@@ -15,7 +15,7 @@ Updated: 2026-08-05
 | Milestone | Status | Cluster status | Next gate |
 | --- | --- | --- | --- |
 | M0 Engineering baseline | Complete | Main repository cloned | Confirm third-party submodules when simulator work begins |
-| M1 Native RoboCasa365 loader | Batch 1 local complete | Pending | Run metadata audit on one real atomic dataset |
+| M1 Native RoboCasa365 loader | Batch 1 published (`83210c2`) | Pending | Run metadata audit on one real atomic dataset |
 | M2 Action/checkpoint adaptation | Not started | Pending | Freeze official PandaOmron schema |
 | M3 RGB-only smoke training | Not started | Pending | One-batch A100/A800 forward/backward |
 | M4 Closed-loop evaluator | Not started | Pending | One complete atomic rollout |
@@ -37,6 +37,6 @@ Updated: 2026-08-05
 
 ## Immediate next actions
 
-1. Push the M1 batch-1 audit and RGB-only changes.
+1. Pull commit `83210c2` on Starlight.
 2. Run the metadata audit on one real RoboCasa365 atomic dataset.
 3. Use the returned metadata/schema report to implement the native Parquet tensor adapter.

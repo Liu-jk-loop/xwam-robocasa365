@@ -41,6 +41,7 @@
 - 纯 Python 数据契约单元测试：6 项通过。
 - Audit CLI 合成数据验证：通过，输出可解析 JSON。
 - Skill / 文档检查 / Python compile / Git diff check：通过。
+- M1 batch-1 commit `83210c2` 已发布到 `origin/dev/atomic-robocasa365`。
 - 真实数据 metadata audit：`cluster-pending`。
 - RGB-only 旧 loader：`cluster-pending`。
 
