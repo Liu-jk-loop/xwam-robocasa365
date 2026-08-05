@@ -13,7 +13,6 @@ Data format convention:
 import torch
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
-from typing import Tuple
 
 
 class VideoAugmentation:
@@ -67,14 +66,13 @@ class VideoAugmentation:
         """
         Apply augmentations in-place on a copy of *data*.
 
-        Expects ``data`` to contain at minimum:
-            ``'video'``  – Tensor[V, T, C, H, W] in [-1, 1]
-            ``'depths'`` – Tensor[V, T, C, H, W] in [-1, 1]
+        Expects ``data`` to contain ``'video'`` and optionally ``'depths'``.
 
-        Returns a new dict with augmented ``'video'`` and ``'depths'``.
+        Returns a new dict with augmented ``'video'`` and, when supplied,
+        augmented ``'depths'``.
         """
         video = data["video"]  # [V, T, C, H, W]
-        depths = data["depths"]  # [V, T, C, H, W]
+        depths = data.get("depths")  # optional [V, T, C, H, W]
 
         H, W = video.shape[-2], video.shape[-1]
 
@@ -83,7 +81,8 @@ class VideoAugmentation:
 
         out = dict(data)
         out["video"] = video
-        out["depths"] = depths
+        if depths is not None:
+            out["depths"] = depths
         return out
 
     # ------------------------------------------------------------------
@@ -93,10 +92,10 @@ class VideoAugmentation:
     def _apply_random_crop(
         self,
         video: torch.Tensor,
-        depths: torch.Tensor,
+        depths: torch.Tensor | None,
         H: int,
         W: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """
         For each view independently, sample one crop region and apply it to
         all T frames of that view (both RGB and depth).
@@ -121,8 +120,6 @@ class VideoAugmentation:
             left = torch.randint(0, W - crop_w + 1, ()).item()
 
             rgb_crop = video[v, :, :, top : top + crop_h, left : left + crop_w]
-            depth_crop = depths[v, :, :, top : top + crop_h, left : left + crop_w]
-
             rgb_crop = F.interpolate(
                 rgb_crop,
                 size=(H, W),
@@ -130,16 +127,18 @@ class VideoAugmentation:
                 align_corners=False,
                 antialias=False,
             )
-            depth_crop = F.interpolate(
-                depth_crop,
-                size=(H, W),
-                mode="nearest",
-            )
-
             aug_video.append(rgb_crop)  # [T, C, H, W]
-            aug_depths.append(depth_crop)
+            if depths is not None:
+                depth_crop = depths[v, :, :, top : top + crop_h, left : left + crop_w]
+                depth_crop = F.interpolate(
+                    depth_crop,
+                    size=(H, W),
+                    mode="nearest",
+                )
+                aug_depths.append(depth_crop)
 
-        return torch.stack(aug_video), torch.stack(aug_depths)  # [V, T, C, H, W]
+        stacked_depths = torch.stack(aug_depths) if depths is not None else None
+        return torch.stack(aug_video), stacked_depths  # [V, T, C, H, W]
 
     def _apply_color_jitter(self, video: torch.Tensor) -> torch.Tensor:
         """

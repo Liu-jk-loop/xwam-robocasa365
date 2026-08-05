@@ -16,6 +16,23 @@ git status --short --branch
 
 Always include the `git rev-parse HEAD` value in feedback.
 
+`git submodule update --init --recursive` downloads the exact third-party revisions referenced by the main repository. In this project they are RoboCasa, robosuite, and RoboTwin. It is normally required once after the first clone; later runs only need it when the referenced submodule commits change.
+
+## M1 metadata audit
+
+After the M1 batch-1 commit is published, replace the placeholders and run:
+
+```bash
+python scripts/audit_robocasa365_dataset.py \
+  --dataset /ABSOLUTE/PATH/TO/ONE/ROBOCASA365/TASK \
+  --task-name CloseFridge \
+  --require-data \
+  --require-videos \
+  --output /tmp/robocasa365_close_fridge_audit.json
+```
+
+This command does not import Torch or decode video. It verifies official metadata, the 16D state, 12D action, three RGB camera keys, atomic-only task membership, and the presence of Parquet/MP4 files.
+
 ## External model paths
 
 Use the existing complete Wan2.2 model:

@@ -5,7 +5,7 @@ Updated: 2026-08-05
 ## Current state
 
 - Active branch: `dev/atomic-robocasa365`
-- Active milestone: M0 — Engineering and collaboration baseline
+- Active milestone: M1 — RoboCasa365 dataset contract and native loader
 - Local runtime: no usable Torch; static validation only
 - Cluster runtime: not yet validated
 - Scope: atomic tasks only; composite tasks excluded
@@ -14,8 +14,8 @@ Updated: 2026-08-05
 
 | Milestone | Status | Cluster status | Next gate |
 | --- | --- | --- | --- |
-| M0 Engineering baseline | Published | Pending | Verify clean cluster checkout |
-| M1 Native RoboCasa365 loader | Not started | Pending | Obtain one minimal official dataset sample and metadata |
+| M0 Engineering baseline | Complete | Main repository cloned | Confirm third-party submodules when simulator work begins |
+| M1 Native RoboCasa365 loader | Batch 1 local complete | Pending | Run metadata audit on one real atomic dataset |
 | M2 Action/checkpoint adaptation | Not started | Pending | Freeze official PandaOmron schema |
 | M3 RGB-only smoke training | Not started | Pending | One-batch A100/A800 forward/backward |
 | M4 Closed-loop evaluator | Not started | Pending | One complete atomic rollout |
@@ -37,6 +37,6 @@ Updated: 2026-08-05
 
 ## Immediate next actions
 
-1. Clone the published development branch on Starlight and capture the environment inventory.
-2. Verify the external checkpoint paths without loading Torch.
-3. Start M1 with metadata/schema inspection before implementing tensor assumptions.
+1. Push the M1 batch-1 audit and RGB-only changes.
+2. Run the metadata audit on one real RoboCasa365 atomic dataset.
+3. Use the returned metadata/schema report to implement the native Parquet tensor adapter.

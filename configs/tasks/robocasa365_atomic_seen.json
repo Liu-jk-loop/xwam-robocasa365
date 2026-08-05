@@ -1,0 +1,28 @@
+{
+  "name": "target_atomic_seen",
+  "scope": "atomic_only",
+  "split": "target",
+  "source": "human",
+  "robocasa_release": "v1.0.1",
+  "source_file": "https://github.com/robocasa/robocasa/blob/v1.0.1/robocasa/utils/dataset_registry.py",
+  "tasks": [
+    "CloseBlenderLid",
+    "CloseFridge",
+    "CloseToasterOvenDoor",
+    "CoffeeSetupMug",
+    "NavigateKitchen",
+    "OpenCabinet",
+    "OpenDrawer",
+    "OpenStandMixerHead",
+    "PickPlaceCounterToCabinet",
+    "PickPlaceCounterToStove",
+    "PickPlaceDrawerToCounter",
+    "PickPlaceSinkToCounter",
+    "PickPlaceToasterToCounter",
+    "SlideDishwasherRack",
+    "TurnOffStove",
+    "TurnOnElectricKettle",
+    "TurnOnMicrowave",
+    "TurnOnSinkFaucet"
+  ]
+}

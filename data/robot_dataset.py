@@ -96,6 +96,7 @@ class RobotDataset(Dataset):
         saturation: float = 0.2,
         hue: float = 0.05,
         inverse_gripper: bool = False,
+        use_depth: bool = True,
         normalize_depths_per_view: bool = True,
         shuffle_view_order: bool = True,
         statistics: dict[str, dict[str, list]] | None = None,
@@ -122,6 +123,7 @@ class RobotDataset(Dataset):
         self.video_size = self._validate_video_size(video_size)
         self.augment = augment
         self.inverse_gripper = bool(inverse_gripper)
+        self.use_depth = bool(use_depth)
         self.normalize_depths_per_view = bool(normalize_depths_per_view)
         self.augmentation = VideoAugmentation(
             crop_ratio=crop_ratio,
@@ -191,7 +193,7 @@ class RobotDataset(Dataset):
             action_ids = self._build_action_ids(start_frame)
 
         video, depths, fps, camera_type_mask = self._load_multiview_video(episode, frame_ids)
-        if self.normalize_depths_per_view:
+        if depths is not None and self.normalize_depths_per_view:
             depths = self._normalize_depths_per_view(depths)
         proprios, proprio_mask = self._build_proprio_tensor(episode, frame_ids, episode_key)
         if use_raw:
@@ -202,7 +204,6 @@ class RobotDataset(Dataset):
 
         data = {
             "video": video,
-            "depths": depths,
             "fps": fps,
             "proprios": proprios,
             "proprio_mask": proprio_mask,
@@ -212,6 +213,8 @@ class RobotDataset(Dataset):
             "prompt": prompt,
             "episode_key": episode_key,
         }
+        if depths is not None:
+            data["depths"] = depths
         if self.augment:
             data = self.augmentation(data)
         return data
@@ -223,7 +226,7 @@ class RobotDataset(Dataset):
             raise FileNotFoundError(f"Missing data directory: {self.data_root}")
         if not self.video_root.exists():
             raise FileNotFoundError(f"Missing video directory: {self.video_root}")
-        if not self.depth_root.exists():
+        if self.use_depth and not self.depth_root.exists():
             raise FileNotFoundError(f"Missing depth directory: {self.depth_root}")
 
     def _load_metadata(self, metadata_path: Path) -> dict[str, int]:
@@ -343,7 +346,7 @@ class RobotDataset(Dataset):
         self,
         episode: dict[str, Any],
         frame_ids: np.ndarray,
-    ) -> tuple[torch.Tensor, torch.Tensor, float, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor | None, float, torch.Tensor]:
         observations = episode.get("observations")
         if not isinstance(observations, dict) or len(observations) == 0:
             raise ValueError("Episode observations are missing or empty.")
@@ -358,11 +361,12 @@ class RobotDataset(Dataset):
             if not isinstance(obs, dict):
                 raise ValueError(f"Observation entry is invalid for view {view_name}.")
 
-            if "rgb_path" not in obs or "depth_path" not in obs:
-                raise ValueError(f"Missing rgb_path/depth_path in view {view_name}.")
+            if "rgb_path" not in obs:
+                raise ValueError(f"Missing rgb_path in view {view_name}.")
+            if self.use_depth and "depth_path" not in obs:
+                raise ValueError(f"Missing depth_path in view {view_name} while use_depth=True.")
 
             rgb_path = self._resolve_media_path(obs["rgb_path"])
-            depth_path = self._resolve_media_path(obs["depth_path"])
 
             obs_start = int(obs.get("start", 0))
             obs_end = int(obs.get("end", obs_start + int(frame_ids[-1]) + 1))
@@ -381,15 +385,17 @@ class RobotDataset(Dataset):
                     antialias=False,
                 )
             )
-            depth_views.append(
-                self._read_video_frames(
-                    depth_path,
-                    abs_frame_ids,
-                    video_size=self.video_size,
-                    interpolation=TF.InterpolationMode.NEAREST_EXACT,
-                    antialias=False,
+            if self.use_depth:
+                depth_path = self._resolve_media_path(obs["depth_path"])
+                depth_views.append(
+                    self._read_video_frames(
+                        depth_path,
+                        abs_frame_ids,
+                        video_size=self.video_size,
+                        interpolation=TF.InterpolationMode.NEAREST_EXACT,
+                        antialias=False,
+                    )
                 )
-            )
 
             if "fps" not in obs:
                 raise ValueError(f"Missing fps in view {view_name}.")
@@ -409,7 +415,7 @@ class RobotDataset(Dataset):
                 raise ValueError(f"Inconsistent fps across views: {fps_values}")
 
         video = torch.stack(video_views, dim=0)  # [V, T, C, H, W]
-        depths = torch.stack(depth_views, dim=0)  # [V, T, C, H, W]
+        depths = torch.stack(depth_views, dim=0) if self.use_depth else None  # [V, T, C, H, W]
         camera_type_mask = torch.tensor(camera_types, dtype=torch.long)
         if self.shuffle_view_order:
             video, depths, camera_type_mask = self._shuffle_view_order(video, depths, camera_type_mask)
@@ -418,15 +424,16 @@ class RobotDataset(Dataset):
     @staticmethod
     def _shuffle_view_order(
         video: torch.Tensor,
-        depths: torch.Tensor,
+        depths: torch.Tensor | None,
         camera_type_mask: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor]:
         num_views = video.shape[0]
         if num_views <= 1:
             return video, depths, camera_type_mask
 
         view_perm = torch.randperm(num_views)
-        return video[view_perm], depths[view_perm], camera_type_mask[view_perm]
+        shuffled_depths = depths[view_perm] if depths is not None else None
+        return video[view_perm], shuffled_depths, camera_type_mask[view_perm]
 
     def _resolve_media_path(self, path_str: Any) -> Path:
         if not isinstance(path_str, str):

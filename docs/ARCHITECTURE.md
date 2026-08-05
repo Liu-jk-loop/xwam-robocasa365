@@ -16,6 +16,7 @@ The X-WAM backbone should consume validated tensors and remain free of dataset-p
 
 - Native RoboCasa365 LeRobot/Parquet is the source of truth.
 - The adapter must read official metadata rather than infer unnamed dimensions from array length.
+- The M1 contract gate expects PandaOmron `observation.state` to be 16D, `action` to be 12D, and the three official RGB camera keys to be present. M2 will freeze the component names and slices from the real `modality.json` before model mapping.
 - Atomic-only selection is explicit and auditable.
 - Cameras are selected by configured keys and stable ordering.
 - RGB is required for the initial path.
