@@ -1,4 +1,45 @@
-# Change log
+# 变更记录
+
+## 2026-08-05 — 各阶段执行过程中文化
+
+- 分支：`dev/atomic-robocasa365`
+- 基线 commit：`1006d72`
+- 运行状态：纯文档和 workflow 修改；本地验证通过
+
+### 问题
+
+原计划虽然已经列出中文工作内容和验收条件，但没有逐阶段说明本地修改、超算执行、反馈证据和阶段退出的完整过程。进度表、集群手册和反馈模板仍混有大量英文，不便于持续协作。
+
+### 新增和修改逻辑
+
+- 为 M0～M7 每个阶段增加中文“阶段执行过程”，明确用户输入、Codex 修改、星光运行、反馈证据和进入下一阶段的条件。
+- 将项目进度表、当前执行过程和资源/输入状态改为中文。
+- 将星光超算操作手册改为中文，并补充 M1 audit 的反馈清单。
+- 将超算反馈模板改为中文，保留 `pass`、`fail`、`blocked` 等可检索状态值及中文解释。
+- 将项目 workflow skill 的操作说明改为中文，并要求后续变更和进度使用中文记录。
+
+### 涉及文件
+
+- `docs/IMPLEMENTATION_PLAN.md`
+- `docs/PROGRESS.md`
+- `docs/CLUSTER_RUNBOOK.md`
+- `.agents/skills/xwam-robocasa365-workflow/SKILL.md`
+- `.agents/skills/xwam-robocasa365-workflow/references/cluster-feedback-template.md`
+
+### 兼容性和风险
+
+- 不修改模型、数据、训练或评测运行逻辑。
+- 命令、配置键、代码符号和验证状态标签保持原样，避免翻译导致脚本不可执行或状态不可检索。
+
+### 验证
+
+- Markdown/diff 格式检查：通过。
+- Skill 结构验证：通过。
+- 文档同步检查：通过。
+
+### 回滚
+
+回退本次文档 commit；不会影响外部数据、模型或超算任务。
 
 ## 2026-08-05 — M1 batch 1: 数据契约与 RGB-only 基础
 

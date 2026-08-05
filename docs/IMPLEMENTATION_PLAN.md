@@ -59,6 +59,14 @@ RoboCasa365 原生数据
 - 加入文档同步检查，防止修改逻辑后遗漏记录。
 - 记录外部模型路径，不在 Git 中复制权重。
 
+阶段执行过程：
+
+1. Codex 在本地检查 fork、upstream、开发分支和仓库状态。
+2. Codex 建立项目规则、文档、workflow skill 和文档同步门禁。
+3. Codex 完成本地静态检查，提交并推送开发分支。
+4. 用户在星光超算 clone 开发分支，确认 commit 和工作区状态。
+5. 用户反馈 clone 结果；Codex 将证据写入进度和变更记录后关闭 M0。
+
 验收条件：
 
 - Skill 结构校验通过。
@@ -81,6 +89,15 @@ RoboCasa365 原生数据
 - 将 depth 改为真正可选：关闭时不检查目录、不解析路径、不读文件、不进入 augmentation。
 - atomic-only 模式下拒绝无法确认任务范围或不在任务清单中的数据。
 - 增加 episode 长度、媒体缺失、时序、维度和任务计数审计。
+
+阶段执行过程：
+
+1. 用户提供一个真实 atomic 任务的数据路径，以及最小 episode、元数据和三路 RGB 视频。
+2. Codex 先实现不依赖 Torch 的 metadata audit，固定任务范围、目录结构和维度契约。
+3. 用户在星光上运行 audit，并反馈 commit、命令、JSON 报告及目录结构。
+4. Codex 根据真实报告实现 Parquet/MP4 到 X-WAM tensor 的原生 adapter，并补充合成数据测试。
+5. 用户在 A100/A800 上读取一个真实 RGB-only batch，反馈 shape、dtype、帧序、动作窗口和错误日志。
+6. Codex 修正问题并记录集群证据；全部 M1 验收项通过后进入 M2。
 
 需要的超算输入：
 
@@ -108,6 +125,15 @@ RoboCasa365 原生数据
 - 同时支持 `xwam_pretrained` 和 `wan_base` 两种初始化。
 - 输出 loaded、remapped、initialized、missing 和 unexpected 参数报告。
 
+阶段执行过程：
+
+1. 用户提供真实 `modality.json`、样例 state/action 和已下载 checkpoint 的实际路径检查结果。
+2. Codex 依据官方字段建立带名称和切片的 `ObservationAdapter`、`ActionCodec` 与 schema 清单。
+3. Codex 实现两种初始化模式和 shape-aware checkpoint adapter，并完成无 GPU 的 schema/映射测试。
+4. 用户在 A100/A800 上分别加载 X-WAM pretrained 与 Wan-base，保存参数加载报告。
+5. 用户运行一个 batch 的 forward/backward 和动作 round-trip；反馈显存、tensor shape、日志和结果。
+6. Codex 根据证据修正映射；动作无静默丢失且两种初始化均可解释后进入 M3。
+
 验收条件：
 
 - 数据动作 → 归一化模型动作 → 反归一化环境动作 round-trip 通过。
@@ -124,6 +150,15 @@ RoboCasa365 原生数据
 - 完成显存测量后提供 H100 profile。
 - 增加确定性 seed、resume、checkpoint 元数据和简洁日志。
 - 先对极小样本过拟合，再进行三个任务的短训练。
+
+阶段执行过程：
+
+1. Codex 准备 A100/A800 debug 配置、确定性 seed、断点恢复和日志记录逻辑。
+2. 用户先运行 batch size 1 的单步训练，反馈显存峰值、耗时和首个 loss。
+3. Codex 根据 40GB/80GB 显存结果调整 gradient checkpointing、梯度累积或 offload。
+4. 用户运行单任务极小样本过拟合，确认 loss 可持续下降且未读取 depth。
+5. 用户运行三个 atomic 任务的短训练，并执行一次保存/恢复测试。
+6. Codex 记录稳定配置和集群证据；短训练及恢复门禁通过后进入 M4。
 
 验收条件：
 
@@ -142,6 +177,15 @@ RoboCasa365 原生数据
 - 保存 episode 元数据、成功状态、结束原因、视频、延迟和动作诊断。
 - 支持中断恢复、缺失 rollout 检测和结果聚合。
 
+阶段执行过程：
+
+1. Codex 将 policy server 与 RoboCasa simulator client 保持为两个独立环境，通过 broker 对接。
+2. Codex 实现 Atomic-Seen 注册、观测打包、完整动作解码、episode 记录和聚合工具。
+3. 用户先用随机或脚本策略验证环境创建、视频和结果写入。
+4. 用户加载 M3 checkpoint，运行一个 manipulation atomic rollout 并反馈完整日志。
+5. 用户运行 `NavigateKitchen`，确认底盘动作不是被截断为零。
+6. Codex 修正闭环问题并验证聚合可重算；单任务闭环和动作完整性通过后进入 M5/M6。
+
 验收条件：
 
 - 随机或脚本策略能创建环境并写出完整结果。
@@ -158,6 +202,15 @@ RoboCasa365 原生数据
 - 以 episode/frame/camera 为键保存版本化缓存和生成元数据。
 - 校验 RGB/depth/action 时序、像素对齐、单位和范围。
 - 评估生成速度和存储成本，再决定是否扩展。
+
+阶段执行过程：
+
+1. Codex 编写独立的状态恢复、深度渲染、缓存索引和对齐审计工具，训练 loader 内不调用 MuJoCo。
+2. 用户选择 1～3 个 atomic 任务，在星光离线生成少量深度缓存。
+3. 用户反馈生成速度、磁盘占用、失败 episode、样例 RGB/depth 和元数据。
+4. Codex 检查像素与时间对齐、单位、范围和缺帧，并修正缓存格式。
+5. 用户运行一个 RGB-D batch 和短训练烟测。
+6. 双方依据质量、速度和存储证据决定是否扩大深度生成；未通过时保持 RGB-only 主线。
 
 验收条件：
 
@@ -176,6 +229,15 @@ RoboCasa365 原生数据
 - 使用固定 seed 和 checkpoint 选择规则评测全部 Atomic-Seen 任务。
 - 汇总 per-task、per-skill、整体成功率、延迟和失败类型。
 
+阶段执行过程：
+
+1. Codex 固定 atomic 数据清单、normalization statistics、H100 配置和 checkpoint 选择规则。
+2. 用户在 H100 上先运行短程训练门禁，确认多卡初始化、吞吐、显存和保存/恢复正常。
+3. 用户启动正式训练；每次反馈 commit、配置、Job ID、checkpoint、训练曲线和异常日志。
+4. Codex 只针对已记录 commit 诊断问题，并将修改推送为新的可追踪 commit。
+5. 用户用固定 seed 对 Atomic-Seen 18 执行闭环评测，补跑缺失或明确记录失败 rollout。
+6. Codex 汇总 per-task、per-skill、总体指标、延迟和失败类型，明确结果为 atomic-only 设置。
+
 验收条件：
 
 - 训练可断点恢复，所有产物记录 Git commit、完整配置和数据清单。
@@ -190,6 +252,14 @@ RoboCasa365 原生数据
 - 在首次集群环境验证后冻结环境依赖。
 - 记录 upstream 同步和兼容性检查方法。
 - 形成从 clean clone 到最终指标的完整操作手册。
+
+阶段执行过程：
+
+1. Codex 根据已经验证的星光环境冻结依赖、配置模板、命令和 CI 门禁。
+2. 用户在新的目录或节点执行 clean clone，不复用旧工作区的手工修改。
+3. 用户按手册依次验证数据、权重、单 batch、短训练、恢复和一个闭环 rollout。
+4. 用户反馈所有命令、commit、环境和产物位置，Codex 修正文档中的缺口。
+5. clean clone 可以仅依赖仓库说明和外部路径复现后，冻结最终复现记录并关闭项目阶段。
 
 验收条件：
 

@@ -3,51 +3,51 @@ name: xwam-robocasa365-workflow
 description: Manage X-WAM adaptation, debugging, training, evaluation, documentation, and Git handoff for RoboCasa365 atomic tasks. Use when planning or changing dataset adapters, action/state schemas, checkpoint loading, RGB/depth handling, cluster configurations, Slurm runs, simulator evaluation, experiment records, or when diagnosing feedback returned from the Starlight cluster.
 ---
 
-# X-WAM RoboCasa365 workflow
+# X-WAM × RoboCasa365 工作流
 
-## Establish context
+## 建立上下文
 
-1. Read repository `AGENTS.md`.
-2. Read `docs/IMPLEMENTATION_PLAN.md`, `docs/ARCHITECTURE.md`, `docs/PROGRESS.md`, and the latest `docs/CHANGELOG.md` entry.
-3. Inspect the current branch, commit, remotes, status, and relevant diff. Preserve unrelated user changes.
-4. Select one milestone task and state its acceptance evidence before editing.
+1. 阅读仓库 `AGENTS.md`。
+2. 阅读 `docs/IMPLEMENTATION_PLAN.md`、`docs/ARCHITECTURE.md`、`docs/PROGRESS.md` 和 `docs/CHANGELOG.md` 最新记录。
+3. 检查当前分支、commit、remote、工作区状态和相关 diff，保留用户已有的无关修改。
+4. 每次只选择一个阶段子任务，修改前明确它的验收证据。
 
-Keep work atomic-only unless the user explicitly expands scope. Treat composite data entering a run as an error.
+除非用户明确扩大范围，否则始终保持 atomic-only；composite 数据进入运行时必须视为错误。
 
-## Classify validation
+## 划分验证级别
 
-Classify every acceptance check as one of:
+每项验收检查必须归入以下一种：
 
-- `local-static`: no Torch import or GPU required.
-- `cluster-smoke`: Torch/CUDA, real dataset, checkpoint, or simulator required.
-- `cluster-train`: multi-GPU training or scheduled evaluation required.
+- `local-static`：不需要导入 Torch 或使用 GPU。
+- `cluster-smoke`：需要 Torch/CUDA、真实数据、checkpoint 或模拟器。
+- `cluster-train`：需要多 GPU 正式训练或计划评测。
 
-The local workstation has no usable Torch runtime. Mark unexecuted runtime checks `cluster-pending`; never infer success from syntax validation.
+本地工作站没有可用的 Torch runtime。未执行的运行时检查必须标记为 `cluster-pending`，不得从语法验证推断运行成功。
 
-## Implement behind adapters
+## 通过 adapter 隔离实现
 
-- Keep RoboCasa365 access behind dataset and observation adapters.
-- Keep named action components, normalization, and environment packing behind an action codec.
-- Keep legacy-to-target parameter handling behind a checkpoint adapter with explicit reports.
-- Keep task registration, rollout records, and metric aggregation behind a benchmark adapter.
-- Keep depth mode explicit as `disabled` or `cached`; never render depth inside training workers.
-- Read official metadata before fixing action, state, camera, timing, or task assumptions.
+- RoboCasa365 数据访问必须封装在 dataset 和 observation adapter 后面。
+- 动作分量名称、归一化和环境打包必须封装在 action codec 后面。
+- legacy 到目标参数的处理必须封装在 checkpoint adapter 后面，并输出明确报告。
+- 任务注册、rollout 记录和指标聚合必须封装在 benchmark adapter 后面。
+- depth 模式只能明确设为 `disabled` 或 `cached`，训练 worker 内禁止渲染深度。
+- 固定 action、state、camera、时序或任务假设前必须读取官方元数据。
 
-## Validate and document
+## 验证并记录
 
-1. Add or update focused tests/fixtures with each logic change.
-2. Run dependency-free checks locally, including Python compilation where applicable.
-3. Run `python .agents/skills/xwam-robocasa365-workflow/scripts/check_change_record.py --base main`.
-4. Update `docs/CHANGELOG.md` with problem, logic, files, compatibility, validation, cluster status, risks, and rollback.
-5. Update `docs/PROGRESS.md` for milestone state, evidence, blockers, and next action.
-6. Add exact cluster commands only when the corresponding implementation exists.
+1. 每次逻辑修改都增加或更新聚焦的测试/fixture。
+2. 在本地运行无依赖检查，适用时包含 Python 语法编译。
+3. 运行 `python .agents/skills/xwam-robocasa365-workflow/scripts/check_change_record.py --base main`。
+4. 在 `docs/CHANGELOG.md` 中用中文记录问题、逻辑、文件、兼容性、验证、超算状态、风险和回滚方法。
+5. 在 `docs/PROGRESS.md` 中用中文记录阶段状态、证据、阻塞项和下一步。
+6. 只有对应实现已经存在时，才能加入精确的超算命令。
 
-For cluster feedback, use `references/cluster-feedback-template.md`. Diagnose only against its recorded commit and resolved configuration.
+超算反馈使用 `references/cluster-feedback-template.md`；只针对模板记录的 commit 和解析后配置进行诊断。
 
-## Publish and hand off
+## 发布与交接
 
-1. Review the complete diff and confirm only intended files are included.
-2. Commit on `dev/atomic-robocasa365` with a focused message.
-3. Push to `origin`; never push to `upstream`.
-4. Hand off the commit SHA, cluster command, expected evidence, and known `cluster-pending` checks.
-5. On feedback, append evidence to the change/progress records before declaring the milestone complete.
+1. 检查完整 diff，确认只包含本次预期文件。
+2. 在 `dev/atomic-robocasa365` 创建聚焦的 commit。
+3. 推送到 `origin`，禁止推送到 `upstream`。
+4. 交接 commit SHA、超算命令、预期证据和已知 `cluster-pending` 检查。
+5. 收到反馈后先把证据写入变更/进度记录，再宣布阶段完成。

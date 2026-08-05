@@ -1,58 +1,58 @@
-# Cluster feedback template
+# 星光超算反馈模板
 
-## Identity
+## 运行标识
 
-- Date/time and timezone:
-- Git commit SHA:
-- Branch:
-- Slurm/Kubernetes job or pod ID:
-- Operator:
+- 日期、时间和时区：
+- Git commit SHA：
+- 分支：
+- Slurm/Kubernetes Job ID 或 Pod ID：
+- 执行人：
 
-## Objective
+## 本次目标
 
-- Milestone/task:
-- Expected acceptance evidence:
-- Result: `pass`, `fail`, or `blocked`
+- 阶段和子任务：
+- 预期验收证据：
+- 结果：`pass`（通过）、`fail`（失败）或 `blocked`（受阻）
 
-## Command and configuration
+## 命令与配置
 
-- Working directory:
-- Exact command:
-- Resolved configuration path or attached configuration:
-- Dataset root and manifest/task subset:
-- Wan2.2 path:
-- X-WAM checkpoint path and initialization mode:
-- Output directory:
+- 工作目录：
+- 完整命令：
+- 解析后的配置路径或随附配置：
+- 数据集根目录及 manifest/任务子集：
+- Wan2.2 路径：
+- X-WAM checkpoint 路径和初始化模式：
+- 输出目录：
 
-## Environment
+## 运行环境
 
-- Host/container image:
+- 主机或容器镜像：
 - Python:
 - PyTorch:
-- CUDA runtime:
-- NVIDIA driver:
-- GPU model, count, and memory:
+- CUDA runtime：
+- NVIDIA driver：
+- GPU 型号、数量和显存：
 - DeepSpeed:
 - FlashAttention:
-- RoboCasa/robosuite/MuJoCo revisions for simulator work:
+- 模拟器任务使用的 RoboCasa/robosuite/MuJoCo 版本：
 
-## Observed behavior
+## 实际运行情况
 
-- Stage reached:
-- Tensor shapes relevant to the issue:
-- Peak allocated/reserved GPU memory:
-- Throughput or step latency:
-- Loss/metric sample:
-- Last successful operation:
-- First failing operation:
+- 到达的运行阶段：
+- 与问题相关的 tensor shape：
+- GPU 已分配/预留显存峰值：
+- 吞吐或单步延迟：
+- loss/指标样例：
+- 最后一个成功操作：
+- 第一个失败操作：
 
-## Logs
+## 日志
 
-Attach the full scheduler log when practical. Otherwise include the complete traceback and at least 100 lines before the first exception. Do not include secrets or access tokens.
+条件允许时附上完整调度日志；否则提供完整 traceback 和第一次异常前至少 100 行日志。不要包含密码、token 或其他敏感信息。
 
-## Artifacts
+## 产物
 
-- Saved checkpoint/result/video paths:
-- Small diagnostic files attached:
-- Can the failure be reproduced with the same command and commit?
-- Any manual changes made on the cluster checkout:
+- 保存的 checkpoint、结果和视频路径：
+- 随附的小型诊断文件：
+- 使用相同命令和 commit 是否可以复现：
+- 是否在超算 checkout 中做过未提交的手工修改：
