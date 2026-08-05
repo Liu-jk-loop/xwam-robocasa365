@@ -32,6 +32,7 @@ The fork had no repository-specific collaboration rules, implementation roadmap,
 - Documentation enforcement script: passed against the complete branch working diff.
 - Python syntax compilation: passed for repository and skill Python sources without importing Torch.
 - Git whitespace/error check: passed.
+- Development branch publication: passed; `dev/atomic-robocasa365` tracks the fork remote.
 - Cluster checkout: pending.
 
 ### Rollback

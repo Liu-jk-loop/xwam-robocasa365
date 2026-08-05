@@ -14,7 +14,7 @@ Updated: 2026-08-05
 
 | Milestone | Status | Cluster status | Next gate |
 | --- | --- | --- | --- |
-| M0 Engineering baseline | Local complete; publish pending | Pending | Publish branch and verify clean cluster checkout |
+| M0 Engineering baseline | Published | Pending | Verify clean cluster checkout |
 | M1 Native RoboCasa365 loader | Not started | Pending | Obtain one minimal official dataset sample and metadata |
 | M2 Action/checkpoint adaptation | Not started | Pending | Freeze official PandaOmron schema |
 | M3 RGB-only smoke training | Not started | Pending | One-batch A100/A800 forward/backward |
@@ -31,13 +31,12 @@ Updated: 2026-08-05
 
 ## Open inputs
 
-- Re-authenticate local GitHub CLI so the development branch can be pushed.
 - Confirm the downloaded X-WAM pretrained file with the path check in `docs/CLUSTER_RUNBOOK.md`.
 - Provide the RoboCasa365 dataset root when available.
 - For M1 cluster validation, provide one minimal real episode plus its metadata and referenced RGB media.
 
 ## Immediate next actions
 
-1. Re-authenticate GitHub CLI and publish the locally validated development branch.
-2. Clone the development branch on Starlight and capture the environment inventory.
+1. Clone the published development branch on Starlight and capture the environment inventory.
+2. Verify the external checkpoint paths without loading Torch.
 3. Start M1 with metadata/schema inspection before implementing tensor assumptions.
