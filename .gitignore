@@ -3,7 +3,6 @@
 .vscode/
 CLAUDE.md
 
-*.sh
 experiments/
 eval_results/
 checkpoints/

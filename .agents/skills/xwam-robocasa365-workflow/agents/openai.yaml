@@ -1,0 +1,4 @@
+interface:
+  display_name: "X-WAM RoboCasa365 Workflow"
+  short_description: "Manage atomic-task adaptation and cluster validation"
+  default_prompt: "Use $xwam-robocasa365-workflow to plan, implement, document, and validate the next atomic-task adaptation change."
