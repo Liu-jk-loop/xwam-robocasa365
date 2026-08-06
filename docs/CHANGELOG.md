@@ -1,5 +1,30 @@
 # 变更记录
 
+## 2026-08-06 — M2 `wan_base` 证据与单 GPU smoke 约束
+
+- 分支：`dev/atomic-robocasa365`
+- 测试 commit：`4951844a1085c6929426d9ae5561e7586550729e`
+- 运行状态：两种初始化均已通过；`xwam_pretrained` 单 batch forward/backward 为 `cluster-pending`
+
+### 星光证据
+
+- `wan_base` 报告为 `pass`、`ok=true`；环境为 Python 3.10.20、Torch 2.9.0+cu128、NVIDIA A800 80GB PCIe。
+- 报告明确 `checkpoint=null`：只加载 Wan2.2 backbone，view/action/proprio 模块由代码初始化；目标共 1282 tensors。
+- `remapped`、`missing`、`unexpected` 均为空，说明消融路径没有误加载 X-WAM checkpoint 或遗留参数差异。
+
+### 新增和修改逻辑
+
+- M2 单步 smoke 配置固定 `devices=1`，不再依赖 Lightning 在当前容器中自动选择 GPU 数量。
+- 训练入口在构造 Dataset/5B 模型前校验可见 GPU、请求设备数和 `WORLD_SIZE` 的整除关系；配置无效时提前失败。
+- Trainer 显式接收解析后的设备数，日志同时打印 trainer device、visible device、world size 和 node 数。
+- 集群命令使用 `/usr/bin/time -v` 与 `tee` 持久化终端输出和 CPU 最大常驻内存；训练入口在成功或异常退出时打印 CUDA allocated/reserved 峰值。
+
+### 验证、风险和回滚
+
+- 本地无 Torch，拓扑解析的真实 Lightning/DeepSpeed 行为为 `cluster-pending`；Python compile、34 项无 Torch 测试、文档门禁和 diff 检查必须通过后发布。
+- 本轮 smoke 只允许单 GPU、batch size 1、一步训练并关闭 checkpoint 保存，不代表 H100 正式训练配置。
+- 回退本次 commit 即恢复自动设备选择；不会修改外部数据、权重或 Conda 环境。
+
 ## 2026-08-06 — M2 `xwam_pretrained` 真实 checkpoint 加载证据
 
 - 分支：`dev/atomic-robocasa365`

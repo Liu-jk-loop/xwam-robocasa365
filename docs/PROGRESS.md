@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：M2——PandaOmron schema、normalization 与 checkpoint 适配
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1 全部门禁通过；M2 contract 与 `xwam_pretrained` 12D 真实加载已通过，`wan_base` 与单步反传待执行
+- 超算运行状态：M1 全部门禁通过；M2 contract、`xwam_pretrained` 与 `wan_base` 初始化均已通过，单步反传待执行
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -16,7 +16,7 @@
 | --- | --- | --- | --- |
 | M0 工程与协作基线 | 已完成 | 主仓库已 clone | 模拟器阶段开始时确认第三方子模块 |
 | M1 原生 RoboCasa365 loader | 已完成 | commit `e4249b9` 真实 batch `ok=true` | 已关闭 |
-| M2 动作与 checkpoint 适配 | contract 已通过；训练归一化、14D→12D loader、双初始化和完整 12D 执行已实现 | `xwam_pretrained` commit `4951844` 真实加载 `ok=true`；`wan_base`/反传待验证 | `wan_base` 报告 + 单 batch forward/backward |
+| M2 动作与 checkpoint 适配 | contract 已通过；训练归一化、14D→12D loader、双初始化和完整 12D 执行已实现 | commit `4951844` 两种初始化均为 `ok=true`；反传待验证 | 单 batch forward/backward |
 | M3 RGB-only 训练烟测 | 未开始 | 待验证 | A100/A800 单 batch forward/backward |
 | M4 闭环评测器 | 未开始 | 待验证 | 完成一个 atomic 闭环 rollout |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
@@ -120,10 +120,18 @@ M2 `xwam_pretrained` 星光真实加载证据：
 - `missing_source`、`unexpected_source`、`shape_errors`、`errors` 均为空，说明 checkpoint 适配没有静默漏载。
 - 本门禁只验证模型构造和参数装载，不读取真实 batch、不执行 CUDA forward/backward、不产生 loss，也不证明左臂 warm-start 策略优于其他初始化方案。
 
+M2 `wan_base` 星光真实加载证据：
+
+- 测试 commit：`4951844a1085c6929426d9ae5561e7586550729e`；模式 `wan_base`，结果 `pass`、`ok=true`。
+- 环境：Python 3.10.20、Torch 2.9.0+cu128、NVIDIA A800 80GB PCIe；CUDA 可用。
+- `checkpoint=null`，确认没有误加载公开 X-WAM cross-embodiment checkpoint。
+- 目标共 1282 tensors：Wan2.2 backbone 由 `from_pretrained` 加载；view embedding、action encoder/decoder、proprio encoder/decoder 由代码初始化。
+- `remapped`、`missing`、`unexpected` 均为空，消融初始化来源清晰；该门禁同样不执行 forward/backward。
+- M2 smoke 配置进一步固定 `devices=1`，避免容器暴露多卡时单 batch 调试意外占用全部 GPU。
+
 ## 待提供输入
 
-- 在 A800 上生成 `wan_base` 初始化报告；该模式不得提供 X-WAM checkpoint。
-- `wan_base` 通过后运行真实单 batch forward/backward，反馈 CPU 内存、GPU 峰值、首个 loss、完整日志和初始化 JSON。
+- 拉取最新单卡 smoke 配置后，运行 `xwam_pretrained` 真实单 batch forward/backward，反馈返回码、CPU 内存峰值、GPU 峰值、首个 loss、完整日志和初始化 JSON。
 - 不在本轮运行闭环 simulator；新版在线 16D observation 提取将在 M4 实现和验收。
 
 ## 当前执行过程
@@ -136,4 +144,5 @@ M2 `xwam_pretrained` 星光真实加载证据：
 6. 用户已在 commit `95808cd` 执行 M2 contract audit，全部检查为 true。
 7. Codex 已根据真实 3072/14D/16D shape 实现 Dataset normalization、shape-aware loader、双初始化和完整 12D 动作执行。
 8. 用户已在 A800 上完成 `xwam_pretrained` 真实加载；1275 exact + 3 remap + 4 reinitialize 完整覆盖 1282 个目标 tensor，门禁通过。
-9. 用户继续执行 `wan_base` 初始化 audit 和单 batch forward/backward；通过后关闭 M2 并进入 M3。
+9. 用户已完成 `wan_base` 初始化 audit，确认只加载 Wan2.2 base 且机器人模块由代码初始化，门禁通过。
+10. Codex 将 M2 smoke 固定为单 GPU；用户执行 `xwam_pretrained` 单 batch forward/backward，通过后关闭 M2 并进入 M3。

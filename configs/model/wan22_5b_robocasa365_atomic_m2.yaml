@@ -39,6 +39,7 @@ accumulate_grad_batches: 1
 gradient_clip_val: 1.0
 gradient_clip_algorithm: norm
 batch_size_per_gpu: 1
+devices: 1
 num_workers_per_gpu: 0
 prefetch_factor: 2
 use_gradient_checkpointing: true

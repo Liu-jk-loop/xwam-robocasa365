@@ -20,6 +20,7 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.strategies import DeepSpeedStrategy
 
 from data.dataset_factory import build_dataset
+from project_tools.training_topology import resolve_training_topology
 from runners.xwam_runner import XWAMRunner
 from utils.console_logger import ConsoleLogger
 from utils.xwam_checkpoint_loader import initialize_xwam_runner
@@ -50,8 +51,17 @@ def _loader_worker_options(num_workers: int, prefetch_factor: int) -> dict:
     }
 
 
+def _resolve_trainer_topology(config):
+    return resolve_training_topology(
+        visible_devices=torch.cuda.device_count(),
+        requested_devices=config.get("devices", "auto"),
+        world_size=os.environ.get("WORLD_SIZE"),
+    )
+
+
 def main():
     config = _load_config()
+    topology = _resolve_trainer_topology(config)
 
     pprint(OmegaConf.to_container(config))
 
@@ -136,20 +146,22 @@ def main():
         f"mode={report['mode']}, result={report['result']}, report={initialization_report}"
     )
 
-    devices = torch.cuda.device_count()
-    world_size = int(os.environ.get("WORLD_SIZE", devices))
-    num_nodes = world_size // devices
-
-    print(f"Runner v2, num_nodes: {num_nodes}, world_size: {world_size}, devices: {devices}")
+    print(
+        "Runner v2, "
+        f"num_nodes: {topology['num_nodes']}, world_size: {topology['world_size']}, "
+        f"trainer_devices: {topology['trainer_devices']}, "
+        f"visible_devices: {topology['visible_devices']}"
+    )
 
     trainer = L.Trainer(
         accelerator="auto",
+        devices=topology["trainer_devices"],
         strategy=DeepSpeedStrategy(
             allgather_bucket_size=5e8,
             reduce_bucket_size=5e8,
         ),
         precision="bf16-mixed",
-        num_nodes=num_nodes,
+        num_nodes=topology["num_nodes"],
         max_steps=config.num_training_steps,
         accumulate_grad_batches=config.accumulate_grad_batches,
         gradient_clip_val=config.gradient_clip_val,
@@ -164,7 +176,16 @@ def main():
         log_every_n_steps=config.log_interval,
         default_root_dir=os.path.join(config.exp_root, config.exp_name),
     )
-    trainer.fit(model=model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader)
+    torch.cuda.reset_peak_memory_stats()
+    try:
+        trainer.fit(model=model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader)
+    finally:
+        gib = 1024**3
+        print(
+            "CUDA peak memory: "
+            f"allocated={torch.cuda.max_memory_allocated() / gib:.3f} GiB, "
+            f"reserved={torch.cuda.max_memory_reserved() / gib:.3f} GiB"
+        )
 
 
 if __name__ == "__main__":

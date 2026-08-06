@@ -155,13 +155,19 @@ python scripts/audit_xwam_checkpoint_loading.py \
 两份加载报告都通过后，再执行一次真实 `CloseFridge` batch 的 forward/backward。该 M2 配置只运行一步、batch size 1、0 worker、RGB-only、gradient checkpointing，并关闭大 checkpoint 保存：
 
 ```bash
-python scripts/train_sft.py \
+mkdir -p logs/cluster
+set -o pipefail
+
+/usr/bin/time -v python scripts/train_sft.py \
   model_config=configs/model/wan22_5b_robocasa365_atomic_m2.yaml \
   wan_checkpoint_dir=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/Wan-AI/Wan2.2-TI2V-5B \
   pretrained_checkpoint=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/x-wam/xwam_checkpoints \
   dataset.dataset_path=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/robocasa/robocasa/datasets/v1.0/pretrain/atomic/CloseFridge/20250819 \
   exp_root=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365 \
-  exp_name=close_fridge_m2_single_step
+  exp_name=close_fridge_m2_single_step \
+  2>&1 | tee logs/cluster/close_fridge_m2_single_step.log
+
+echo "train_exit_code=${PIPESTATUS[0]}"
 ```
 
 反馈三份 JSON/配置、完整终端日志、返回码、CPU 内存峰值、GPU 峰值和首个 loss。若第一条加载 audit 失败，不要继续训练，也不要改为 `strict=False` 或手动删除报错参数。
