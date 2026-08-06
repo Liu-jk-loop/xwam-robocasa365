@@ -1,0 +1,35 @@
+# M3.1：固定一个 CloseFridge clip，验证连续 loss、checkpoint 和 resume。
+exp_root: ./experiments/
+exp_name: close_fridge_m3_overfit
+seed: 42
+
+# optimizer / scheduler
+lr: 1e-5
+weight_decay: 0.01
+num_warmup_steps: 0
+num_training_steps: 10
+trainer_max_steps: 8
+accumulate_grad_batches: 1
+gradient_clip_val: 1.0
+gradient_clip_algorithm: norm
+
+# deterministic tiny subset
+train_subset_size: 1
+train_subset_start: 0
+train_shuffle: false
+persist_generator_state: true
+text_dropout_prob: 0.0
+
+# logging / checkpoint
+log_interval: 1
+enable_tensorboard: false
+enable_checkpointing: true
+save_interval: 8
+save_top_k: 1
+save_last: link
+save_on_exception: false
+resume_checkpoint: null
+
+# no validation/generation during the overfit gate
+val_interval: 8
+limit_val_batches: 0

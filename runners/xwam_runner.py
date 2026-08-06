@@ -20,6 +20,7 @@ class XWAMRunner(L.LightningModule):
         super().__init__()
         self.config = config
         self.run_depth = bool(config.use_depth) if run_depth is None else bool(run_depth)
+        self._restored_generator_state = None
 
         # TODO: remove hard-coded views and modalities
         self.num_views = 3
@@ -97,8 +98,25 @@ class XWAMRunner(L.LightningModule):
         }
 
     def on_fit_start(self):
-        print(f"Setting generator for rank {self.global_rank} with seed {self.config.seed + self.global_rank}")
-        self.generator_per_rank = torch.Generator(device="cpu").manual_seed(self.config.seed + self.global_rank)
+        seed = self.config.seed + self.global_rank
+        self.generator_per_rank = torch.Generator(device="cpu").manual_seed(seed)
+        if self._restored_generator_state is not None:
+            self.generator_per_rank.set_state(self._restored_generator_state.cpu())
+            print(f"Restored training generator state for rank {self.global_rank}")
+        else:
+            print(f"Setting generator for rank {self.global_rank} with seed {seed}")
+
+    def on_save_checkpoint(self, checkpoint):
+        if bool(getattr(self.config, "persist_generator_state", False)) and hasattr(
+            self, "generator_per_rank"
+        ):
+            checkpoint["xwam_generator_state"] = self.generator_per_rank.get_state()
+
+    def on_load_checkpoint(self, checkpoint):
+        if bool(getattr(self.config, "persist_generator_state", False)):
+            if "xwam_generator_state" not in checkpoint:
+                raise RuntimeError("resume checkpoint 缺少 xwam_generator_state")
+            self._restored_generator_state = checkpoint["xwam_generator_state"]
 
     def training_step(self, batch, batch_idx):
         # 1. prepare condition

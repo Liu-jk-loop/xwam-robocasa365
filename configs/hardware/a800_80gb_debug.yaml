@@ -1,0 +1,15 @@
+# A800 80GB 单卡调试层；不作为 H100 正式训练配置。
+precision: bf16-mixed
+batch_size_per_gpu: 1
+devices: 1
+num_workers_per_gpu: 0
+prefetch_factor: 2
+use_gradient_checkpointing: true
+
+# 已在 M2 单步门禁验证的显存策略。
+deepspeed_stage: 2
+deepspeed_offload_optimizer: true
+deepspeed_offload_optimizer_device: cpu
+deepspeed_pin_memory: false
+deepspeed_overlap_comm: false
+deepspeed_bucket_size: 100000000

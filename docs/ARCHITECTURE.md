@@ -75,6 +75,16 @@ model defaults
 
 Absolute cluster paths are allowed in cluster-local overrides but not as Python defaults. Every saved experiment must contain the resolved configuration, Git commit, dataset manifest ID, checkpoint source, and environment summary.
 
+### M3 training-run contract
+
+- 配置合并顺序固定为 model → data/schema → hardware → experiment → CLI override；后层只能覆盖前层，不在 Python 中写机器路径。
+- `num_training_steps` 表示学习率计划总步数，`trainer_max_steps` 表示本次调用停止位置。初始运行和 resume 必须使用相同的学习率计划总步数。
+- 极小样本门禁通过 `train_subset_size/train_subset_start` 选择固定 clip，并显式关闭 shuffle；它只用于验证过拟合和恢复，不能充当正式数据抽样策略。
+- Lightning/DeepSpeed 完整恢复统一走 `Trainer.fit(ckpt_path=...)`。恢复时不再重复加载公开 X-WAM checkpoint，模型、optimizer、scheduler、global step 和 loop state 由训练 checkpoint 接管。
+- M3 单卡确定性门禁把 X-WAM 自定义 CPU generator state 写入 checkpoint 并在 resume 时恢复。该能力显式限制为 world size 1；多卡 RNG 恢复在正式 H100 profile 中另行设计。
+- 每次调用写出独立的 resolved config、run metadata 和 run result JSON。metadata 包含 Git commit/dirty state、命令、配置来源、环境版本、数据/manifest/schema、子集、拓扑、DeepSpeed 和 checkpoint 来源；result 包含 pass/fail、global step、耗时、进程 max RSS、CUDA 峰值和 checkpoint 路径。
+- A800 debug profile 可以使用已验证的 ZeRO-2 CPUAdam offload。正式 H100 profile 不继承该决定，必须依据 GPU 数量、显存和吞吐单独冻结。
+
 ## Current external paths
 
 These paths are cluster deployment facts, not portable defaults:

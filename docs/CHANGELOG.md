@@ -1,5 +1,35 @@
 # 变更记录
 
+## 2026-08-06 — M3.1 分层配置、极小子集与 checkpoint resume 门禁
+
+- 分支：`dev/atomic-robocasa365`
+- 基线 commit：`c593036`
+- 运行状态：本地静态验证完成；A800 8-step + resume-to-10 为 `cluster-pending`
+
+### 目标与问题
+
+- M2 配置把模型、硬件和一步实验参数放在同一文件中，不能作为 M3/H100 正式配置基础。
+- 训练入口没有固定极小子集、显式 resume path、每次调用的 Git/config/result 产物；`num_training_steps` 同时承担 scheduler horizon 和本次停止位置，也无法对分段恢复保持同一学习率计划。
+- X-WAM 使用自建 CPU generator 采样 diffusion noise/timestep，Lightning 不会自动理解这个对象的恢复语义；不保存它会让单样本 resume 的随机序列重新从 seed 开始。
+
+### 新增和修改逻辑
+
+- 增加 RoboCasa365 atomic 模型层、A800 80GB 单卡 debug 硬件层和 `CloseFridge` M3 极小样本实验层；训练入口按 model/data/hardware/experiment/CLI 顺序合并。
+- `train_subset_size=1`、`train_subset_start=0` 和 `train_shuffle=false` 固定唯一 clip；边界越界或空数据在构造 5B 模型前失败。
+- 分离 `num_training_steps=10` 的 scheduler horizon 与首轮 `trainer_max_steps=8`；resume 使用同一 horizon 并把 invocation limit 提升到 10。
+- 增加 `resume_checkpoint`，存在性检查通过后传入 `Trainer.fit(ckpt_path=...)`；恢复运行跳过公开 X-WAM checkpoint adapter，完整训练状态由 DeepSpeed checkpoint 接管。
+- 单 GPU M3 配置保存/恢复自定义 generator state；resume 缺少该字段或 world size 大于 1 时明确拒绝，避免随机序列静默重置或多卡错误复用 rank 0 RNG。
+- checkpoint callback 支持配置 `save_top_k/save_last/save_on_exception`，M3 首轮只在 step 8 保留一个 checkpoint，并以本地 `last.ckpt` symlink 指向它，避免重复复制 5B optimizer state。
+- 每次调用生成独立 resolved config、metadata JSON 和 result JSON，自动记录 Git、环境、配置/数据/checkpoint 来源、命令、子集、global step、耗时、进程 max RSS、CUDA peak 与 checkpoint 路径。
+- validation 为 0 时不再重复构造完整验证 Dataset；既有配置没有设置新字段时保持原 scheduler、全数据 shuffle、初始化和 Torch AdamW/DeepSpeed 行为。
+
+### 验证、风险和回滚
+
+- 新增 dependency-free schedule/subset/resume/provenance 测试和静态 wiring 测试；本地无 Torch，真实 OmegaConf/Lightning/DeepSpeed checkpoint 保存恢复均为 `cluster-pending`。
+- DeepSpeed ZeRO checkpoint 是目录而非普通单文件，完整 optimizer checkpoint 可能占用数十 GiB；两段运行会保留 step 8/10 两个恢复点，运行前必须检查实验盘至少约 200 GiB 可用空间。
+- 10 个 diffusion step 的单点 loss 可能因随机 timestep/noise 波动，M3.1 先验收有限值、总体趋势、step 连续和恢复完整性，不要求每一步严格单调下降。
+- 回退本次 commit 可移除 M3.1 能力；不会删除外部实验目录。正式 H100 profile 尚未创建，不能把 A800 CPU offload 配置作为正式训练结论。
+
 ## 2026-08-06 — M2 单步训练集群验收通过
 
 - 分支：`dev/atomic-robocasa365`

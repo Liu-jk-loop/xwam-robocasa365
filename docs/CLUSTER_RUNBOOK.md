@@ -178,6 +178,80 @@ echo "train_exit_code=${PIPESTATUS[0]}"
 
 日志中必须出现 `offload_optimizer: True`、`offload_optimizer_device: cpu`、`allgather_bucket_size: 100000000` 和 `Optimizer backend: deepspeed_cpu_adam`。首次运行可能编译 CPUAdam 扩展，需要等待其完成；不要设置 `zero_force_ds_cpu_optimizer=false` 绕过保护。反馈三份 JSON/配置、完整终端日志、返回码、`free -h`、CPUAdam 编译信息、GPU 峰值和首个 loss。若第一条加载 audit 失败，不要继续训练，也不要改为 `strict=False` 或手动删除报错参数。
 
+## M3.1 固定单 clip 训练与 checkpoint resume
+
+本门禁仍使用 A800 80GB 单卡和已验证的 CPUAdam offload，只验证 `CloseFridge` 一个固定 clip 的连续训练、checkpoint 和恢复。它不是正式 H100 配置。完整 DeepSpeed optimizer checkpoint 可能占用数十 GiB，两段运行会保留 step 8/10 两个恢复点；先确认主机 `available` 内存至少 64 GiB，实验盘建议至少 200 GiB 可用：
+
+```bash
+conda activate xwam-robocasa365
+cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+git rev-parse HEAD
+git status --short
+
+free -h
+mkdir -p /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365
+df -h /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365
+mkdir -p logs/cluster
+set -o pipefail
+```
+
+第一段从公开 X-WAM checkpoint 初始化，在固定全局 clip 0 上训练到 step 8，并保存完整训练 checkpoint：
+
+```bash
+python scripts/train_sft.py \
+  model_config=configs/model/wan22_5b_robocasa365_atomic.yaml \
+  hardware_config=configs/hardware/a800_80gb_debug.yaml \
+  experiment_config=configs/experiment/robocasa365_close_fridge_m3_overfit.yaml \
+  wan_checkpoint_dir=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/Wan-AI/Wan2.2-TI2V-5B \
+  pretrained_checkpoint=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/x-wam/xwam_checkpoints \
+  dataset.dataset_path=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/robocasa/robocasa/datasets/v1.0/pretrain/atomic/CloseFridge/20250819 \
+  exp_root=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365 \
+  exp_name=close_fridge_m3_overfit_gate1 \
+  2>&1 | tee logs/cluster/close_fridge_m3_overfit_initial.log
+
+echo "initial_exit_code=${PIPESTATUS[0]}"
+```
+
+第一段必须同时满足：
+
+- `Training data selection` 显示 base 23496、selected 1、indices `(0,)`、shuffle false。
+- 输出 step 0～7 的有限 video/action/proprio/total loss，depth loss 始终为 0；允许随机 diffusion loss 波动，不要求逐步严格单调。
+- `Trainer.fit` 正常达到 `max_steps=8`，run result JSON 为 `pass/global_step=8`。
+- checkpoint 目录存在，run metadata 中 Git commit 与上方 `git rev-parse HEAD` 相同且 `dirty=false`。
+
+确认第一段返回码为 0 后再检查 checkpoint；如果失败或磁盘空间不足，不要启动恢复段：
+
+```bash
+XWAM_M3_ROOT=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365/close_fridge_m3_overfit_gate1
+XWAM_M3_CKPT=$XWAM_M3_ROOT/checkpoints/last.ckpt
+
+test -e "$XWAM_M3_CKPT"
+du -shL "$XWAM_M3_CKPT"
+find "$XWAM_M3_ROOT/runs" -maxdepth 1 -type f -print | sort
+```
+
+第二段从 `last.ckpt` 恢复到同一 scheduler horizon 的 step 10，并在 step 10 更新 checkpoint：
+
+```bash
+python scripts/train_sft.py \
+  model_config=configs/model/wan22_5b_robocasa365_atomic.yaml \
+  hardware_config=configs/hardware/a800_80gb_debug.yaml \
+  experiment_config=configs/experiment/robocasa365_close_fridge_m3_overfit.yaml \
+  wan_checkpoint_dir=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/Wan-AI/Wan2.2-TI2V-5B \
+  dataset.dataset_path=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/robocasa/robocasa/datasets/v1.0/pretrain/atomic/CloseFridge/20250819 \
+  exp_root=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365 \
+  exp_name=close_fridge_m3_overfit_gate1 \
+  trainer_max_steps=10 \
+  save_interval=10 \
+  resume_checkpoint="$XWAM_M3_CKPT" \
+  2>&1 | tee logs/cluster/close_fridge_m3_overfit_resume.log
+
+echo "resume_exit_code=${PIPESTATUS[0]}"
+```
+
+第二段必须出现 `deferred_to_trainer`、`Restored training generator state`、step 8～9、`max_steps=10` 和 result `pass/global_step=10`。反馈两份日志、`runs/` 下六份 JSON/YAML、`du -shL last.ckpt`、两次退出码和资源检查结果。正式 H100 GPU 数量未冻结前，不要把本配置扩大到多卡或关闭 offload。
+
 ## X-WAM Conda 环境
 
 先按 `docs/ENVIRONMENT_PLAN.md` 的 E0 步骤审计当前 `abot_m05`，日志写入 `logs/cluster/`。`ok=false` 只表示不能直接运行；当 `clone_base_ok=true` 且 `reuse_recommendation=clone_then_patch` 时，可以 clone 为独立环境后补依赖。不要在 `abot_m05` 中直接运行全量依赖安装。

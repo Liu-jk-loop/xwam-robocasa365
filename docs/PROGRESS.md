@@ -5,9 +5,9 @@
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：M3——RGB-only Atomic 训练烟测准备
+- 当前阶段：M3.1——单任务极小样本、checkpoint 与 resume 门禁
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1、M2 全部门禁通过；A800 已完成 DeepSpeedCPUAdam 单 batch 参数更新，M3 短程训练待准备
+- 超算运行状态：M1、M2 全部门禁通过；M3.1 本地实现完成，A800 8-step 与 resume-to-10 待验证
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -17,7 +17,7 @@
 | M0 工程与协作基线 | 已完成 | 主仓库已 clone | 模拟器阶段开始时确认第三方子模块 |
 | M1 原生 RoboCasa365 loader | 已完成 | commit `e4249b9` 真实 batch `ok=true` | 已关闭 |
 | M2 动作与 checkpoint 适配 | 已完成 | 两种初始化、完整动作契约及 DeepSpeedCPUAdam 单 batch 参数更新均通过 | 已关闭 |
-| M3 RGB-only 训练烟测 | 准备中 | 单步基线已通过；短程连续训练待验证 | A100/A800 极小样本过拟合与保存/恢复 |
+| M3 RGB-only 训练烟测 | M3.1 本地实现完成 | 单步基线已通过；8-step/恢复待验证 | A800 固定单 clip 训练到 step 8，再恢复到 step 10 |
 | M4 闭环评测器 | 未开始 | 待验证 | 完成一个 atomic 闭环 rollout |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
 | M6 Atomic 正式训练与评测 | 未开始 | 待验证 | 通过 H100 正式训练门禁 |
@@ -164,7 +164,8 @@ M2 单步训练第四次启动与关闭证据：
 
 ## 待提供输入
 
-- M3 先准备单任务极小样本过拟合和保存/恢复门禁；运行反馈必须显式包含 `git rev-parse HEAD`、返回码、`free -h`、完整解析配置、连续 loss、GPU 峰值、吞吐和 checkpoint 路径。
+- 拉取 M3.1 最新 commit 后，先检查 CPU 内存和实验盘可用空间，再按 runbook 对固定 `CloseFridge` clip 训练到 step 8；只有 checkpoint 和 result JSON 均通过才恢复到 step 10。
+- 反馈 `git rev-parse HEAD`、两次返回码、`free -h`/`df -h`、两份完整日志、全部 run config/metadata/result JSON、连续 loss、checkpoint 目录大小和最终 CUDA 峰值。
 - 不在本轮运行闭环 simulator；新版在线 16D observation 提取将在 M4 实现和验收。
 
 ## 当前执行过程
@@ -183,3 +184,4 @@ M2 单步训练第四次启动与关闭证据：
 12. 第二次启动已完成 forward/backward，在首次 AdamW optimizer state 初始化时因 80GB 显存容量不足退出；Codex 改为 ZeRO-2 CPU optimizer offload，等待单 batch 参数更新复测。
 13. 第三次启动在 DeepSpeed 初始化阶段因 offload 仍收到 Torch AdamW 而退出；Codex 将 M2 offload 分支切换为 DeepSpeedCPUAdam，正式配置保持 Torch AdamW，等待复测。
 14. 第四次启动已用 DeepSpeedCPUAdam 完成真实 batch 的 forward、backward 和 optimizer update；CUDA allocated peak 30.677 GiB、首个 loss 2.979639，M2 关闭并进入 M3 准备。
+15. Codex 已实现 M3.1 分层配置、固定单 clip、8/10 step 调度边界、DeepSpeed resume、自定义 RNG state 恢复和运行 provenance；等待 A800 两段式验收。

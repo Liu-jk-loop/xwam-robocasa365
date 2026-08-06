@@ -2,13 +2,19 @@ import os
 import gc
 import sys
 import logging
+import importlib.metadata
+import platform
+import resource
+import time
+from datetime import datetime, timezone
+from pathlib import Path
 from pprint import pprint
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from omegaconf import OmegaConf
 import lightning as L
 from lightning.pytorch.callbacks import (
@@ -24,6 +30,14 @@ from project_tools.training_topology import (
     resolve_deepspeed_options,
     resolve_training_topology,
 )
+from project_tools.training_run import (
+    collect_git_state,
+    resolve_resume_checkpoint,
+    resolve_save_last,
+    resolve_subset_indices,
+    resolve_training_schedule,
+    write_json_atomic,
+)
 from runners.xwam_runner import XWAMRunner
 from utils.console_logger import ConsoleLogger
 from utils.xwam_checkpoint_loader import initialize_xwam_runner
@@ -33,6 +47,7 @@ def _load_config():
     overrides = OmegaConf.from_cli()
     model_config_path = overrides.pop("model_config", "configs/model/wan22_5b_sft.yaml")
     model_config = OmegaConf.load(model_config_path)
+    config_sources = {"model": str(Path(model_config_path).resolve())}
 
     dataset_override = overrides.get("dataset")
     if isinstance(dataset_override, str):
@@ -42,7 +57,23 @@ def _load_config():
         dataset_name = str(model_config.dataset)
     data_config_path = overrides.pop("data_config", f"configs/data/{dataset_name}.yaml")
     model_config["dataset"] = OmegaConf.load(data_config_path)
-    return OmegaConf.merge(model_config, overrides)
+    config_sources["data"] = str(Path(data_config_path).resolve())
+
+    layers = [model_config]
+    for key, source_name in (
+        ("hardware_config", "hardware"),
+        ("experiment_config", "experiment"),
+    ):
+        config_path = overrides.pop(key, None)
+        if config_path is not None:
+            if not isinstance(config_path, str):
+                raise TypeError(f"{key} 必须是 YAML 路径字符串")
+            layers.append(OmegaConf.load(config_path))
+            config_sources[source_name] = str(Path(config_path).resolve())
+
+    config = OmegaConf.merge(*layers, overrides)
+    config["config_sources"] = config_sources
+    return config
 
 
 def _loader_worker_options(num_workers: int, prefetch_factor: int) -> dict:
@@ -52,6 +83,13 @@ def _loader_worker_options(num_workers: int, prefetch_factor: int) -> dict:
         "prefetch_factor": int(prefetch_factor),
         "multiprocessing_context": "forkserver",
     }
+
+
+def _package_version(distribution: str) -> str | None:
+    try:
+        return importlib.metadata.version(distribution)
+    except importlib.metadata.PackageNotFoundError:
+        return None
 
 
 def _resolve_trainer_topology(config):
@@ -64,34 +102,57 @@ def _resolve_trainer_topology(config):
 
 def main():
     config = _load_config()
+    schedule = resolve_training_schedule(
+        num_training_steps=config.num_training_steps,
+        trainer_max_steps=config.get("trainer_max_steps"),
+    )
+    config.trainer_max_steps = schedule["trainer_max_steps"]
+    resume_checkpoint = resolve_resume_checkpoint(config.get("resume_checkpoint"))
+    config.resume_checkpoint = resume_checkpoint
     topology = _resolve_trainer_topology(config)
+    if bool(config.get("persist_generator_state", False)) and topology["world_size"] != 1:
+        raise ValueError("persist_generator_state 当前只允许 M3 单 GPU 确定性恢复门禁")
     deepspeed_options = resolve_deepspeed_options(config)
 
     pprint(OmegaConf.to_container(config))
 
-    os.makedirs(os.path.join(config.exp_root, config.exp_name), exist_ok=True)
+    exp_dir = Path(config.exp_root) / config.exp_name
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_dir = exp_dir / "runs"
+    exp_dir.mkdir(parents=True, exist_ok=True)
+    run_dir.mkdir(parents=True, exist_ok=True)
     OmegaConf.save(
         config,
-        os.path.join(config.exp_root, config.exp_name, "config.yaml"),
+        exp_dir / "config.yaml",
+        resolve=True,
+    )
+    resolved_config_path = run_dir / f"{run_id}_config.yaml"
+    OmegaConf.save(
+        config,
+        resolved_config_path,
         resolve=True,
     )
     L.seed_everything(config.seed, workers=True)
 
     callbacks = [ModelSummary(max_depth=2), LearningRateMonitor(logging_interval="step")]
+    checkpoint_callback = None
     if bool(config.get("enable_checkpointing", True)):
+        checkpoint_callback = ModelCheckpoint(
+            dirpath=exp_dir / "checkpoints",
+            save_top_k=int(config.get("save_top_k", -1)),
+            save_last=resolve_save_last(config.get("save_last", True)),
+            save_weights_only=False,
+            save_on_exception=bool(config.get("save_on_exception", False)),
+            every_n_train_steps=int(config.save_interval),
+            enable_version_counter=False,
+        )
         callbacks.insert(
             1,
-            ModelCheckpoint(
-                dirpath=os.path.join(config.exp_root, config.exp_name, "checkpoints"),
-                save_top_k=-1,
-                save_last=True,
-                every_n_train_steps=config.save_interval,
-                enable_version_counter=False,
-            ),
+            checkpoint_callback,
         )
 
     tb_path = os.getenv("TENSORBOARD_LOG_PATH", None)
-    loggers = [ConsoleLogger(max_steps=config.num_training_steps)]
+    loggers = [ConsoleLogger(max_steps=schedule["trainer_max_steps"])]
     if bool(config.get("enable_tensorboard", True)):
         loggers.insert(
             0,
@@ -102,37 +163,105 @@ def main():
         )
     logging.getLogger("lightning.pytorch").setLevel(logging.INFO)
 
-    train_dataset = build_dataset(config.dataset, use_depth=config.use_depth)
-    config.action_num = train_dataset.action_num
-    if int(config.action_dim) != int(train_dataset.action_dim):
+    base_train_dataset = build_dataset(config.dataset, use_depth=config.use_depth)
+    config.action_num = base_train_dataset.action_num
+    if int(config.action_dim) != int(base_train_dataset.action_dim):
         raise ValueError(
-            f"模型 action_dim={config.action_dim} 与数据 action_dim={train_dataset.action_dim} 不一致"
+            f"模型 action_dim={config.action_dim} 与数据 action_dim={base_train_dataset.action_dim} 不一致"
         )
-    if int(config.proprio_dim) != int(train_dataset.proprio_dim):
+    if int(config.proprio_dim) != int(base_train_dataset.proprio_dim):
         raise ValueError(
-            f"模型 proprio_dim={config.proprio_dim} 与数据 proprio_dim={train_dataset.proprio_dim} 不一致"
+            f"模型 proprio_dim={config.proprio_dim} 与数据 proprio_dim={base_train_dataset.proprio_dim} 不一致"
         )
 
-    val_dataset = build_dataset(config.dataset, use_depth=config.use_depth, augment=False)
+    subset_indices = resolve_subset_indices(
+        dataset_length=len(base_train_dataset),
+        subset_size=config.get("train_subset_size"),
+        subset_start=int(config.get("train_subset_start", 0)),
+    )
+    train_dataset = (
+        base_train_dataset
+        if subset_indices is None
+        else Subset(base_train_dataset, subset_indices)
+    )
+    train_shuffle = bool(config.get("train_shuffle", True))
+    print(
+        "Training data selection: "
+        f"base_samples={len(base_train_dataset)}, selected_samples={len(train_dataset)}, "
+        f"subset_indices={subset_indices}, shuffle={train_shuffle}"
+    )
+    OmegaConf.save(config, exp_dir / "config.yaml", resolve=True)
+    OmegaConf.save(config, resolved_config_path, resolve=True)
 
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=config.batch_size_per_gpu,
         num_workers=config.num_workers_per_gpu,
-        shuffle=True,
+        shuffle=train_shuffle,
         pin_memory=True,
         drop_last=True,
         **_loader_worker_options(config.num_workers_per_gpu, config.prefetch_factor),
     )
 
-    val_dataloader = DataLoader(
-        val_dataset,
-        batch_size=1,
-        num_workers=config.num_workers_per_gpu,
-        shuffle=True,
-        pin_memory=True,
-        **_loader_worker_options(config.num_workers_per_gpu, config.prefetch_factor),
+    val_dataloader = None
+    if float(config.limit_val_batches) > 0:
+        val_dataset = build_dataset(config.dataset, use_depth=config.use_depth, augment=False)
+        val_dataloader = DataLoader(
+            val_dataset,
+            batch_size=1,
+            num_workers=config.num_workers_per_gpu,
+            shuffle=True,
+            pin_memory=True,
+            **_loader_worker_options(config.num_workers_per_gpu, config.prefetch_factor),
+        )
+
+    run_metadata_path = run_dir / f"{run_id}_metadata.json"
+    run_result_path = run_dir / f"{run_id}_result.json"
+    write_json_atomic(
+        run_metadata_path,
+        {
+            "schema_version": 1,
+            "run_id": run_id,
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
+            "git": collect_git_state(Path(__file__).resolve().parents[1]),
+            "command": sys.argv,
+            "config_sources": OmegaConf.to_container(config.config_sources, resolve=True),
+            "resolved_config": str(resolved_config_path.resolve()),
+            "dataset": {
+                "path": config.dataset.get("dataset_path"),
+                "task_name": config.dataset.get("task_name"),
+                "base_samples": len(base_train_dataset),
+                "selected_samples": len(train_dataset),
+                "subset_indices": list(subset_indices) if subset_indices is not None else None,
+                "shuffle": train_shuffle,
+                "task_manifest": config.dataset.get("task_manifest"),
+                "schema_path": config.dataset.get("schema_path"),
+                "use_depth": bool(config.use_depth),
+            },
+            "checkpoint": {
+                "initialization_mode": config.get("initialization_mode"),
+                "pretrained_checkpoint": config.get("pretrained_checkpoint"),
+                "resume_checkpoint": resume_checkpoint,
+            },
+            "environment": {
+                "python": platform.python_version(),
+                "torch": torch.__version__,
+                "cuda_runtime": torch.version.cuda,
+                "lightning": getattr(L, "__version__", None),
+                "deepspeed": _package_version("deepspeed"),
+                "gpu_names": [
+                    torch.cuda.get_device_name(index)
+                    for index in range(torch.cuda.device_count())
+                ],
+            },
+            "training": schedule,
+            "resume_checkpoint": resume_checkpoint,
+            "deepspeed": deepspeed_options,
+            "topology": topology,
+            "result": "pending",
+        },
     )
+    print(f"Run metadata: {run_metadata_path}")
 
     model = XWAMRunner(config, run_depth=bool(config.use_depth))
     initialization_report = config.get("checkpoint_initialization_report")
@@ -140,16 +269,23 @@ def main():
         initialization_report = os.path.join(
             config.exp_root, config.exp_name, "checkpoint_initialization.json"
         )
-    report = initialize_xwam_runner(
-        model,
-        mode=str(config.get("initialization_mode", "legacy_strict")),
-        checkpoint=config.get("pretrained_checkpoint"),
-        schema_path=config.get("checkpoint_schema_path"),
-        report_path=initialization_report,
-    )
+    if resume_checkpoint is None:
+        report = initialize_xwam_runner(
+            model,
+            mode=str(config.get("initialization_mode", "legacy_strict")),
+            checkpoint=config.get("pretrained_checkpoint"),
+            schema_path=config.get("checkpoint_schema_path"),
+            report_path=initialization_report,
+        )
+    else:
+        report = {
+            "mode": "resume_checkpoint",
+            "result": "deferred_to_trainer",
+        }
     print(
         "Checkpoint initialization: "
-        f"mode={report['mode']}, result={report['result']}, report={initialization_report}"
+        f"mode={report['mode']}, result={report['result']}, "
+        f"report={initialization_report if resume_checkpoint is None else resume_checkpoint}"
     )
 
     print(
@@ -164,9 +300,9 @@ def main():
         accelerator="auto",
         devices=topology["trainer_devices"],
         strategy=DeepSpeedStrategy(**deepspeed_options),
-        precision="bf16-mixed",
+        precision=str(config.get("precision", "bf16-mixed")),
         num_nodes=topology["num_nodes"],
-        max_steps=config.num_training_steps,
+        max_steps=schedule["trainer_max_steps"],
         accumulate_grad_batches=config.accumulate_grad_batches,
         gradient_clip_val=config.gradient_clip_val,
         gradient_clip_algorithm=config.gradient_clip_algorithm,
@@ -181,15 +317,51 @@ def main():
         default_root_dir=os.path.join(config.exp_root, config.exp_name),
     )
     torch.cuda.reset_peak_memory_stats()
+    fit_error = None
+    fit_started = time.monotonic()
     try:
-        trainer.fit(model=model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader)
+        trainer.fit(
+            model=model,
+            train_dataloaders=train_dataloader,
+            val_dataloaders=val_dataloader,
+            ckpt_path=resume_checkpoint,
+        )
+    except BaseException as exc:
+        fit_error = f"{type(exc).__name__}: {exc}"
+        raise
     finally:
         gib = 1024**3
+        allocated_gib = torch.cuda.max_memory_allocated() / gib
+        reserved_gib = torch.cuda.max_memory_reserved() / gib
         print(
             "CUDA peak memory: "
-            f"allocated={torch.cuda.max_memory_allocated() / gib:.3f} GiB, "
-            f"reserved={torch.cuda.max_memory_reserved() / gib:.3f} GiB"
+            f"allocated={allocated_gib:.3f} GiB, "
+            f"reserved={reserved_gib:.3f} GiB"
         )
+        result_payload = {
+            "schema_version": 1,
+            "run_id": run_id,
+            "result": "pass" if fit_error is None else "fail",
+            "error": fit_error,
+            "global_step": int(trainer.global_step),
+            "trainer_max_steps": schedule["trainer_max_steps"],
+            "elapsed_seconds": time.monotonic() - fit_started,
+            "process_max_rss_raw": int(
+                resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            ),
+            "process_max_rss_platform": sys.platform,
+            "cuda_peak_allocated_gib": allocated_gib,
+            "cuda_peak_reserved_gib": reserved_gib,
+            "resume_checkpoint": resume_checkpoint,
+            "last_checkpoint": (
+                checkpoint_callback.last_model_path if checkpoint_callback is not None else None
+            ),
+            "best_checkpoint": (
+                checkpoint_callback.best_model_path if checkpoint_callback is not None else None
+            ),
+        }
+        write_json_atomic(run_result_path, result_payload)
+        print(f"Run result: {run_result_path} ({result_payload['result']})")
 
 
 if __name__ == "__main__":
