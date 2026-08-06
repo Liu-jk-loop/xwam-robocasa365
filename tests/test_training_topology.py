@@ -5,11 +5,37 @@ from pathlib import Path
 
 from project_tools.training_topology import (
     resolve_deepspeed_options,
+    resolve_optimizer_backend,
     resolve_training_topology,
 )
 
 
 class TrainingTopologyTest(unittest.TestCase):
+    def test_optimizer_backend_is_cpu_adam_only_for_explicit_offload(self) -> None:
+        self.assertEqual(resolve_optimizer_backend({}), "torch_adamw")
+        self.assertEqual(
+            resolve_optimizer_backend({"deepspeed_offload_optimizer": False}),
+            "torch_adamw",
+        )
+        self.assertEqual(
+            resolve_optimizer_backend({"deepspeed_offload_optimizer": True}),
+            "deepspeed_cpu_adam",
+        )
+
+    def test_runner_wires_both_optimizer_backends(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        runner = (repo_root / "runners/xwam_runner.py").read_text()
+        legacy_config = (repo_root / "configs/model/wan22_5b_sft.yaml").read_text()
+        smoke_config = (
+            repo_root / "configs/model/wan22_5b_robocasa365_atomic_m2.yaml"
+        ).read_text()
+        self.assertIn("DeepSpeedCPUAdam", runner)
+        self.assertIn("torch.optim.AdamW", runner)
+        self.assertIn("adamw_mode=True", runner)
+        self.assertIn("fp32_optimizer_states=True", runner)
+        self.assertIn("deepspeed_offload_optimizer: false", legacy_config)
+        self.assertIn("deepspeed_offload_optimizer: true", smoke_config)
+
     def test_legacy_deepspeed_defaults_are_unchanged(self) -> None:
         options = resolve_deepspeed_options({})
         self.assertEqual(options["stage"], 2)

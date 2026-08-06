@@ -1,5 +1,30 @@
 # 变更记录
 
+## 2026-08-06 — M2 offload optimizer 选择 DeepSpeedCPUAdam
+
+- 分支：`dev/atomic-robocasa365`
+- 失败配置：与 commit `4bdb272` 的 M2 smoke 一致；反馈未附 `git rev-parse HEAD`
+- 运行状态：CPU offload 参数解析通过；DeepSpeed 初始化拒绝 client-provided Torch AdamW，修复后参数更新为 `cluster-pending`
+
+### 问题与诊断
+
+- ZeRO-2 CPU offload 已正确解析，但 runner 的 `configure_optimizers()` 固定返回 `torch.optim.AdamW`。
+- DeepSpeed 默认要求 ZeRO-Offload 使用 `DeepSpeedCPUAdam`，因此在 `strategy.setup/deepspeed.initialize` 阶段主动抛出 `ZeRORuntimeException`；本轮尚未读取 batch，也未执行 forward/backward。
+- 退出前 CUDA peak 21.294 GiB 只代表初始化阶段，不能作为完整训练显存结论；NCCL cleanup warning 是异常退出的伴随结果。
+
+### 新增和修改逻辑
+
+- 新增无依赖 optimizer backend policy：只有显式设置 `deepspeed_offload_optimizer=true` 时选择 `deepspeed_cpu_adam`，其他运行一律选择 `torch_adamw`。
+- CPU offload 分支使用 `DeepSpeedCPUAdam`，显式保持 AdamW mode、FP32 optimizer state、lr、betas、eps 和 weight decay；scheduler 逻辑不变。
+- optimizer backend 在启动日志中打印，便于区分单卡调试和正式训练来源。
+- M2 单卡 smoke 继续开启 CPU offload；正式默认配置保持 offload false，因此仍使用 Torch AdamW 和 GPU optimizer，不改变正式实验语义。
+
+### 验证、风险和回滚
+
+- 本地没有 Torch；backend policy、静态 wiring、Python compile、完整无 Torch 测试、变更记录门禁和 diff 检查通过后发布，真实 CPUAdam 扩展加载与参数更新为 `cluster-pending`。
+- 首次使用 DeepSpeedCPUAdam 可能触发本地扩展编译；若失败，应记录 CPUAdam builder/compiler 日志，不绕过 `zero_force_ds_cpu_optimizer` 保护。
+- 将 M2 的 `deepspeed_offload_optimizer` 设为 false 会回到 Torch AdamW，但单卡 80GB 会重现 optimizer state OOM；正式训练是否需要 offload 将在 H100 多卡 profile 中单独确定。
+
 ## 2026-08-06 — M2 optimizer-step OOM 与 ZeRO-2 CPU offload
 
 - 分支：`dev/atomic-robocasa365`

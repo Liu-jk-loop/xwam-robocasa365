@@ -5,6 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 
+def resolve_optimizer_backend(config: Any) -> str:
+    """Keep CPUAdam restricted to runs that explicitly enable optimizer offload."""
+    if bool(config.get("deepspeed_offload_optimizer", False)):
+        return "deepspeed_cpu_adam"
+    return "torch_adamw"
+
+
 def resolve_deepspeed_options(config: Any) -> dict[str, Any]:
     """Resolve memory-sensitive DeepSpeed options without importing Torch/Lightning."""
     stage = int(config.get("deepspeed_stage", 2))

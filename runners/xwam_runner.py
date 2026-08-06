@@ -12,6 +12,7 @@ from modules.wan_model import XWAMModel
 from modules.t5 import T5EncoderModel
 from modules.vae2_2 import Wan2_2_VAE
 from utils.utils import sample_beta
+from project_tools.training_topology import resolve_optimizer_backend
 
 
 class XWAMRunner(L.LightningModule):
@@ -60,11 +61,28 @@ class XWAMRunner(L.LightningModule):
         self.model.train()
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-            self.model.parameters(),
-            lr=self.config.lr,
-            weight_decay=self.config.weight_decay,
-        )
+        optimizer_backend = resolve_optimizer_backend(self.config)
+        optimizer_kwargs = {
+            "lr": self.config.lr,
+            "betas": (0.9, 0.999),
+            "eps": 1e-8,
+            "weight_decay": self.config.weight_decay,
+        }
+        if optimizer_backend == "deepspeed_cpu_adam":
+            from deepspeed.ops.adam import DeepSpeedCPUAdam
+
+            optimizer = DeepSpeedCPUAdam(
+                self.model.parameters(),
+                adamw_mode=True,
+                fp32_optimizer_states=True,
+                **optimizer_kwargs,
+            )
+        else:
+            optimizer = torch.optim.AdamW(
+                self.model.parameters(),
+                **optimizer_kwargs,
+            )
+        print(f"Optimizer backend: {optimizer_backend}")
         lr_scheduler = get_cosine_schedule_with_warmup(
             optimizer,
             num_warmup_steps=self.config.num_warmup_steps,

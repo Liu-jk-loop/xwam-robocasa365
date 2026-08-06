@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：M2——PandaOmron schema、normalization 与 checkpoint 适配
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1 全部门禁通过；M2 contract、两种初始化及真实 batch forward/backward 已通过，首次 optimizer step 因 Adam state 显存不足待复测
+- 超算运行状态：M1 全部门禁通过；M2 contract、两种初始化及真实 batch forward/backward 已通过；CPU offload 已到 DeepSpeed 初始化，待用 DeepSpeedCPUAdam 完成参数更新
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -16,7 +16,7 @@
 | --- | --- | --- | --- |
 | M0 工程与协作基线 | 已完成 | 主仓库已 clone | 模拟器阶段开始时确认第三方子模块 |
 | M1 原生 RoboCasa365 loader | 已完成 | commit `e4249b9` 真实 batch `ok=true` | 已关闭 |
-| M2 动作与 checkpoint 适配 | contract 已通过；训练归一化、14D→12D loader、双初始化和完整 12D 执行已实现 | 两种初始化和 forward/backward 已通过；首次 optimizer step OOM | CPU offload 下完成单 batch 参数更新 |
+| M2 动作与 checkpoint 适配 | contract 已通过；训练归一化、14D→12D loader、双初始化和完整 12D 执行已实现 | 两种初始化和 forward/backward 已通过；CPU offload 需切换 DeepSpeedCPUAdam | CPU offload 下完成单 batch 参数更新 |
 | M3 RGB-only 训练烟测 | 未开始 | 待验证 | A100/A800 短程连续训练 |
 | M4 闭环评测器 | 未开始 | 待验证 | 完成一个 atomic 闭环 rollout |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
@@ -145,9 +145,17 @@ M2 单步训练第二次启动反馈：
 - upstream legacy 配置仍保持 ZeRO-2、GPU optimizer、5e8 bucket 和 overlap；本次只改变 atomic M2 单卡 smoke。
 - 新配置需要主机提供足够内存，运行前以 `free -h` 确认可用内存，建议至少 64 GiB；真实参数更新仍为 `cluster-pending`。
 
+M2 单步训练第三次启动反馈：
+
+- 解析配置正确包含 ZeRO-2、CPU optimizer offload、1e8 bucket 和关闭 overlap，说明 commit `4bdb272` 的显存策略 wiring 已生效；反馈没有附 `git rev-parse HEAD`，正式 SHA 仍待补。
+- DeepSpeed 在初始化阶段发现 runner 仍提供 `torch.optim.AdamW`，按默认保护抛出 `ZeRORuntimeException`，要求使用 `DeepSpeedCPUAdam` 或显式绕过保护。
+- 本轮失败发生在 `strategy.setup/deepspeed.initialize`，未读取真实 batch、未执行 forward/backward 或 optimizer step；21.294 GiB CUDA peak 不能代表完整 offload 训练峰值。
+- runner 改为根据 `deepspeed_offload_optimizer` 选择 backend：M2 smoke 使用 `DeepSpeedCPUAdam`，正式默认配置 offload false 时仍使用 `torch.optim.AdamW`。
+- 不采用 `zero_force_ds_cpu_optimizer=false` 绕过方案；CPUAdam 扩展加载/编译和一次完整参数更新仍为 `cluster-pending`。
+
 ## 待提供输入
 
-- 拉取启用 ZeRO-2 CPU optimizer offload 的最新单卡 smoke 配置；确认主机 `available` 内存至少 64 GiB 后，原 Python 命令不变地重跑完整单 batch train step，反馈返回码、`free -h`、GPU 峰值、首个 loss、完整日志和初始化 JSON。
+- 拉取按 offload 状态选择 DeepSpeedCPUAdam/Torch AdamW 的最新逻辑；确认主机 `available` 内存至少 64 GiB 后，原 Python 命令不变地重跑完整单 batch train step，反馈返回码、`free -h`、CPUAdam 编译信息、GPU 峰值、首个 loss、完整日志和初始化 JSON。
 - 不在本轮运行闭环 simulator；新版在线 16D observation 提取将在 M4 实现和验收。
 
 ## 当前执行过程
@@ -164,3 +172,4 @@ M2 单步训练第二次启动反馈：
 10. Codex 将 M2 smoke 固定为单 GPU；用户执行 `xwam_pretrained` 单 batch forward/backward，通过后关闭 M2 并进入 M3。
 11. 第一次启动在可选 TensorBoard logger 构造阶段退出；Codex 改为 smoke 显式关闭 TensorBoard，等待同命令重跑。
 12. 第二次启动已完成 forward/backward，在首次 AdamW optimizer state 初始化时因 80GB 显存容量不足退出；Codex 改为 ZeRO-2 CPU optimizer offload，等待单 batch 参数更新复测。
+13. 第三次启动在 DeepSpeed 初始化阶段因 offload 仍收到 Torch AdamW 而退出；Codex 将 M2 offload 分支切换为 DeepSpeedCPUAdam，正式配置保持 Torch AdamW，等待复测。
