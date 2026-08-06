@@ -129,9 +129,16 @@ M2 `wan_base` 星光真实加载证据：
 - `remapped`、`missing`、`unexpected` 均为空，消融初始化来源清晰；该门禁同样不执行 forward/backward。
 - M2 smoke 配置进一步固定 `devices=1`，避免容器暴露多卡时单 batch 调试意外占用全部 GPU。
 
+M2 单步训练第一次启动反馈：
+
+- 测试 commit：`54920d8404ed83d04d7b1abe0d80c43047c05ec1`；解析后的配置正确指向 12D/16D、RGB-only、单 GPU、一步训练和真实 `CloseFridge/20250819`。
+- 运行在创建 `TensorBoardLogger` 时因环境没有可选包 `tensorboard/tensorboardX` 退出，尚未构造 Dataset、模型或 optimizer，也未执行 forward/backward。
+- 已有 Torch/CUDA/DeepSpeed/FlashAttention 和两种模型初始化证据仍然有效；该错误不表示核心训练环境损坏。
+- M2 smoke 显式设置 `enable_tensorboard=false`，保留 `ConsoleLogger` 与 `tee` 日志；正式 upstream 配置显式保持 `enable_tensorboard=true`。
+
 ## 待提供输入
 
-- 拉取最新单卡 smoke 配置后，运行 `xwam_pretrained` 真实单 batch forward/backward，反馈返回码、CPU 内存峰值、GPU 峰值、首个 loss、完整日志和初始化 JSON。
+- 拉取关闭可选 TensorBoard logger 的最新单卡 smoke 配置后，原命令不变地重跑 `xwam_pretrained` 单 batch forward/backward；反馈返回码、GPU 峰值、首个 loss、完整日志和初始化 JSON。
 - 不在本轮运行闭环 simulator；新版在线 16D observation 提取将在 M4 实现和验收。
 
 ## 当前执行过程
@@ -146,3 +153,4 @@ M2 `wan_base` 星光真实加载证据：
 8. 用户已在 A800 上完成 `xwam_pretrained` 真实加载；1275 exact + 3 remap + 4 reinitialize 完整覆盖 1282 个目标 tensor，门禁通过。
 9. 用户已完成 `wan_base` 初始化 audit，确认只加载 Wan2.2 base 且机器人模块由代码初始化，门禁通过。
 10. Codex 将 M2 smoke 固定为单 GPU；用户执行 `xwam_pretrained` 单 batch forward/backward，通过后关闭 M2 并进入 M3。
+11. 第一次启动在可选 TensorBoard logger 构造阶段退出；Codex 改为 smoke 显式关闭 TensorBoard，等待同命令重跑。

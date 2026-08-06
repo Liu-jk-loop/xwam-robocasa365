@@ -1,5 +1,30 @@
 # 变更记录
 
+## 2026-08-06 — M2 smoke 解除可选 TensorBoard 依赖
+
+- 分支：`dev/atomic-robocasa365`
+- 失败 commit：`54920d8404ed83d04d7b1abe0d80c43047c05ec1`
+- 运行状态：配置解析通过；在 logger 构造阶段失败，真实 Dataset/model/forward/backward 均未开始
+
+### 问题与诊断
+
+- `TensorBoardLogger` 构造时发现环境没有 `tensorboard` 或 `tensorboardX`，抛出 `ModuleNotFoundError`。
+- 该包只用于可视化日志，不属于 Torch、CUDA、DeepSpeed、FlashAttention、Dataset 或 checkpoint 核心链路；此前环境和模型加载门禁不受影响。
+- 单步 smoke 已使用 `tee` 持久化控制台日志，没有必要为了这一门禁修改已验证环境或新增 TensorBoard 依赖。
+
+### 新增和修改逻辑
+
+- 训练入口新增 `enable_tensorboard` 配置开关；只有显式启用时才构造 `TensorBoardLogger`，`ConsoleLogger` 始终保留。
+- upstream legacy 配置显式保持 `enable_tensorboard=true`，维持原训练行为。
+- M2 atomic 单步配置设为 `enable_tensorboard=false`，原训练命令和输出路径不变。
+- 增加静态配置测试，防止 M2 smoke 再次意外依赖可选 TensorBoard 包。
+
+### 验证、风险和回滚
+
+- 本地无 Torch；35 项无 Torch 测试、Python compile、文档门禁和 diff 检查通过后发布，真实 Lightning logger 分支为 `cluster-pending`。
+- 关闭 TensorBoard 只减少事件文件，不影响控制台 loss、初始化 JSON、训练计算、梯度或 checkpoint 策略。
+- 回退本次 commit 或在运行时覆盖 `enable_tensorboard=true` 可恢复 TensorBoard；环境安装 `tensorboard` 不是本轮必要操作。
+
 ## 2026-08-06 — M2 `wan_base` 证据与单 GPU smoke 约束
 
 - 分支：`dev/atomic-robocasa365`

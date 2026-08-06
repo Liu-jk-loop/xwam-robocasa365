@@ -87,13 +87,15 @@ def main():
         )
 
     tb_path = os.getenv("TENSORBOARD_LOG_PATH", None)
-    loggers = [
-        TensorBoardLogger(
-            save_dir=tb_path if tb_path else os.path.join(config.exp_root, config.exp_name, "tb_logs"),
-            name=config.exp_name,
-        ),
-        ConsoleLogger(max_steps=config.num_training_steps),
-    ]
+    loggers = [ConsoleLogger(max_steps=config.num_training_steps)]
+    if bool(config.get("enable_tensorboard", True)):
+        loggers.insert(
+            0,
+            TensorBoardLogger(
+                save_dir=tb_path if tb_path else os.path.join(config.exp_root, config.exp_name, "tb_logs"),
+                name=config.exp_name,
+            ),
+        )
     logging.getLogger("lightning.pytorch").setLevel(logging.INFO)
 
     train_dataset = build_dataset(config.dataset, use_depth=config.use_depth)

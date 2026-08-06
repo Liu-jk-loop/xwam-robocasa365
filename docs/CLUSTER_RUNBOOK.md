@@ -154,6 +154,8 @@ python scripts/audit_xwam_checkpoint_loading.py \
 
 两份加载报告都通过后，再执行一次真实 `CloseFridge` batch 的 forward/backward。该 M2 配置只运行一步、batch size 1、0 worker、RGB-only、gradient checkpointing，并关闭大 checkpoint 保存：
 
+M2 smoke 还显式设置 `enable_tensorboard=false`：只保留控制台/`tee` 日志，不要求环境安装可选的 `tensorboard` 或 `tensorboardX`。正式训练配置仍默认启用 TensorBoard。
+
 ```bash
 mkdir -p logs/cluster
 set -o pipefail

@@ -34,6 +34,7 @@ num_training_steps: 20000
 log_interval: 20
 save_interval: 5000
 enable_checkpointing: true
+enable_tensorboard: true
 val_interval: 2500
 limit_val_batches: 5
 accumulate_grad_batches: 1

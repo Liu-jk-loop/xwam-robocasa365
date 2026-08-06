@@ -33,6 +33,7 @@ num_training_steps: 1
 log_interval: 1
 save_interval: 1
 enable_checkpointing: false
+enable_tensorboard: false
 val_interval: 1
 limit_val_batches: 0
 accumulate_grad_batches: 1
