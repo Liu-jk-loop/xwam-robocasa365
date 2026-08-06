@@ -1,5 +1,25 @@
 # 变更记录
 
+## 2026-08-06 — M2 `xwam_pretrained` 真实 checkpoint 加载证据
+
+- 分支：`dev/atomic-robocasa365`
+- 测试 commit：`4951844a1085c6929426d9ae5561e7586550729e`
+- 运行状态：`xwam_pretrained` 模型构造与参数装载通过；`wan_base` 和单 batch forward/backward 为 `cluster-pending`
+
+### 星光证据与结论
+
+- 环境为 Python 3.10.20、Torch 2.9.0+cu128、NVIDIA A800 80GB PCIe，CUDA 可用；报告 `result=pass`、`ok=true`。
+- 公开 checkpoint source 共 1555 tensors，RGB-only PandaOmron target 共 1282 tensors。
+- 1275 项参数严格同名同 shape 加载；3 项 action boundary 按 legacy `[0:7]` → PandaOmron `[5:12]` 部分映射；4 项 proprio 语义边界重新初始化。
+- 273 项 source-only 参数全部属于 depth `extra_blocks/extra_heads`，在 RGB-only 目标中明确记录为 `discard_source`。
+- target 侧 `1275 + 3 + 4 = 1282`，source 侧 `1275 + 3 + 4 + 273 = 1555`；missing、unexpected、shape error 和 errors 全为空，没有静默漏载。
+
+### 边界与下一门禁
+
+- 本轮没有修改源代码、配置或外部权重，只把真实集群证据写入项目记录。
+- 此 audit 不读取 RoboCasa365 batch、不把模型移到 GPU 执行 forward/backward、不计算 loss，也不评估左臂 warm-start 的训练优劣。
+- 下一步先验证 `wan_base` 初始化来源可解释，再运行 `CloseFridge` 单 batch forward/backward 并记录 CPU/GPU 峰值和首个 loss。
+
 ## 2026-08-06 — M2 第二批：训练归一化、14D→12D checkpoint loader 与双初始化
 
 - 分支：`dev/atomic-robocasa365`
