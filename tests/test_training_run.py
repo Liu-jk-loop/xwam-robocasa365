@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 
 from project_tools.training_run import (
+    append_jsonl_fsync,
+    collect_memory_snapshot,
     collect_git_state,
     resolve_resume_checkpoint,
     resolve_save_last,
@@ -20,6 +22,9 @@ class TrainingRunTest(unittest.TestCase):
         repo_root = Path(__file__).resolve().parents[1]
         model = (repo_root / "configs/model/wan22_5b_robocasa365_atomic.yaml").read_text()
         hardware = (repo_root / "configs/hardware/a800_80gb_debug.yaml").read_text()
+        low_memory_hardware = (
+            repo_root / "configs/hardware/a800_80gb_120g_debug.yaml"
+        ).read_text()
         experiment = (
             repo_root
             / "configs/experiment/robocasa365_close_fridge_m3_overfit.yaml"
@@ -29,6 +34,10 @@ class TrainingRunTest(unittest.TestCase):
         self.assertNotIn("deepspeed_offload_optimizer", model)
         self.assertIn("deepspeed_offload_optimizer: true", hardware)
         self.assertIn("# A800 80GB 单卡调试层", hardware)
+        self.assertIn("deepspeed_fp32_optimizer_states: true", hardware)
+        self.assertIn("deepspeed_fp32_optimizer_states: false", low_memory_hardware)
+        self.assertIn("deepspeed_exclude_frozen_parameters: true", low_memory_hardware)
+        self.assertIn("禁止用于正式训练", low_memory_hardware)
         self.assertIn("train_subset_size: 1", experiment)
         self.assertIn("trainer_max_steps: 8", experiment)
         self.assertIn("num_training_steps: 10", experiment)
@@ -50,6 +59,9 @@ class TrainingRunTest(unittest.TestCase):
             '"process_max_rss_raw"',
             '"gpu_names"',
             "persist_generator_state 当前只允许 M3 单 GPU",
+            "ResourceAwareModelCheckpoint",
+            "checkpoint_save_start",
+            '"memory_at_result"',
         ):
             self.assertIn(token, entrypoint)
         self.assertIn("xwam_generator_state", runner)
@@ -106,6 +118,33 @@ class TrainingRunTest(unittest.TestCase):
         self.assertFalse(resolve_save_last(False))
         with self.assertRaises(ValueError):
             resolve_save_last("copy")
+
+    def test_memory_snapshot_and_durable_jsonl_are_machine_readable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cgroup = root / "cgroup"
+            cgroup.mkdir()
+            (cgroup / "memory.current").write_text("1024\n")
+            (cgroup / "memory.peak").write_text("2048\n")
+            (cgroup / "memory.max").write_text("4096\n")
+            (cgroup / "memory.events").write_text("oom 1\noom_kill 1\n")
+            proc_status = root / "status"
+            proc_status.write_text("VmRSS:\t10 kB\nVmHWM:\t20 kB\n")
+
+            snapshot = collect_memory_snapshot(
+                cgroup_root=cgroup,
+                proc_status_path=proc_status,
+            )
+            self.assertEqual(snapshot["process"]["VmRSS"], 10 * 1024)
+            self.assertEqual(snapshot["process"]["VmHWM"], 20 * 1024)
+            self.assertEqual(snapshot["cgroup"]["memory.max"], "4096")
+            self.assertEqual(snapshot["cgroup"]["memory.events"]["oom_kill"], 1)
+
+            events = root / "events.jsonl"
+            append_jsonl_fsync(events, {"event": "start", "memory": snapshot})
+            append_jsonl_fsync(events, {"event": "complete"})
+            rows = [json.loads(line) for line in events.read_text().splitlines()]
+            self.assertEqual([row["event"] for row in rows], ["start", "complete"])
 
 
 if __name__ == "__main__":

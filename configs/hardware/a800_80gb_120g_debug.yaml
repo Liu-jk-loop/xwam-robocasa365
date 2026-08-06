@@ -1,0 +1,20 @@
+# A800 80GB + 120 GiB 主机内存的单卡低内存门禁；禁止用于正式训练。
+precision: bf16-mixed
+batch_size_per_gpu: 1
+devices: 1
+num_workers_per_gpu: 0
+prefetch_factor: 2
+use_gradient_checkpointing: true
+
+# 复用 M2 已验证的 ZeRO-2 CPU offload，并缩小通信 buffer。
+deepspeed_stage: 2
+deepspeed_offload_optimizer: true
+deepspeed_offload_optimizer_device: cpu
+deepspeed_pin_memory: false
+deepspeed_overlap_comm: false
+deepspeed_bucket_size: 100000000
+
+# 仅用于 120 GiB M3 checkpoint/resume 工程门禁。
+# 正式 H100 训练必须恢复 FP32 optimizer states，并重新验收 checkpoint/resume。
+deepspeed_fp32_optimizer_states: false
+deepspeed_exclude_frozen_parameters: true

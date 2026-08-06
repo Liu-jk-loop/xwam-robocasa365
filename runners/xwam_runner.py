@@ -12,7 +12,10 @@ from modules.wan_model import XWAMModel
 from modules.t5 import T5EncoderModel
 from modules.vae2_2 import Wan2_2_VAE
 from utils.utils import sample_beta
-from project_tools.training_topology import resolve_optimizer_backend
+from project_tools.training_topology import (
+    resolve_cpu_adam_options,
+    resolve_optimizer_backend,
+)
 
 
 class XWAMRunner(L.LightningModule):
@@ -72,11 +75,16 @@ class XWAMRunner(L.LightningModule):
         if optimizer_backend == "deepspeed_cpu_adam":
             from deepspeed.ops.adam import DeepSpeedCPUAdam
 
+            cpu_adam_options = resolve_cpu_adam_options(self.config)
             optimizer = DeepSpeedCPUAdam(
                 self.model.parameters(),
                 adamw_mode=True,
-                fp32_optimizer_states=True,
+                **cpu_adam_options,
                 **optimizer_kwargs,
+            )
+            print(
+                "CPUAdam options: "
+                f"fp32_optimizer_states={cpu_adam_options['fp32_optimizer_states']}"
             )
         else:
             optimizer = torch.optim.AdamW(

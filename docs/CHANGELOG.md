@@ -1,5 +1,40 @@
 # 变更记录
 
+## 2026-08-06 — M3.1 120 GiB checkpoint 低内存门禁
+
+- 分支：`dev/atomic-robocasa365`
+- 基线 commit：`cfe86cb`
+- 运行状态：本地静态验证完成；A800 step 8 保存与 resume-to-10 为 `cluster-pending`
+
+### 问题与集群证据
+
+- 原 M3.1 运行在固定 RGB clip 上完成 step 0～7，并由 Lightning 正常报告 `max_steps=8 reached`；没有 NaN、CUDA OOM 或 Python traceback。
+- step 8 恰好触发完整 DeepSpeed checkpoint，日志间隔由约 30 秒增至约 180 秒；之后没有进入训练入口的 `finally`，缺少 CUDA peak、result JSON 和正常退出，tmux/Pod 同时失效。
+- 模型包含 5.0B trainable 与 6.4B frozen 参数，CPUAdam 使用 FP32 master/momentum/variance；星光当前主机内存只有 120 GiB。结论为 checkpoint/teardown 阶段失败，cgroup OOM 概率最高但仍需事件证据确认。
+
+### 新增和修改逻辑
+
+- 新增独立 `a800_80gb_120g_debug` hardware profile：保持 ZeRO-2 CPU offload，但将 CPUAdam optimizer state 设为非 FP32，并在 checkpoint 保存时排除冻结 T5/VAE。
+- 原 `a800_80gb_debug`、M2 smoke 和 upstream 配置显式保持 FP32 optimizer state；代码默认也是 FP32，防止正式训练静默继承低内存调试语义。
+- CPUAdam state 精度改为配置驱动并在日志、resolved config 和 run metadata 中记录；非布尔配置提前拒绝。
+- DeepSpeedStrategy 接入 `exclude_frozen_parameters`，默认 false，只有 120 GiB profile 显式启用。
+- checkpoint callback 在实际保存前后 fsync 写入独立 JSONL，记录 step、目标路径、进程 VmRSS/VmHWM、cgroup memory current/peak/max/events；普通异常额外写入 error 事件。
+- run metadata/result 增加 optimizer backend/state precision、checkpoint event 路径和内存快照。
+
+### 兼容性、风险与正式训练恢复
+
+- 本次不修改 Dataset、RGB、depth、12D action、16D proprio、loss 或公开 checkpoint 映射。
+- BF16 optimizer state 只用于 120 GiB 的 M3 保存/恢复工程门禁，可能改变优化器数值；该结果不能代表正式训练配置。
+- H100 短程门禁和正式训练必须显式使用 `deepspeed_fp32_optimizer_states=true`，并重新验证 checkpoint/resume。
+- 排除冻结参数依赖 Lightning 2.6.5/DeepSpeed 0.19.4 的真实保存与严格恢复行为，本地无 Torch，保持 `cluster-pending`。
+- 回退本次 commit 可恢复原 M3 profile；不会删除当前不完整实验目录或外部 checkpoint。
+
+### 本地验证
+
+- CPUAdam 精度默认/覆盖、DeepSpeed 冻结参数选项和非法类型测试通过。
+- cgroup v2/RSS 解析及 fsync JSONL 测试通过。
+- 聚焦无 Torch 测试、Python compile、文档同步和 Git diff 检查通过。
+
 ## 2026-08-06 — M3.1 分层配置、极小子集与 checkpoint resume 门禁
 
 - 分支：`dev/atomic-robocasa365`

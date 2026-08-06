@@ -27,10 +27,14 @@ from lightning.pytorch.strategies import DeepSpeedStrategy
 
 from data.dataset_factory import build_dataset
 from project_tools.training_topology import (
+    resolve_cpu_adam_options,
     resolve_deepspeed_options,
+    resolve_optimizer_backend,
     resolve_training_topology,
 )
 from project_tools.training_run import (
+    append_jsonl_fsync,
+    collect_memory_snapshot,
     collect_git_state,
     resolve_resume_checkpoint,
     resolve_save_last,
@@ -41,6 +45,45 @@ from project_tools.training_run import (
 from runners.xwam_runner import XWAMRunner
 from utils.console_logger import ConsoleLogger
 from utils.xwam_checkpoint_loader import initialize_xwam_runner
+
+
+class ResourceAwareModelCheckpoint(ModelCheckpoint):
+    """Persist memory evidence immediately before and after DeepSpeed saves."""
+
+    def __init__(self, *args, diagnostics_path: Path, **kwargs):
+        self.diagnostics_path = Path(diagnostics_path)
+        super().__init__(*args, **kwargs)
+
+    def _record_checkpoint_event(self, event, trainer, filepath, error=None):
+        payload = {
+            "event": event,
+            "filepath": str(filepath),
+            "global_step": int(trainer.global_step),
+            "error": error,
+            "memory": collect_memory_snapshot(),
+        }
+        append_jsonl_fsync(self.diagnostics_path, payload)
+        rss_bytes = payload["memory"]["process"].get("VmRSS")
+        print(
+            "Checkpoint resource event: "
+            f"event={event}, global_step={trainer.global_step}, "
+            f"rss_bytes={rss_bytes}, diagnostics={self.diagnostics_path}",
+            flush=True,
+        )
+
+    def _save_checkpoint(self, trainer, filepath):
+        self._record_checkpoint_event("checkpoint_save_start", trainer, filepath)
+        try:
+            super()._save_checkpoint(trainer, filepath)
+        except BaseException as exc:
+            self._record_checkpoint_event(
+                "checkpoint_save_error",
+                trainer,
+                filepath,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+        self._record_checkpoint_event("checkpoint_save_complete", trainer, filepath)
 
 
 def _load_config():
@@ -136,8 +179,10 @@ def main():
 
     callbacks = [ModelSummary(max_depth=2), LearningRateMonitor(logging_interval="step")]
     checkpoint_callback = None
+    checkpoint_events_path = run_dir / f"{run_id}_checkpoint_events.jsonl"
     if bool(config.get("enable_checkpointing", True)):
-        checkpoint_callback = ModelCheckpoint(
+        checkpoint_callback = ResourceAwareModelCheckpoint(
+            diagnostics_path=checkpoint_events_path,
             dirpath=exp_dir / "checkpoints",
             save_top_k=int(config.get("save_top_k", -1)),
             save_last=resolve_save_last(config.get("save_last", True)),
@@ -242,6 +287,7 @@ def main():
                 "initialization_mode": config.get("initialization_mode"),
                 "pretrained_checkpoint": config.get("pretrained_checkpoint"),
                 "resume_checkpoint": resume_checkpoint,
+                "events": str(checkpoint_events_path.resolve()),
             },
             "environment": {
                 "python": platform.python_version(),
@@ -257,7 +303,12 @@ def main():
             "training": schedule,
             "resume_checkpoint": resume_checkpoint,
             "deepspeed": deepspeed_options,
+            "optimizer": {
+                "backend": resolve_optimizer_backend(config),
+                **resolve_cpu_adam_options(config),
+            },
             "topology": topology,
+            "memory_at_metadata": collect_memory_snapshot(),
             "result": "pending",
         },
     )
@@ -359,6 +410,8 @@ def main():
             "best_checkpoint": (
                 checkpoint_callback.best_model_path if checkpoint_callback is not None else None
             ),
+            "checkpoint_events": str(checkpoint_events_path.resolve()),
+            "memory_at_result": collect_memory_snapshot(),
         }
         write_json_atomic(run_result_path, result_payload)
         print(f"Run result: {run_result_path} ({result_payload['result']})")

@@ -148,6 +148,7 @@ RoboCasa365 原生数据
 
 - 将配置拆分为 model、dataset/schema、hardware 和 experiment 四层。
 - 提供 A100/A800 debug profile：batch size 1、梯度累积、gradient checkpointing、可选 offload。
+- 为只有 120 GiB 主机内存的 A800 门禁提供独立低内存 profile；该 profile 可降低 CPUAdam state 精度，但不得继承到 H100 正式训练。
 - 完成显存测量后提供 H100 profile。
 - 增加确定性 seed、resume、checkpoint 元数据和简洁日志。
 - 先对极小样本过拟合，再进行三个任务的短训练。
@@ -157,7 +158,7 @@ RoboCasa365 原生数据
 1. Codex 准备 A100/A800 debug 配置、确定性 seed、断点恢复和日志记录逻辑。
 2. 用户先运行 batch size 1 的单步训练，反馈显存峰值、耗时和首个 loss。
 3. Codex 根据 40GB/80GB 显存结果调整 gradient checkpointing、梯度累积或 offload。
-4. 用户运行单任务极小样本过拟合，确认 loss 可持续下降且未读取 depth。
+4. 用户运行单任务极小样本过拟合，确认 loss 可持续下降且未读取 depth；若使用低精度 optimizer state，只验收工程恢复能力并显式记录。
 5. 用户运行三个 atomic 任务的短训练，并执行一次保存/恢复测试。
 6. Codex 记录稳定配置和集群证据；短训练及恢复门禁通过后进入 M4。
 
@@ -233,7 +234,7 @@ RoboCasa365 原生数据
 阶段执行过程：
 
 1. Codex 固定 atomic 数据清单、normalization statistics、H100 配置和 checkpoint 选择规则。
-2. 用户在 H100 上先运行短程训练门禁，确认多卡初始化、吞吐、显存和保存/恢复正常。
+2. 用户在 H100 上先恢复 FP32 optimizer state，运行短程训练门禁，确认多卡初始化、吞吐、显存和保存/恢复正常。
 3. 用户启动正式训练；每次反馈 commit、配置、Job ID、checkpoint、训练曲线和异常日志。
 4. Codex 只针对已记录 commit 诊断问题，并将修改推送为新的可追踪 commit。
 5. 用户用固定 seed 对 Atomic-Seen 18 执行闭环评测，补跑缺失或明确记录失败 rollout。

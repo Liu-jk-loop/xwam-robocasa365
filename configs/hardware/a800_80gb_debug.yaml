@@ -13,3 +13,7 @@ deepspeed_offload_optimizer_device: cpu
 deepspeed_pin_memory: false
 deepspeed_overlap_comm: false
 deepspeed_bucket_size: 100000000
+
+# 原始/高内存调试 profile 保持 FP32 optimizer state；正式配置也以 FP32 为默认。
+deepspeed_fp32_optimizer_states: true
+deepspeed_exclude_frozen_parameters: false

@@ -50,6 +50,8 @@ deepspeed_offload_optimizer_device: cpu
 deepspeed_pin_memory: false
 deepspeed_overlap_comm: false
 deepspeed_bucket_size: 100000000
+deepspeed_fp32_optimizer_states: true
+deepspeed_exclude_frozen_parameters: false
 
 # losses / flow matching
 rf_distribution: uniform

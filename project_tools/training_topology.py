@@ -12,6 +12,14 @@ def resolve_optimizer_backend(config: Any) -> str:
     return "torch_adamw"
 
 
+def resolve_cpu_adam_options(config: Any) -> dict[str, bool]:
+    """Resolve CPUAdam state precision while keeping FP32 as the safe default."""
+    fp32_optimizer_states = config.get("deepspeed_fp32_optimizer_states", True)
+    if not isinstance(fp32_optimizer_states, bool):
+        raise ValueError("deepspeed_fp32_optimizer_states 必须是布尔值")
+    return {"fp32_optimizer_states": fp32_optimizer_states}
+
+
 def resolve_deepspeed_options(config: Any) -> dict[str, Any]:
     """Resolve memory-sensitive DeepSpeed options without importing Torch/Lightning."""
     stage = int(config.get("deepspeed_stage", 2))
@@ -33,6 +41,12 @@ def resolve_deepspeed_options(config: Any) -> dict[str, Any]:
             f"当前为 {offload_device}"
         )
 
+    exclude_frozen_parameters = config.get(
+        "deepspeed_exclude_frozen_parameters", False
+    )
+    if not isinstance(exclude_frozen_parameters, bool):
+        raise ValueError("deepspeed_exclude_frozen_parameters 必须是布尔值")
+
     return {
         "stage": stage,
         "offload_optimizer": bool(
@@ -43,6 +57,7 @@ def resolve_deepspeed_options(config: Any) -> dict[str, Any]:
         "overlap_comm": bool(config.get("deepspeed_overlap_comm", True)),
         "allgather_bucket_size": bucket_size,
         "reduce_bucket_size": bucket_size,
+        "exclude_frozen_parameters": exclude_frozen_parameters,
     }
 
 

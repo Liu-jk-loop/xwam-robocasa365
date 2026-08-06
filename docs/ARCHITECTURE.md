@@ -84,6 +84,9 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - M3 单卡确定性门禁把 X-WAM 自定义 CPU generator state 写入 checkpoint 并在 resume 时恢复。该能力显式限制为 world size 1；多卡 RNG 恢复在正式 H100 profile 中另行设计。
 - 每次调用写出独立的 resolved config、run metadata 和 run result JSON。metadata 包含 Git commit/dirty state、命令、配置来源、环境版本、数据/manifest/schema、子集、拓扑、DeepSpeed 和 checkpoint 来源；result 包含 pass/fail、global step、耗时、进程 max RSS、CUDA 峰值和 checkpoint 路径。
 - A800 debug profile 可以使用已验证的 ZeRO-2 CPUAdam offload。正式 H100 profile 不继承该决定，必须依据 GPU 数量、显存和吞吐单独冻结。
+- `a800_80gb_120g_debug` 是独立的低内存工程门禁：CPUAdam momentum/variance 随 BF16 参数保存，并在 DeepSpeed checkpoint 中排除冻结 T5/VAE。它只验证连续训练和完整恢复 wiring，不作为正式优化器数值配置。
+- CPUAdam 默认和原有 A800/M2/upstream profile 均保持 `fp32_optimizer_states=true`。H100 正式门禁必须显式使用 FP32 optimizer state 并重新验证 checkpoint/resume，禁止从 120 GiB profile 隐式继承 BF16 state。
+- 每次 DeepSpeed checkpoint 保存前后向独立 JSONL fsync 写入 process RSS、cgroup memory current/peak/max/events。缺少 `checkpoint_save_complete` 时，结合 `oom_kill` 和 checkpoint 文件结构区分保存期 OOM 与普通 Python 异常。
 
 ## Current external paths
 
