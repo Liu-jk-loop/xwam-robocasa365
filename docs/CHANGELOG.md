@@ -1,5 +1,43 @@
 # 变更记录
 
+## 2026-08-06 — Policy 环境集群验收与 pip check 精确策略
+
+- 分支：`dev/atomic-robocasa365`
+- 集群测试 commit：`2da8e02`
+- 运行状态：A800 核心环境门禁通过；新版 audit 复跑为 `cluster-pending`
+
+### 问题
+
+从 `abot_m05` clone 后继承了 ABot editable `wam 0.1.0`，其 NumPy/Transformers 精确依赖与 X-WAM upstream 冲突。移除 `wam` 后，`pip check` 仍将 Decord 0.6.0 的旧 manylinux wheel tag 报为当前平台不支持，导致 audit `ok=false`；但 Decord import 和真实 MP4 解码均已通过。安装脚本还会在 `pip check` 非零时提前退出，遗漏安装后 freeze。
+
+### 新增和修改逻辑
+
+- 安装器检测 clone 中残留的 `wam` 并拒绝继续，要求只在独立 X-WAM 环境中显式卸载。
+- 安装后先保存 freeze，再执行 `pip check`，因此验收失败也保留安装后环境快照。
+- 环境 audit 增加精确 pip-check 策略：仅当 manifest 显式允许且包 runtime import 成功时，才把对应 `is not supported on this platform` 行降级为 warning。
+- 当前白名单只有 `decord`；ABot 依赖冲突或任何其他 pip-check 输出仍然阻塞。
+- 安装器同样只接受唯一的 Decord 0.6.0 wheel-tag 提示，并额外执行 Decord import。
+
+### 集群证据
+
+- Torch 2.9.0+cu128 在 A800 上完成 BF16 矩阵乘；FlashAttention 2.8.3 完成 BF16 CUDA kernel。
+- Decord 0.6.0 解码真实 `CloseFridge` episode 0 左相机 MP4 成功：294 帧、`256x256x3`、`uint8`、像素范围 `[0,255]`。
+- Lightning 2.6.5、DeepSpeed 0.19.4 和全部关键模块 import 成功；`ds_report` 返回码为 0。
+- `wam` 已从 clone 环境移除，母环境未修改。
+
+### 涉及文件与验证
+
+- 逻辑与契约：`project_tools/starlight_environment.py`、`configs/environment/xwam_starlight.json`、`scripts/install_starlight_dependencies.sh`。
+- 测试：`tests/test_starlight_environment.py`，覆盖精确允许与不可隐藏的混合冲突。
+- 文档：`docs/ENVIRONMENT_PLAN.md`、`docs/CLUSTER_RUNBOOK.md`、`docs/PROGRESS.md`。
+- 本地无 Torch；18 项无依赖测试、shell 语法、Python compile、文档门禁和 Git diff 检查通过。
+
+### 风险与回滚
+
+- Decord 例外只覆盖单一精确 pip 输出，不会忽略缺包、版本冲突或其他平台问题。
+- 当前仅验证 CPU 视频解码；M1 真实 batch 仍需检查多视角帧序和动作窗口。
+- 回退本次 commit 会恢复严格的原始 `pip check` 判定，不会修改已创建的 Conda 环境。
+
 ## 2026-08-06 — 星光 clone 环境增量安装方案
 
 - 分支：`dev/atomic-robocasa365`

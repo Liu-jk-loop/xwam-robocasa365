@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：M1——RoboCasa365 数据契约与原生 loader
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1 metadata audit 已通过；`abot_m05` clone 底座已确认，增量安装命令已生成
+- 超算运行状态：M1 metadata 与 policy 环境核心门禁已通过；原生 loader 待实现
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -15,7 +15,7 @@
 | 阶段 | 当前状态 | 超算状态 | 下一门禁 |
 | --- | --- | --- | --- |
 | M0 工程与协作基线 | 已完成 | 主仓库已 clone | 模拟器阶段开始时确认第三方子模块 |
-| M1 原生 RoboCasa365 loader | metadata 门禁通过，原生 loader 待实现 | 数据 audit 通过；环境 clone/补包待执行 | 独立 policy 环境 audit 达到 `ok=true` |
+| M1 原生 RoboCasa365 loader | metadata 门禁通过，原生 loader 待实现 | 环境 kernel/解码门禁通过；新版 audit 待复跑 | 读取一个真实 RGB-only batch |
 | M2 动作与 checkpoint 适配 | 未开始 | 待验证 | 冻结官方 PandaOmron schema |
 | M3 RGB-only 训练烟测 | 未开始 | 待验证 | A100/A800 单 batch forward/backward |
 | M4 闭环评测器 | 未开始 | 待验证 | 完成一个 atomic 闭环 rollout |
@@ -49,16 +49,28 @@
 - 结论：`abot_m05` 适合作为 clone 底座，不可直接用于 X-WAM；禁止修改原环境。
 - 安装方案：clone 为 `xwam-robocasa365`，先 dry-run、再 apply；约束文件保护现有 Torch/CUDA/FlashAttention，完整日志与安装前后 freeze 均写入 `logs/cluster/`。
 
+独立 policy 环境验证证据：
+
+- 测试 commit：`2da8e020952086de8a0805a8c16ef2a4d783d228`；环境为 `xwam-robocasa365`，A800 80GB。
+- 版本：Torch 2.9.0+cu128、NumPy 1.23.5、Transformers 4.51.3、FlashAttention 2.8.3、Lightning 2.6.5、DeepSpeed 0.19.4、Decord 0.6.0。
+- Torch BF16 矩阵乘 CUDA kernel 通过；FlashAttention BF16 CUDA kernel 通过。
+- Decord 成功解码真实 `CloseFridge` episode 0 左相机视频：294 帧、`256x256x3`、`uint8`、范围 `[0,255]`。
+- DeepSpeed import 与 `ds_report` 返回码通过；当前不用的 async I/O、GDS、FP quantizer、sparse attention 不作为阻塞。
+- 已从 clone 环境移除 ABot editable `wam`；原 `abot_m05` 未修改。
+- 唯一剩余原始 `pip check` 输出是 Decord 0.6.0 旧 wheel tag；已有 runtime import 和真实解码证据，按精确白名单降级为 warning。
+- 结论：policy 环境核心门禁通过；需要拉取新版 audit 并复跑，生成机器可读的最终 `ok=true` 证据。
+
 ## 待提供输入
 
 - 早先数据 audit 所在的 `git rev-parse HEAD`（如仍可确认）。
 - 按 `docs/CLUSTER_RUNBOOK.md` 中的路径检查确认 X-WAM pretrained 文件。
-- clone 并补齐独立 policy 环境，反馈 dry-run、apply、freeze 和最终环境 audit。
+- 拉取新版 audit 后复跑，反馈最终 `ok=true` 报告。
+- M1 原生 loader 实现后读取一个真实 RGB-only batch。
 
 ## 当前执行过程
 
-1. Codex 已根据 commit `d5cef4d` 的真实日志生成受约束的 clone、dry-run、安装和验收流程。
-2. 用户拉取最新开发分支，clone `abot_m05` 为独立 `xwam-robocasa365` Conda 环境。
-3. 用户先运行依赖 dry-run，再执行 apply，并反馈持久化日志和安装后 freeze。
-4. 用户运行最终环境 audit；Codex记录 `ok=true` 或按日志修正依赖。
+1. 用户已完成独立环境增量安装，并移除 clone 中冲突的 ABot `wam`。
+2. 用户已通过 Torch/FlashAttention CUDA kernel 和真实 Decord MP4 解码。
+3. Codex 发布只允许 Decord 精确旧 wheel tag warning 的 audit，并修复安装后 freeze 留存。
+4. 用户拉取后复跑环境 audit，形成最终机器可读证据。
 5. Codex 基于已验证环境和真实数据 schema 实现原生 Parquet tensor adapter。

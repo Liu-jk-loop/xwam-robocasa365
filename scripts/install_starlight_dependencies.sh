@@ -33,9 +33,16 @@ log_dir="$repo_root/logs/cluster"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 log_file="$log_dir/xwam_dependency_${mode}_${timestamp}.log"
 freeze_file="$log_dir/xwam_dependency_${mode}_${timestamp}_before.txt"
+after_file="$log_dir/xwam_dependency_${mode}_${timestamp}_after.txt"
 
 mkdir -p "$log_dir"
 python -m pip freeze > "$freeze_file"
+
+if python -m pip show wam >/dev/null 2>&1; then
+  echo "拒绝执行：clone 中仍有 ABot 的 wam 包，它与 X-WAM 的 NumPy/Transformers 约束冲突。" >&2
+  echo "请仅在当前 clone 环境执行：python -m pip uninstall -y wam" >&2
+  exit 2
+fi
 
 pip_args=(
   -m pip install
@@ -62,8 +69,23 @@ if [[ $pip_status -ne 0 ]]; then
 fi
 
 if [[ "$mode" == "apply" ]]; then
-  python -m pip check | tee -a "$log_file"
-  python -m pip freeze > "$log_dir/xwam_dependency_${mode}_${timestamp}_after.txt"
+  python -m pip freeze > "$after_file"
+
+  set +e
+  pip_check_output="$(python -m pip check 2>&1)"
+  pip_check_status=$?
+  set -e
+  echo "$pip_check_output" | tee -a "$log_file"
+
+  if [[ $pip_check_status -ne 0 ]]; then
+    if [[ "$pip_check_output" == "decord 0.6.0 is not supported on this platform" ]] \
+      && python -c "import decord" >/dev/null 2>&1; then
+      echo "已知警告：Decord 0.6.0 runtime import 已通过，仅 wheel tag 被 pip 判为不支持。" | tee -a "$log_file"
+    else
+      echo "pip check 发现未允许的依赖问题；安装后快照已保存：$after_file" >&2
+      exit "$pip_check_status"
+    fi
+  fi
 fi
 
 echo "完成：$mode；完整日志位于 $log_file"

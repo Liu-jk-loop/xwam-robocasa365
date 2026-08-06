@@ -106,11 +106,14 @@ conda activate xwam-robocasa365
 export TORCH_EXTENSIONS_DIR=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/.cache/torch_extensions/xwam-robocasa365
 
 cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+python -m pip uninstall -y wam
 bash scripts/install_starlight_dependencies.sh dry-run
 bash scripts/install_starlight_dependencies.sh apply
 ```
 
-clone 会保留环境中已安装的 Python 包和二进制扩展。安装脚本只允许在 `xwam-robocasa365` 中运行，会拒绝修改 `abot_m05`；它使用 `configs/environment/xwam_starlight_constraints.txt` 保护已经验证的 Torch 2.9.0、torchvision 0.24.0、torchaudio 2.9.0、FlashAttention 2.8.3 以及 CUDA 12.8 组合。pip 子进程显式使用 `DS_BUILD_OPS=0`，避免安装阶段预编译 DeepSpeed CUDA op；脚本不会修改代理变量。
+clone 会保留环境中已安装的 Python 包和二进制扩展，也会继承 ABot 的 editable `wam`。该包固定要求 NumPy 1.26.4 和 Transformers 4.55.2，与 X-WAM upstream 约束冲突，因此只在 clone 环境中卸载；不会删除 ABot 源码或修改 `abot_m05`。安装脚本会在检测到 `wam` 时拒绝继续。
+
+安装脚本只允许在 `xwam-robocasa365` 中运行，会拒绝修改 `abot_m05`；它使用 `configs/environment/xwam_starlight_constraints.txt` 保护已经验证的 Torch 2.9.0、torchvision 0.24.0、torchaudio 2.9.0、FlashAttention 2.8.3 以及 CUDA 12.8 组合。pip 子进程显式使用 `DS_BUILD_OPS=0`，避免安装阶段预编译 DeepSpeed CUDA op；脚本不会修改代理变量。
 
 `dry-run` 只进行 pip 依赖解析，结果写入 `logs/cluster/xwam_dependency_dry-run_<UTC时间>.log`。`apply` 执行相同解析并安装，随后运行 `pip check`，同时写入安装前后 `pip freeze`。首次集群烟测通过后，以 `*_after.txt` 为依据生成完整锁文件；在此之前，Lightning/DeepSpeed 使用经过约束的稳定版本区间，而不是假装已有集群验证的精确版本。
 
@@ -125,7 +128,9 @@ python scripts/audit_starlight_environment.py \
 python -m pip check
 ```
 
-预期 `ok=true`、`reuse_recommendation=clone_ready`。`ds_report` 中当前未使用的 CPUAdam、AIO 等 op 显示未安装不等于失败；以报告命令返回码、DeepSpeed import 和后续真实一步训练为准。`TORCH_EXTENSIONS_DIR` 使用独立目录，避免其他环境留下的 Torch/CUDA JIT 缓存造成 ABI 冲突。
+预期 `ok=true`、`reuse_recommendation=clone_ready`。PyPI 的 Decord 0.6.0 wheel 在当前 x86_64/glibc 2.39 容器中可 import，并已成功解码真实 `CloseFridge` MP4；新版 pip 仍会因旧 manylinux tag 输出 `is not supported on this platform`。环境 manifest 只允许将这一条精确提示降级为 warning，且必须先通过 Decord runtime import；任何其他 `pip check` 输出仍为错误。
+
+`ds_report` 中当前未使用的 CPUAdam、AIO、GDS、FP quantizer 和 sparse attention 等 op 显示未安装或不兼容不构成当前烟测失败；当前训练使用 `torch.optim.AdamW` 且没有 CPU/NVMe offload。以 DeepSpeed report 返回码和后续真实一步训练为准。`TORCH_EXTENSIONS_DIR` 使用独立目录，避免其他环境留下的 Torch/CUDA JIT 缓存造成 ABI 冲突。
 
 ## 六、DeepSpeed 处理原则
 

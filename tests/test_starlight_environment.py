@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 
 from project_tools.starlight_environment import (
+    apply_pip_check_policy,
     classify_clone_base,
     evaluate_packages,
     version_key,
@@ -20,6 +21,44 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class StarlightEnvironmentTest(unittest.TestCase):
+    def test_pip_policy_allows_only_explicit_runtime_validated_wheel_tag(self) -> None:
+        result = {
+            "ok": False,
+            "returncode": 1,
+            "stdout": "decord 0.6.0 is not supported on this platform\n",
+            "stderr": "",
+        }
+        evaluated = apply_pip_check_policy(result, {"decord": "0.6.0"})
+        self.assertTrue(evaluated["ok"])
+        self.assertFalse(evaluated["raw_ok"])
+        self.assertEqual(evaluated["remaining_lines"], [])
+
+    def test_pip_policy_does_not_hide_dependency_conflicts(self) -> None:
+        result = {
+            "ok": False,
+            "returncode": 1,
+            "stdout": (
+                "wam 0.1.0 has requirement numpy==1.26.4, but you have numpy 1.23.5.\n"
+                "decord 0.6.0 is not supported on this platform\n"
+            ),
+            "stderr": "",
+        }
+        evaluated = apply_pip_check_policy(result, {"decord": "0.6.0"})
+        self.assertFalse(evaluated["ok"])
+        self.assertEqual(len(evaluated["ignored_lines"]), 1)
+        self.assertEqual(len(evaluated["remaining_lines"]), 1)
+
+    def test_pip_policy_does_not_allow_unvalidated_wheel_version(self) -> None:
+        result = {
+            "ok": False,
+            "returncode": 1,
+            "stdout": "decord 0.7.0 is not supported on this platform\n",
+            "stderr": "",
+        }
+        evaluated = apply_pip_check_policy(result, {"decord": "0.6.0"})
+        self.assertFalse(evaluated["ok"])
+        self.assertEqual(evaluated["ignored_lines"], [])
+
     def test_cluster_constraints_protect_audited_cuda_stack(self) -> None:
         constraints = (
             REPO_ROOT / "configs" / "environment" / "xwam_starlight_constraints.txt"

@@ -16,6 +16,9 @@ from typing import Any, Callable
 
 
 VERSION_NUMBER = re.compile(r"\d+")
+PIP_UNSUPPORTED_PATTERN = re.compile(
+    r"^(?P<distribution>[A-Za-z0-9_.-]+)\s+(?P<version>\S+)\s+is not supported on this platform$"
+)
 
 
 def version_key(version: str, width: int = 4) -> tuple[int, ...]:
@@ -88,6 +91,44 @@ def run_command(command: list[str], timeout: int = 60) -> dict[str, Any]:
         "stdout": result.stdout[-12000:],
         "stderr": result.stderr[-12000:],
     }
+
+
+def apply_pip_check_policy(
+    result: dict[str, Any],
+    allowed_unsupported_wheels: dict[str, str],
+) -> dict[str, Any]:
+    """将已验证可运行的旧 wheel tag 从 pip check 错误降为警告。"""
+    evaluated = dict(result)
+    evaluated["raw_ok"] = bool(result.get("ok"))
+    if evaluated["raw_ok"]:
+        evaluated["ignored_lines"] = []
+        evaluated["remaining_lines"] = []
+        evaluated["ok"] = True
+        return evaluated
+
+    allowed = {
+        name.lower().replace("_", "-"): version
+        for name, version in allowed_unsupported_wheels.items()
+    }
+    ignored_lines: list[str] = []
+    remaining_lines: list[str] = []
+    output = "\n".join(part for part in (str(result.get("stdout", "")), str(result.get("stderr", ""))) if part)
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        match = PIP_UNSUPPORTED_PATTERN.fullmatch(stripped)
+        distribution = match.group("distribution").lower().replace("_", "-") if match else None
+        version = match.group("version") if match else None
+        if distribution in allowed and allowed[distribution] == version:
+            ignored_lines.append(stripped)
+        else:
+            remaining_lines.append(stripped)
+
+    evaluated["ignored_lines"] = ignored_lines
+    evaluated["remaining_lines"] = remaining_lines
+    evaluated["ok"] = bool(ignored_lines) and not remaining_lines
+    return evaluated
 
 
 def probe_import(module: str, timeout: int = 60) -> dict[str, Any]:
@@ -263,9 +304,25 @@ def audit_environment(
         if not deepspeed_report["ok"]:
             errors.append("DeepSpeed ds_report 执行失败")
 
-    pip_check = run_command([sys.executable, "-m", "pip", "check"], timeout=120)
+    pip_check_raw = run_command([sys.executable, "-m", "pip", "check"], timeout=120)
+    by_distribution = {item["distribution"]: item for item in packages}
+    allowed_unsupported: dict[str, str] = {}
+    for distribution, version in manifest.get("pip_check", {}).get("allow_unsupported_wheels", {}).items():
+        package = by_distribution.get(distribution)
+        if (
+            package
+            and package.get("installed") == version
+            and package.get("runtime_import", {}).get("ok")
+        ):
+            allowed_unsupported[distribution] = version
+    pip_check = apply_pip_check_policy(pip_check_raw, allowed_unsupported)
     if not pip_check["ok"]:
         errors.append("pip check 发现依赖冲突")
+    elif pip_check["ignored_lines"]:
+        warnings.extend(
+            f"pip check 已降级为警告（包已通过 runtime import）：{line}"
+            for line in pip_check["ignored_lines"]
+        )
 
     nvidia_smi = run_command(
         [

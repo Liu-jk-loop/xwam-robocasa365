@@ -33,6 +33,9 @@
     {"distribution": "einops", "module": "einops"},
     {"distribution": "ninja", "module": "ninja", "required": false}
   ],
+  "pip_check": {
+    "allow_unsupported_wheels": {"decord": "0.6.0"}
+  },
   "simulator_contract": {
     "separate_environment": true,
     "robocasa": {"version": "0.2.0", "commit": "756598a5be52e052339bb2d957426e39015c2afb"},

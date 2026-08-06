@@ -56,6 +56,7 @@ conda activate xwam-robocasa365
 export TORCH_EXTENSIONS_DIR=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/.cache/torch_extensions/xwam-robocasa365
 
 cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+python -m pip uninstall -y wam
 bash scripts/install_starlight_dependencies.sh dry-run
 bash scripts/install_starlight_dependencies.sh apply
 
@@ -72,7 +73,9 @@ python scripts/audit_starlight_environment.py \
 3. `logs/cluster/xwam_dependency_apply_*_after.txt`。
 4. `logs/cluster/xwam_robocasa365_environment.json`。
 
-安装脚本会拒绝在 `abot_m05` 中执行；核心约束文件会阻止 pip 替换已验证的 Torch、torchvision、torchaudio 和 FlashAttention。
+安装脚本会拒绝在 `abot_m05` 中执行，也会拒绝保留从 ABot 继承且依赖冲突的 editable `wam`；核心约束文件会阻止 pip 替换已验证的 Torch、torchvision、torchaudio 和 FlashAttention。卸载 clone 中的 `wam` 不会删除 ABot 源码或修改母环境。
+
+当前容器中 `pip check` 会把旧 Decord 0.6.0 wheel tag 报为平台不支持。只有当该提示是唯一输出且 Decord runtime import 成功时，安装器和环境 audit 才将其记录为 warning；其他冲突仍返回失败。真实视频解码验证使用 `CloseFridge` episode 0 左相机 MP4。
 
 ## 外部模型路径
 
