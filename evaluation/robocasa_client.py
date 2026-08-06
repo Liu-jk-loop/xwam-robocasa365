@@ -232,18 +232,21 @@ def main(args: Args):
 
             socket.send(pickle.dumps(data_batch))
             result = pickle.loads(socket.recv())  # shape: [Ta, Da]
-            action = result["actions"]
+            action = np.asarray(result["actions"], dtype=np.float32)
+            expected_action_dim = int(np.prod(env.action_spec[0].shape))
+            if action.ndim != 2 or action.shape[1] != expected_action_dim:
+                raise ValueError(
+                    "policy action 必须完整匹配 PandaOmron 环境动作维度，"
+                    f"expected=[Ta,{expected_action_dim}], actual={action.shape}"
+                )
 
             action = action[: args.action_length]
-            pad_action = np.zeros(env.action_spec[0].shape)
             for ai in range(action.shape[0]):
-                pad_action[:7] = action[ai]
-
                 if step_i % 4 == 0:
                     video_img, _, _ = render_obs(env, camera_names, base2world)
                     video_array.append(video_img)
 
-                env.step(pad_action)
+                env.step(action[ai])
                 step_i += 1
 
                 if env._check_success():

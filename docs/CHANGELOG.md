@@ -1,5 +1,47 @@
 # 变更记录
 
+## 2026-08-06 — M2 第二批：训练归一化、14D→12D checkpoint loader 与双初始化
+
+- 分支：`dev/atomic-robocasa365`
+- 基线 commit：`95808cd`
+- 运行状态：真实 M2 contract 已通过；5B 模型加载和单 batch forward/backward 为 `cluster-pending`
+
+### 星光输入证据
+
+- commit `95808cd8daa49b87907cb4f8c4eafc1c0862cae3` 的 M2 contract 报告为 `pass`、`ok=true`，所有 14 项检查均为 true。
+- 真实数据为 `CloseFridge/20250819`；state 16D、action 12D、三路 RGB，真实 modality 与版本化 schema 完全一致。
+- state/action 无裁剪 round-trip 最大误差均为 `1.1920928955078125e-07`；控制模式符号域和完整 12D 环境动作检查通过。
+- 公开 checkpoint 约 38.9 GB、1555 个 tensor；实际 hidden dim 为 3072，action 输入/输出为 14D，proprio 输入/输出为 16D。
+
+### 新增和修改逻辑
+
+- 将版本化 `PandaOmronTensorCodec` 接入原生 Dataset：按真实 `stats.json` 对 named component 归一化和裁剪，再输出 16D state、12D action 及同 shape mask。
+- 将 RoboCasa365 数据配置从 M1 audit-only 切换到 M2 单任务可训练状态，并强制指定版本化 schema；`normalization=none` 仍只保留给审计和诊断。
+- 增加无 Torch checkpoint adaptation contract，逐项分类 exact load、action remap、proprio reinitialize、RGB-only discard、missing、unexpected 和 shape error。
+- action boundary 只复制 legacy arm `[0:7]` 到 PandaOmron `[5:12]`；新 base/control `[0:5]` 保留 runner 初始化。任何其他 shape mismatch、missing 或 unexpected 参数都会阻塞加载。
+- proprio 虽然同为 16D，但语义不同，因此 encoder 输入边界和 decoder 输出边界的 weight/bias 全部重新初始化；中间层仍严格同名同 shape 加载。
+- 增加 `xwam_pretrained` 与 `wan_base` 两种显式初始化模式和 JSON 报告；`wan_base` 不允许同时提供 X-WAM checkpoint。
+- 训练入口支持显式 `model_config`/`data_config`、0 worker DataLoader，并始终生成初始化报告；原 upstream 配置保留 `legacy_strict` 行为。
+- 增加 atomic-only M2 单步 smoke 配置和星光 checkpoint loading audit。
+- RGB-only runner 默认关闭 depth 分支；旧 evaluator 删除 `pad_action[:7]`，改为严格检查并执行完整环境动作向量。
+
+### 涉及文件与验证
+
+- 数据：`data/robocasa365_dataset.py`、`configs/data/robocasa365.yaml`。
+- checkpoint：`project_tools/xwam_checkpoint_contract.py`、`utils/xwam_checkpoint_loader.py`。
+- 训练：`scripts/train_sft.py`、`runners/xwam_runner.py`、`configs/model/wan22_5b_robocasa365_atomic_m2.yaml`。
+- 验收与测试：`scripts/audit_xwam_checkpoint_loading.py`、`tests/test_xwam_checkpoint_contract.py`。
+- 动作执行：`evaluation/robocasa_client.py`。
+- 本地 30 项测试、Python compile、audit CLI help、文档同步门禁和 Git diff check 通过。
+
+### 兼容性、风险和回滚
+
+- 原 `wan22_5b_sft.yaml` 默认仍为 legacy dataset、14D action、16D proprio 和 `legacy_strict`，不改变 upstream 训练语义。
+- 本轮 normalization 使用当前单任务目录的 task-local `stats.json`；不能直接视为多任务正式训练统计。
+- 公开 checkpoint 全量 runtime load 约 38.9 GB，星光首次测试需要记录 CPU 峰值；本地无法验证 Torch 2.9 运行时。
+- evaluator 目前只完成“不得丢弃动作维度”的边界修复；在线 16D observation 构造和 simulator 闭环仍属于 M4，当前不可运行正式评测。
+- 回退本次 commit 即恢复 M1 audit-only Dataset 和 upstream strict loader；不会改动外部数据、Wan/X-WAM 权重或 Conda 环境。
+
 ## 2026-08-06 — M2 第一批：PandaOmron schema、normalization codec 与 checkpoint inventory
 
 - 分支：`dev/atomic-robocasa365`

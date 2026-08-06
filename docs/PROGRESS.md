@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：M2——PandaOmron schema、normalization 与 checkpoint 适配
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1 全部门禁通过；M2 schema/checkpoint 审计待星光执行
+- 超算运行状态：M1 全部门禁通过；M2 contract audit 已通过，12D 模型加载与单步反传待星光执行
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -16,7 +16,7 @@
 | --- | --- | --- | --- |
 | M0 工程与协作基线 | 已完成 | 主仓库已 clone | 模拟器阶段开始时确认第三方子模块 |
 | M1 原生 RoboCasa365 loader | 已完成 | commit `e4249b9` 真实 batch `ok=true` | 已关闭 |
-| M2 动作与 checkpoint 适配 | 第一批 schema、NumPy codec、checkpoint inventory 已实现 | 真实 modality/stats/checkpoint 为 `cluster-pending` | M2 contract audit `ok=true` |
+| M2 动作与 checkpoint 适配 | contract 已通过；训练归一化、14D→12D loader、双初始化和完整 12D 执行已实现 | contract commit `95808cd` 为 `ok=true`；模型加载/反传待验证 | 两种初始化报告 + 单 batch forward/backward |
 | M3 RGB-only 训练烟测 | 未开始 | 待验证 | A100/A800 单 batch forward/backward |
 | M4 闭环评测器 | 未开始 | 待验证 | 完成一个 atomic 闭环 rollout |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
@@ -86,12 +86,34 @@ M2 第一批本地证据：
 - 增加真实 `modality.json` 严格匹配和 `stats.json` q01/q99/min/max 维度审计。
 - 增加 NumPy state/action codec，保留完整 12D action，支持 unclipped round-trip、训练区间 clip 和 control-mode 环境离散化。
 - 增加 checkpoint 低内存 shape inventory，目标是确认公开 checkpoint 为 legacy action 14D/proprio 16D，并输出后续迁移计划。
-- 本地 26 项测试、Python compile 和 diff 检查通过；真实 schema/stats/checkpoint 为 `cluster-pending`。
+- 本地 26 项测试、Python compile 和 diff 检查通过。
+
+M2 contract 星光验收证据：
+
+- 测试 commit：`95808cd8daa49b87907cb4f8c4eafc1c0862cae3`；结果 `pass`、`ok=true`。
+- 环境：Python 3.10.20、Torch 2.9.0+cu128、NumPy 1.23.5、PyArrow 16.1.0。
+- 真实 `modality.json` 与版本化 schema 完全一致；schema SHA 为 `e95f2b71...f08b4`，modality 文件 SHA 为 `59589093...73fb`。
+- episode 0 的 state/action 无裁剪往返最大误差均为 `1.1920928955078125e-07`；训练裁剪比例分别约为 `0.276%` 和 `1.559%`。
+- control mode 只出现 `-1`，294 帧全部通过符号域检查；完整 12D environment action 门禁通过。
+- 公开 checkpoint 文件约 38.9 GB、1555 个 tensor；实际隐藏维度为 3072，action 边界为 14D，proprio 边界为 16D，所有检查为 true。
+- 结论：真实数据语义、统计量和 checkpoint 迁移前提均已确认，M2 第二批可以按冻结合同实现。
+
+M2 第二批本地证据：
+
+- 原生 Dataset 已接入 `panda_omron_v1` codec；训练 sample 在转为 Torch tensor 前按 named component 归一化并裁剪，仍保留 16D state 和完整 12D action。
+- `robocasa365.yaml` 已解除 M1 audit-only 门禁，但只适用于单任务 task-local stats；正式多任务统计在 M3/M6 另行冻结。
+- checkpoint adapter 严格分类 exact load、action remap、proprio reinitialize、RGB-only discard、missing、unexpected 和 shape error。
+- action encoder/decoder 只把 legacy arm `[0:7]` 复制到 PandaOmron `[5:12]`；base/control `[0:5]` 保留新初始化；proprio 输入/输出边界因语义变化全部重初始化。
+- 支持 `xwam_pretrained` 和 `wan_base`；后者明确禁止传入 X-WAM checkpoint，避免实验来源混淆。
+- RGB-only evaluator 已删除只执行前 7 维的旧逻辑，环境动作维度不等于 policy 输出时立即失败；在线 observation 提取仍属于 M4，当前不能据此启动闭环评测。
+- 增加 M2 单步 A800 smoke 配置和 checkpoint load audit；本地 30 项测试、Python compile、CLI help 和 diff 检查通过。
+- 本地没有 Torch，真实 5B 模型构造、38.9 GB checkpoint 加载和 forward/backward 均为 `cluster-pending`。
 
 ## 待提供输入
 
-- 拉取新版 audit 后复跑，反馈最终 `ok=true` 报告。
-- 运行 M2 contract audit，反馈真实 modality SHA、stats、样例 component ranges 和 checkpoint boundary shapes。
+- 星光拉取 M2 第二批 commit，在 A800 上分别生成 `xwam_pretrained` 和 `wan_base` 初始化报告。
+- 先反馈模型构造/加载阶段的 CPU 内存、GPU 显存和 JSON 报告；加载通过后再运行真实单 batch forward/backward。
+- 不在本轮运行闭环 simulator；新版在线 16D observation 提取将在 M4 实现和验收。
 
 ## 当前执行过程
 
@@ -100,5 +122,6 @@ M2 第一批本地证据：
 3. Codex 发布只允许 Decord 精确旧 wheel tag warning 的 audit，并修复安装后 freeze 留存。
 4. 用户已在 commit `e4249b9` 读取真实 `CloseFridge` batch，M1 全部门禁通过。
 5. Codex 已发布 M2 第一批：版本化 schema、normalization codec 与 checkpoint shape audit。
-6. 用户在星光执行 M2 contract audit，反馈持久化 JSON。
-7. Codex 根据真实报告实现 dataset normalization 接入和 shape-aware checkpoint loader，再进入单 batch forward/backward。
+6. 用户已在 commit `95808cd` 执行 M2 contract audit，全部检查为 true。
+7. Codex 已根据真实 3072/14D/16D shape 实现 Dataset normalization、shape-aware loader、双初始化和完整 12D 动作执行。
+8. 用户在 A800 上先执行两种初始化 audit，再执行单 batch forward/backward；通过后关闭 M2 并进入 M3。

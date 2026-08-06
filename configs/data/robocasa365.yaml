@@ -1,7 +1,7 @@
-# M1 原生 RoboCasa365 LeRobot v2.1 单任务配置。
+# M2 原生 RoboCasa365 LeRobot v2.1 单任务训练配置。
 # 路径保持为可覆盖占位值；星光运行时通过命令行传入真实日期目录。
 format: robocasa365_lerobot_v21
-training_ready: false
+training_ready: true
 dataset_path: ./datasets/robocasa365/CloseFridge/latest
 task_name: CloseFridge
 task_manifest: configs/tasks/robocasa365_atomic_seen.json
@@ -23,6 +23,7 @@ brightness: 0.2
 contrast: 0.2
 saturation: 0.2
 hue: 0.05
-normalization: none
+normalization: panda_omron_v1
+schema_path: configs/schemas/robocasa365_panda_omron_v1.json
 parquet_cache_size: 8
 video_cache_size: 12

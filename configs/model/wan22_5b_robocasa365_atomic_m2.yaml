@@ -1,0 +1,65 @@
+# M2 单任务 smoke 配置；只验证真实 batch、checkpoint 适配和一次训练 step。
+# M3 会另行提供 H100 正式训练配置，不能把本文件直接当作正式实验配置。
+
+# t5 / vae
+t5_model: umt5_xxl
+t5_dtype: torch.bfloat16
+text_len: 512
+t5_checkpoint: models_t5_umt5-xxl-enc-bf16.pth
+t5_tokenizer: google/umt5-xxl
+vae_checkpoint: Wan2.2_VAE.pth
+vae_stride: (4, 16, 16)
+
+# model / dataset
+num_extra_layers: 10
+dataset: robocasa365
+action_dim: 12
+proprio_dim: 16
+use_depth: false
+wan_checkpoint_dir: ./checkpoints/wan22_5b/
+pretrained_checkpoint: ./checkpoints/pretrained/checkpoints/last.ckpt
+initialization_mode: xwam_pretrained
+checkpoint_schema_path: configs/schemas/robocasa365_panda_omron_v1.json
+checkpoint_initialization_report: null
+
+# one-step A800 smoke only
+exp_root: ./experiments/
+exp_name: robocasa365_atomic_m2_smoke
+seed: 42
+lr: 1e-5
+weight_decay: 0.01
+num_warmup_steps: 0
+num_training_steps: 1
+log_interval: 1
+save_interval: 1
+enable_checkpointing: false
+val_interval: 1
+limit_val_batches: 0
+accumulate_grad_batches: 1
+gradient_clip_val: 1.0
+gradient_clip_algorithm: norm
+batch_size_per_gpu: 1
+num_workers_per_gpu: 0
+prefetch_factor: 2
+use_gradient_checkpointing: true
+
+# losses / flow matching
+rf_distribution: uniform
+time_shifting: 5.0
+action_loss_weight: 1.0
+depth_loss_weight: 0.0
+proprio_loss_weight: 1.0
+dct_loss_weight: 0.0
+flow_matching_num_train_timesteps: 1000
+
+# validation/inference fields used by the runner
+sample_fps: 5
+sample_steps: 50
+frame_num: 9
+use_decoupled_inference: true
+action_denoise_steps: 10
+use_decoupled_sampling: true
+use_joint_distribution: true
+clean_action_ratio: 0.5
+text_dropout_prob: 0.1
+cfg_list: [0]

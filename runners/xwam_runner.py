@@ -15,10 +15,10 @@ from utils.utils import sample_beta
 
 
 class XWAMRunner(L.LightningModule):
-    def __init__(self, config, run_depth=True):
+    def __init__(self, config, run_depth=None):
         super().__init__()
         self.config = config
-        self.run_depth = run_depth
+        self.run_depth = bool(config.use_depth) if run_depth is None else bool(run_depth)
 
         # TODO: remove hard-coded views and modalities
         self.num_views = 3

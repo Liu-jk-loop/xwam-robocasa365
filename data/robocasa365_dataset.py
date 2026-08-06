@@ -24,6 +24,10 @@ from data.robocasa365_index import (
     episode_video_path,
     load_episode_records,
 )
+from data.robocasa365_schema import PandaOmronTensorCodec
+
+
+SUPPORTED_NORMALIZATION = {"none", "panda_omron_v1"}
 
 
 class RoboCasa365Dataset(Dataset):
@@ -49,13 +53,18 @@ class RoboCasa365Dataset(Dataset):
         hue: float = 0.05,
         use_depth: bool = False,
         normalization: str = "none",
+        schema_path: str | None = None,
         parquet_cache_size: int = 8,
         video_cache_size: int = 12,
     ):
         if use_depth:
             raise ValueError("RoboCasa365 M1 loader 仅支持 depth=disabled；cached depth 将在 M5 单独接入")
-        if normalization != "none":
-            raise ValueError("M1 只允许 normalization='none'；正式 normalization 将在 M2 冻结 schema 后实现")
+        if normalization not in SUPPORTED_NORMALIZATION:
+            raise ValueError(
+                f"normalization 只允许 {sorted(SUPPORTED_NORMALIZATION)}，实际为 {normalization!r}"
+            )
+        if normalization == "panda_omron_v1" and not schema_path:
+            raise ValueError("normalization='panda_omron_v1' 时必须提供版本化 schema_path")
         if len(camera_keys) != 3:
             raise ValueError(f"X-WAM 当前要求固定三路 RGB 相机，实际为 {len(camera_keys)} 路")
         if len(camera_types) != len(camera_keys):
@@ -87,6 +96,7 @@ class RoboCasa365Dataset(Dataset):
         )
         self.proprio_dim = EXPECTED_STATE_DIM
         self.action_dim = EXPECTED_ACTION_DIM
+        self.normalization = normalization
         self.augment = bool(augment)
         self.augmentation = VideoAugmentation(
             crop_ratio=crop_ratio,
@@ -115,6 +125,22 @@ class RoboCasa365Dataset(Dataset):
             raise ValueError(f"配置选择了元数据中不存在的相机：{missing_selected}")
 
         self.dataset_root, self.info, self.episodes = load_episode_records(dataset_path)
+        self.tensor_codec = (
+            PandaOmronTensorCodec.from_dataset(dataset_path, schema_path)
+            if normalization == "panda_omron_v1"
+            else None
+        )
+        if self.tensor_codec is not None:
+            if self.tensor_codec.schema.state.dimension != self.proprio_dim:
+                raise ValueError(
+                    "schema state dimension 与 loader 不一致："
+                    f"{self.tensor_codec.schema.state.dimension} != {self.proprio_dim}"
+                )
+            if self.tensor_codec.schema.action.dimension != self.action_dim:
+                raise ValueError(
+                    "schema action dimension 与 loader 不一致："
+                    f"{self.tensor_codec.schema.action.dimension} != {self.action_dim}"
+                )
         self.episode_by_index: dict[int, EpisodeRecord] = {
             episode.episode_index: episode for episode in self.episodes
         }
@@ -148,8 +174,13 @@ class RoboCasa365Dataset(Dataset):
             [self._read_video_frames(clip.episode_index, camera_key, frame_ids) for camera_key in self.camera_keys],
             dim=0,
         )
-        proprios = torch.from_numpy(states[frame_ids].copy())
-        selected_actions = torch.from_numpy(actions[action_ids].copy())
+        selected_states = states[frame_ids].copy()
+        selected_actions = actions[action_ids].copy()
+        if self.tensor_codec is not None:
+            selected_states = self.tensor_codec.encode_state(selected_states, clip=True)
+            selected_actions = self.tensor_codec.encode_action(selected_actions, clip=True)
+        proprios = torch.from_numpy(np.ascontiguousarray(selected_states, dtype=np.float32))
+        selected_actions = torch.from_numpy(np.ascontiguousarray(selected_actions, dtype=np.float32))
         prompt_index = int(torch.randint(len(episode.prompts), ()).item()) if self.augment else 0
 
         data = {

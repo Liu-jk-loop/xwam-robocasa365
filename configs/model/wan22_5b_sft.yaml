@@ -20,6 +20,9 @@ proprio_dim: 16
 # training
 wan_checkpoint_dir: ./checkpoints/wan22_5b/
 pretrained_checkpoint: ./checkpoints/pretrained/checkpoints/last.ckpt
+initialization_mode: legacy_strict
+checkpoint_schema_path: null
+checkpoint_initialization_report: null
 exp_root: ./experiments/
 exp_name: debug
 
@@ -30,6 +33,7 @@ num_warmup_steps: 200
 num_training_steps: 20000
 log_interval: 20
 save_interval: 5000
+enable_checkpointing: true
 val_interval: 2500
 limit_val_batches: 5
 accumulate_grad_batches: 1

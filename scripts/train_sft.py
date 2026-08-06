@@ -22,15 +22,36 @@ from lightning.pytorch.strategies import DeepSpeedStrategy
 from data.dataset_factory import build_dataset
 from runners.xwam_runner import XWAMRunner
 from utils.console_logger import ConsoleLogger
+from utils.xwam_checkpoint_loader import initialize_xwam_runner
+
+
+def _load_config():
+    overrides = OmegaConf.from_cli()
+    model_config_path = overrides.pop("model_config", "configs/model/wan22_5b_sft.yaml")
+    model_config = OmegaConf.load(model_config_path)
+
+    dataset_override = overrides.get("dataset")
+    if isinstance(dataset_override, str):
+        dataset_name = dataset_override
+        del overrides["dataset"]
+    else:
+        dataset_name = str(model_config.dataset)
+    data_config_path = overrides.pop("data_config", f"configs/data/{dataset_name}.yaml")
+    model_config["dataset"] = OmegaConf.load(data_config_path)
+    return OmegaConf.merge(model_config, overrides)
+
+
+def _loader_worker_options(num_workers: int, prefetch_factor: int) -> dict:
+    if num_workers <= 0:
+        return {}
+    return {
+        "prefetch_factor": int(prefetch_factor),
+        "multiprocessing_context": "forkserver",
+    }
 
 
 def main():
-    model_config = OmegaConf.load("configs/model/wan22_5b_sft.yaml")
-    config_override = OmegaConf.from_cli()
-    config = OmegaConf.merge(model_config, config_override)
-
-    data_config = OmegaConf.load(f"configs/data/{config.dataset}.yaml")
-    config["dataset"] = data_config
+    config = _load_config()
 
     pprint(OmegaConf.to_container(config))
 
@@ -42,17 +63,18 @@ def main():
     )
     L.seed_everything(config.seed, workers=True)
 
-    callbacks = [
-        ModelSummary(max_depth=2),
-        ModelCheckpoint(
-            dirpath=os.path.join(config.exp_root, config.exp_name, "checkpoints"),
-            save_top_k=-1,
-            save_last=True,
-            every_n_train_steps=config.save_interval,
-            enable_version_counter=False,
-        ),
-        LearningRateMonitor(logging_interval="step"),
-    ]
+    callbacks = [ModelSummary(max_depth=2), LearningRateMonitor(logging_interval="step")]
+    if bool(config.get("enable_checkpointing", True)):
+        callbacks.insert(
+            1,
+            ModelCheckpoint(
+                dirpath=os.path.join(config.exp_root, config.exp_name, "checkpoints"),
+                save_top_k=-1,
+                save_last=True,
+                every_n_train_steps=config.save_interval,
+                enable_version_counter=False,
+            ),
+        )
 
     tb_path = os.getenv("TENSORBOARD_LOG_PATH", None)
     loggers = [
@@ -81,29 +103,38 @@ def main():
         train_dataset,
         batch_size=config.batch_size_per_gpu,
         num_workers=config.num_workers_per_gpu,
-        prefetch_factor=config.prefetch_factor,
         shuffle=True,
         pin_memory=True,
         drop_last=True,
-        multiprocessing_context="forkserver" if config.num_workers_per_gpu > 0 else None,
+        **_loader_worker_options(config.num_workers_per_gpu, config.prefetch_factor),
     )
 
     val_dataloader = DataLoader(
         val_dataset,
         batch_size=1,
-        num_workers=2,
+        num_workers=config.num_workers_per_gpu,
         shuffle=True,
         pin_memory=True,
-        multiprocessing_context="forkserver",
+        **_loader_worker_options(config.num_workers_per_gpu, config.prefetch_factor),
     )
 
-    model = XWAMRunner(config)
-    if config.get("pretrained_checkpoint", None) is not None:
-        print(f"Loading pretrained checkpoint from {config.pretrained_checkpoint}...")
-        ckpt = torch.load(
-            os.path.join(config.pretrained_checkpoint, "checkpoint/mp_rank_00_model_states.pt"), map_location="cpu"
+    model = XWAMRunner(config, run_depth=bool(config.use_depth))
+    initialization_report = config.get("checkpoint_initialization_report")
+    if initialization_report is None:
+        initialization_report = os.path.join(
+            config.exp_root, config.exp_name, "checkpoint_initialization.json"
         )
-        model.load_state_dict(ckpt["module"])
+    report = initialize_xwam_runner(
+        model,
+        mode=str(config.get("initialization_mode", "legacy_strict")),
+        checkpoint=config.get("pretrained_checkpoint"),
+        schema_path=config.get("checkpoint_schema_path"),
+        report_path=initialization_report,
+    )
+    print(
+        "Checkpoint initialization: "
+        f"mode={report['mode']}, result={report['result']}, report={initialization_report}"
+    )
 
     devices = torch.cuda.device_count()
     world_size = int(os.environ.get("WORLD_SIZE", devices))
@@ -124,6 +155,7 @@ def main():
         gradient_clip_val=config.gradient_clip_val,
         gradient_clip_algorithm=config.gradient_clip_algorithm,
         enable_progress_bar=False,
+        enable_checkpointing=bool(config.get("enable_checkpointing", True)),
         callbacks=callbacks,
         logger=loggers,
         val_check_interval=config.val_interval,

@@ -118,6 +118,54 @@ python scripts/audit_robocasa365_m2_contract.py \
 
 如果 `weights_only` 或 `mmap` 读取 checkpoint 失败，不要改为普通全量 `torch.load`；把完整报告反馈回来，避免不必要的 CPU 内存峰值。M2 contract 通过前仍不要启动训练。
 
+## M2 12D checkpoint 加载与单步反传
+
+M2 contract 已在 commit `95808cd` 通过。拉取 M2 第二批 commit 后，先只构造模型并验证公开 X-WAM 权重适配，不要直接启动训练：
+
+```bash
+conda activate xwam-robocasa365
+
+cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+git rev-parse HEAD
+
+python scripts/audit_xwam_checkpoint_loading.py \
+  --mode xwam_pretrained \
+  --wan-checkpoint-dir /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/Wan-AI/Wan2.2-TI2V-5B \
+  --xwam-checkpoint /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/x-wam/xwam_checkpoints \
+  --output logs/cluster/xwam_pretrained_panda_omron_loading.json
+```
+
+预期报告应为 `result=pass`、`ok=true`，并满足：
+
+- `action_remap` 恰好包含 action encoder 输入 weight、decoder 输出 weight/bias 三项。
+- `reinitialize` 恰好包含 proprio encoder 输入和 decoder 输出的 weight/bias 四项。
+- `missing_source`、`unexpected_source`、`shape_errors` 和 `errors` 均为空。
+- RGB-only 目标不存在的 depth `extra_blocks/extra_heads` 只能进入 `discard_source`，不能被当作普通 missing 静默跳过。
+
+然后验证不使用公开 X-WAM cross-embodiment 权重的 `wan_base` 消融初始化：
+
+```bash
+python scripts/audit_xwam_checkpoint_loading.py \
+  --mode wan_base \
+  --wan-checkpoint-dir /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/Wan-AI/Wan2.2-TI2V-5B \
+  --output logs/cluster/wan_base_panda_omron_loading.json
+```
+
+两份加载报告都通过后，再执行一次真实 `CloseFridge` batch 的 forward/backward。该 M2 配置只运行一步、batch size 1、0 worker、RGB-only、gradient checkpointing，并关闭大 checkpoint 保存：
+
+```bash
+python scripts/train_sft.py \
+  model_config=configs/model/wan22_5b_robocasa365_atomic_m2.yaml \
+  wan_checkpoint_dir=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/Wan-AI/Wan2.2-TI2V-5B \
+  pretrained_checkpoint=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/x-wam/xwam_checkpoints \
+  dataset.dataset_path=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/robocasa/robocasa/datasets/v1.0/pretrain/atomic/CloseFridge/20250819 \
+  exp_root=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365 \
+  exp_name=close_fridge_m2_single_step
+```
+
+反馈三份 JSON/配置、完整终端日志、返回码、CPU 内存峰值、GPU 峰值和首个 loss。若第一条加载 audit 失败，不要继续训练，也不要改为 `strict=False` 或手动删除报错参数。
+
 ## X-WAM Conda 环境
 
 先按 `docs/ENVIRONMENT_PLAN.md` 的 E0 步骤审计当前 `abot_m05`，日志写入 `logs/cluster/`。`ok=false` 只表示不能直接运行；当 `clone_base_ok=true` 且 `reuse_recommendation=clone_then_patch` 时，可以 clone 为独立环境后补依赖。不要在 `abot_m05` 中直接运行全量依赖安装。
