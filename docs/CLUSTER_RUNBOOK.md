@@ -82,6 +82,42 @@ python scripts/audit_robocasa365_batch.py \
 
 反馈以下内容：commit SHA、完整命令和返回码、`logs/cluster/robocasa365_close_fridge_batch.json`。如果失败，保留完整 `error` 和 `traceback`，不要只截取最后一行。
 
+## M2 PandaOmron schema 与 checkpoint 契约审计
+
+M1 已在 commit `e4249b9` 通过。拉取 M2 第一批后，在 policy 环境执行：
+
+```bash
+conda activate xwam-robocasa365
+
+cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+git rev-parse HEAD
+
+python scripts/audit_robocasa365_m2_contract.py \
+  --dataset /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/robocasa/robocasa/datasets/v1.0/pretrain/atomic/CloseFridge/20250819 \
+  --task-name CloseFridge \
+  --checkpoint /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/x-wam/xwam_checkpoints \
+  --episode-index 0 \
+  --log-file logs/cluster/robocasa365_close_fridge_m2_contract.json
+```
+
+该命令完成四项只读检查：
+
+1. 将真实 `meta/modality.json` 的每个名称、切片和 original key 与版本化 schema 对比。
+2. 读取 `meta/stats.json` 的 state/action q01、q99、min、max，并报告退化 quantile 维度。
+3. 对真实 episode 0 执行 state/action 未裁剪 round-trip，报告 component range、control-mode 值和训练 clip 比例。
+4. 使用 FakeTensorMode 和 mmap 只读取公开 DeepSpeed checkpoint 元数据，报告 action/proprio encoder/decoder 边界 shape，不构造 5B 模型、不占用 GPU 权重显存。
+
+预期所有 `checks` 为 `true`，尤其是：
+
+- state/action 分别为 16D/12D。
+- `control_mode` 只包含 `-1/+1`。
+- unclipped round-trip 最大误差小于 `1e-5`。
+- checkpoint action 边界为 legacy 14D，proprio 边界为 16D。
+- 最终 `result=pass`、`ok=true`。
+
+如果 `weights_only` 或 `mmap` 读取 checkpoint 失败，不要改为普通全量 `torch.load`；把完整报告反馈回来，避免不必要的 CPU 内存峰值。M2 contract 通过前仍不要启动训练。
+
 ## X-WAM Conda 环境
 
 先按 `docs/ENVIRONMENT_PLAN.md` 的 E0 步骤审计当前 `abot_m05`，日志写入 `logs/cluster/`。`ok=false` 只表示不能直接运行；当 `clone_base_ok=true` 且 `reuse_recommendation=clone_then_patch` 时，可以 clone 为独立环境后补依赖。不要在 `abot_m05` 中直接运行全量依赖安装。

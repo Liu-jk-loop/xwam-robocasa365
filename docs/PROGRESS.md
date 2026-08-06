@@ -5,9 +5,9 @@
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：M1——RoboCasa365 数据契约与原生 loader
+- 当前阶段：M2——PandaOmron schema、normalization 与 checkpoint 适配
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1 metadata 与 policy 环境核心门禁已通过；原生 loader 已实现，真实 batch 待验收
+- 超算运行状态：M1 全部门禁通过；M2 schema/checkpoint 审计待星光执行
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -15,8 +15,8 @@
 | 阶段 | 当前状态 | 超算状态 | 下一门禁 |
 | --- | --- | --- | --- |
 | M0 工程与协作基线 | 已完成 | 主仓库已 clone | 模拟器阶段开始时确认第三方子模块 |
-| M1 原生 RoboCasa365 loader | 原生 v2.1 Parquet/MP4 adapter 与 batch audit 已实现 | 环境 kernel/解码门禁通过；真实 batch 为 `cluster-pending` | 读取一个真实 RGB-only batch |
-| M2 动作与 checkpoint 适配 | 未开始 | 待验证 | 冻结官方 PandaOmron schema |
+| M1 原生 RoboCasa365 loader | 已完成 | commit `e4249b9` 真实 batch `ok=true` | 已关闭 |
+| M2 动作与 checkpoint 适配 | 第一批 schema、NumPy codec、checkpoint inventory 已实现 | 真实 modality/stats/checkpoint 为 `cluster-pending` | M2 contract audit `ok=true` |
 | M3 RGB-only 训练烟测 | 未开始 | 待验证 | A100/A800 单 batch forward/backward |
 | M4 闭环评测器 | 未开始 | 待验证 | 完成一个 atomic 闭环 rollout |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
@@ -68,20 +68,37 @@ M1 原生 loader 本地证据：
 - 相机顺序固定为左 agentview、右 agentview、eye-in-hand；类型 mask 为 `[0,0,1]`。
 - `use_depth=false`，batch 中不产生 `depths`；augmentation 关闭时重复读取必须逐项完全一致。
 - M1 state/action 尚未归一化，原生配置以 `training_ready=false` 阻止误启动训练；M2 冻结 schema 后解除。
-- 本地 22 项无 Torch 测试和 Python 语法编译通过；真实 Parquet/MP4 batch 为 `cluster-pending`。
+- 本地 22 项无 Torch 测试和 Python 语法编译通过。
+
+M1 原生 loader 星光验收证据：
+
+- 测试 commit：`e4249b9a763f5f47c7b9b5de0c4ffdefdc27f9e6`；结果 `pass`、`ok=true`。
+- 环境：Python 3.10.20、Torch 2.9.0+cu128、NumPy 1.23.5、PyArrow 16.1.0、Decord 0.6.0。
+- 数据：`CloseFridge/20250819`，106 episodes、23496 valid clips。
+- sample：RGB `[3,9,3,256,320]`、state `[9,16]`、action `[32,12]`；DataLoader batch 维度正确。
+- 帧序 `[0,4,...,32]`、动作序列 `[0..31]`、camera mask `[0,0,1]`，无 depth。
+- 所有 tensor 有限；无 augmentation 时重复读取完全一致。
+- 结论：M1 退出条件全部满足，阶段关闭。
+
+M2 第一批本地证据：
+
+- 增加版本化 PandaOmron schema，固定 16D state 和 12D action 的命名、切片、表示与 normalization policy。
+- 增加真实 `modality.json` 严格匹配和 `stats.json` q01/q99/min/max 维度审计。
+- 增加 NumPy state/action codec，保留完整 12D action，支持 unclipped round-trip、训练区间 clip 和 control-mode 环境离散化。
+- 增加 checkpoint 低内存 shape inventory，目标是确认公开 checkpoint 为 legacy action 14D/proprio 16D，并输出后续迁移计划。
+- 本地 26 项测试、Python compile 和 diff 检查通过；真实 schema/stats/checkpoint 为 `cluster-pending`。
 
 ## 待提供输入
 
-- 早先数据 audit 所在的 `git rev-parse HEAD`（如仍可确认）。
-- 按 `docs/CLUSTER_RUNBOOK.md` 中的路径检查确认 X-WAM pretrained 文件。
 - 拉取新版 audit 后复跑，反馈最终 `ok=true` 报告。
-- 安装新增的 PyArrow 16.1.0，并运行 M1 真实 RGB-only batch audit。
+- 运行 M2 contract audit，反馈真实 modality SHA、stats、样例 component ranges 和 checkpoint boundary shapes。
 
 ## 当前执行过程
 
 1. 用户已完成独立环境增量安装，并移除 clone 中冲突的 ABot `wam`。
 2. 用户已通过 Torch/FlashAttention CUDA kernel 和真实 Decord MP4 解码。
 3. Codex 发布只允许 Decord 精确旧 wheel tag warning 的 audit，并修复安装后 freeze 留存。
-4. Codex 已实现原生 Parquet/MP4 tensor adapter、固定时间窗和 batch audit，并保留训练门禁。
-5. 用户拉取指定 commit，在独立 policy 环境补装受约束的 PyArrow，读取真实 `CloseFridge` batch。
-6. Codex 根据报告核对 shape、dtype、帧序、动作窗口和确定性，通过后关闭 M1 并进入 M2。
+4. 用户已在 commit `e4249b9` 读取真实 `CloseFridge` batch，M1 全部门禁通过。
+5. Codex 已发布 M2 第一批：版本化 schema、normalization codec 与 checkpoint shape audit。
+6. 用户在星光执行 M2 contract audit，反馈持久化 JSON。
+7. Codex 根据真实报告实现 dataset normalization 接入和 shape-aware checkpoint loader，再进入单 batch forward/backward。

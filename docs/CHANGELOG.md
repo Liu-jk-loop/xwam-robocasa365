@@ -1,5 +1,48 @@
 # 变更记录
 
+## 2026-08-06 — M2 第一批：PandaOmron schema、normalization codec 与 checkpoint inventory
+
+- 分支：`dev/atomic-robocasa365`
+- 基线 commit：`e4249b9`
+- 运行状态：M1 真实 batch 已通过；M2 本地静态验证完成，真实 contract 为 `cluster-pending`
+
+### M1 集群证据
+
+- commit `e4249b9a763f5f47c7b9b5de0c4ffdefdc27f9e6`，真实 `CloseFridge/20250819` batch 报告为 `pass`、`ok=true`。
+- 106 episodes、23496 clips；RGB `[3,9,3,256,320]`、state `[9,16]`、action `[32,12]`。
+- 帧序、动作窗口、三相机 mask、无 depth、有限数值和无 augmentation 确定性全部通过。
+- M1 阶段正式关闭。
+
+### 问题
+
+M1 只输出未归一化 16D/12D tensor。训练和闭环运行还需要确认每一维语义、统计量和环境动作打包。公开 X-WAM checkpoint 的 action 为 legacy 双臂 14D；PandaOmron 虽然 proprio 同为 16D，但语义完全不同，不能因 shape 相同而静默加载边界层。
+
+### 新增和修改逻辑
+
+- 增加 atomic-only PandaOmron v1 schema，固定 state/action component 名称、连续切片、原始 key、表示和 normalization policy。
+- state：base position、base quaternion、相对 EEF position/quaternion、双 gripper qpos；action：4D base motion、control mode、EEF delta position/axis-angle、gripper close。
+- 增加真实 `modality.json` 严格匹配；字段名称、顺序、切片或 original key 变化都会阻塞。
+- 增加 `stats.json` q01/q99/min/max 检查和 named-component NumPy codec。
+- quantile 组件按 q01/q99 归一化；quaternion、controller-range 和离散控制字段保留原生 `[-1,1]`。
+- 支持无裁剪可逆审计、训练输入裁剪率统计，以及输出到环境前将 control mode 离散为 `-1/+1`；完整 12D action 始终保留。
+- 增加低内存 checkpoint inventory：使用 FakeTensorMode+mmap 读取参数 shape，禁止为了审计普通全量加载 5B checkpoint。
+- 固定下一批迁移策略：legacy 左臂 7D 边界权重复制到目标 action `[5:12]`；新 base/control `[0:5]` 初始化；proprio 边界因语义变化重新初始化；其他参数严格按名称和 shape 加载。
+
+### 涉及文件与验证
+
+- schema：`configs/schemas/robocasa365_panda_omron_v1.json`。
+- schema/codec：`data/robocasa365_schema.py`。
+- 星光审计：`scripts/audit_robocasa365_m2_contract.py`。
+- 测试：`tests/test_robocasa365_schema.py`，覆盖真实切片契约、12D round-trip、control-mode 离散、clip 和错误切片拒绝。
+- 本地 26 项测试、Python compile 和 diff 检查通过；真实 modality/stats/checkpoint 为 `cluster-pending`。
+
+### 风险与回滚
+
+- 版本化 schema 依据公开 RoboCasa365 数据契约建立，但星光真实文件仍是最终门禁；不一致时不会自动修正。
+- 当前 codec 尚未接入训练 Dataset，`training_ready=false` 继续生效。
+- checkpoint 本批只做 shape inventory，尚未加载或改写任何参数。
+- 回退本次 commit 即移除 M2 schema/audit，不影响已通过的 M1 loader、外部数据、权重或环境。
+
 ## 2026-08-06 — M1 原生 LeRobot v2.1 Parquet/MP4 batch adapter
 
 - 分支：`dev/atomic-robocasa365`

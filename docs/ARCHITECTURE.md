@@ -39,6 +39,15 @@ The X-WAM backbone should consume validated tensors and remain free of dataset-p
 - Keep base motion and control mode available even for manipulation-heavy atomic tasks.
 - Validate round-trips using recorded dataset actions before closed-loop policy evaluation.
 
+### PandaOmron versioned schema
+
+- `configs/schemas/robocasa365_panda_omron_v1.json` is the expected 16D/12D contract. Runtime use is legal only after the real task `meta/modality.json` matches every named slice.
+- State is `base_position[0:3] + base_rotation[3:7] + end_effector_position_relative[7:10] + end_effector_rotation_relative[10:14] + gripper_qpos[14:16]`.
+- Action is `base_motion[0:4] + control_mode[4:5] + end_effector_position[5:8] + end_effector_rotation[8:11] + gripper_close[11:12]`. No action dimension may be discarded.
+- Position-like components use dataset `q01/q99`; unit quaternion, controller-range, control-mode and gripper action components preserve their native `[-1,1]` representation. Quantile normalization reports clipping rate and supports an unclipped audit round-trip.
+- Model output keeps `control_mode` continuous during denoising, then discretizes it to `-1/+1` only when packing an environment action.
+- Legacy X-WAM action semantics are dual-arm 14D. The declared migration copies its left-arm 7D boundary weights into PandaOmron arm slice `[5:12]`, initializes new base/control slice `[0:5]`, and reinitializes proprio boundary layers because the two 16D vectors have different meanings.
+
 ## Model initialization
 
 Two modes remain supported:

@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "schema_id": "robocasa365_panda_omron_v1",
+  "scope": "atomic_only",
+  "robot_type": "PandaOmron",
+  "source": {
+    "modality_path": "meta/modality.json",
+    "statistics_path": "meta/stats.json",
+    "dataset_feature_contract": "RoboCasa365 LeRobot v2.1"
+  },
+  "state": {
+    "original_key": "observation.state",
+    "dimension": 16,
+    "components": [
+      {"name": "base_position", "start": 0, "end": 3, "normalization": "quantile"},
+      {"name": "base_rotation", "start": 3, "end": 7, "normalization": "identity_unit", "representation": "quaternion_wxyz"},
+      {"name": "end_effector_position_relative", "start": 7, "end": 10, "normalization": "quantile"},
+      {"name": "end_effector_rotation_relative", "start": 10, "end": 14, "normalization": "identity_unit", "representation": "quaternion_wxyz"},
+      {"name": "gripper_qpos", "start": 14, "end": 16, "normalization": "quantile"}
+    ]
+  },
+  "action": {
+    "original_key": "action",
+    "dimension": 12,
+    "components": [
+      {"name": "base_motion", "start": 0, "end": 4, "normalization": "identity_unit", "absolute": false},
+      {"name": "control_mode", "start": 4, "end": 5, "normalization": "categorical_sign", "values": [-1.0, 1.0]},
+      {"name": "end_effector_position", "start": 5, "end": 8, "normalization": "quantile", "absolute": false},
+      {"name": "end_effector_rotation", "start": 8, "end": 11, "normalization": "quantile", "absolute": false, "representation": "axis_angle"},
+      {"name": "gripper_close", "start": 11, "end": 12, "normalization": "identity_unit"}
+    ]
+  },
+  "videos": [
+    {"name": "robot0_agentview_left", "original_key": "observation.images.robot0_agentview_left", "camera_type": "static"},
+    {"name": "robot0_agentview_right", "original_key": "observation.images.robot0_agentview_right", "camera_type": "static"},
+    {"name": "robot0_eye_in_hand", "original_key": "observation.images.robot0_eye_in_hand", "camera_type": "dynamic"}
+  ],
+  "checkpoint_mapping": {
+    "source_action_schema": "legacy_dual_arm_14d",
+    "target_action_schema": "panda_omron_12d",
+    "arm_source_slice": [0, 7],
+    "arm_target_slice": [5, 12],
+    "new_action_slice": [0, 5],
+    "proprio_boundary_policy": "reinitialize_due_to_semantic_change"
+  }
+}
