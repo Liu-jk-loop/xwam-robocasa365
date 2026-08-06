@@ -5,9 +5,9 @@
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：M2——PandaOmron schema、normalization 与 checkpoint 适配
+- 当前阶段：M3——RGB-only Atomic 训练烟测准备
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1 全部门禁通过；M2 contract、两种初始化及真实 batch forward/backward 已通过；CPU offload 已到 DeepSpeed 初始化，待用 DeepSpeedCPUAdam 完成参数更新
+- 超算运行状态：M1、M2 全部门禁通过；A800 已完成 DeepSpeedCPUAdam 单 batch 参数更新，M3 短程训练待准备
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -16,8 +16,8 @@
 | --- | --- | --- | --- |
 | M0 工程与协作基线 | 已完成 | 主仓库已 clone | 模拟器阶段开始时确认第三方子模块 |
 | M1 原生 RoboCasa365 loader | 已完成 | commit `e4249b9` 真实 batch `ok=true` | 已关闭 |
-| M2 动作与 checkpoint 适配 | contract 已通过；训练归一化、14D→12D loader、双初始化和完整 12D 执行已实现 | 两种初始化和 forward/backward 已通过；CPU offload 需切换 DeepSpeedCPUAdam | CPU offload 下完成单 batch 参数更新 |
-| M3 RGB-only 训练烟测 | 未开始 | 待验证 | A100/A800 短程连续训练 |
+| M2 动作与 checkpoint 适配 | 已完成 | 两种初始化、完整动作契约及 DeepSpeedCPUAdam 单 batch 参数更新均通过 | 已关闭 |
+| M3 RGB-only 训练烟测 | 准备中 | 单步基线已通过；短程连续训练待验证 | A100/A800 极小样本过拟合与保存/恢复 |
 | M4 闭环评测器 | 未开始 | 待验证 | 完成一个 atomic 闭环 rollout |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
 | M6 Atomic 正式训练与评测 | 未开始 | 待验证 | 通过 H100 正式训练门禁 |
@@ -153,9 +153,18 @@ M2 单步训练第三次启动反馈：
 - runner 改为根据 `deepspeed_offload_optimizer` 选择 backend：M2 smoke 使用 `DeepSpeedCPUAdam`，正式默认配置 offload false 时仍使用 `torch.optim.AdamW`。
 - 不采用 `zero_force_ds_cpu_optimizer=false` 绕过方案；CPUAdam 扩展加载/编译和一次完整参数更新仍为 `cluster-pending`。
 
+M2 单步训练第四次启动与关闭证据：
+
+- 运行逻辑包含 commit `2c107b2` 独有的 optimizer backend 日志；反馈未单独附 `git rev-parse HEAD`，该复现字段在 M3 必须补齐。
+- checkpoint initialization 为 `xwam_pretrained/pass`；DeepSpeed 配置为 ZeRO-2、CPU optimizer offload、1e8 bucket、关闭 overlap，backend 为 `deepspeed_cpu_adam`。
+- 真实 `CloseFridge` batch 产生 video/action/proprio loss `0.191945/1.254097/1.533597`，depth loss 为 0，总 loss `2.979639` 与分项求和一致。
+- Trainer 正常报告 `max_steps=1 reached`，无 traceback；因此 forward、backward 和第一次 CPUAdam 参数更新全部通过。
+- CUDA peak allocated/reserved 为 `30.677/40.076 GiB`，证明 M2 单卡 offload profile 可在 A800 80GB 上完成训练 step。
+- M2 的 schema round-trip、checkpoint 可解释加载、完整 12D 动作、RGB-only 数据与单 batch 训练全部满足退出条件，阶段正式关闭。
+
 ## 待提供输入
 
-- 拉取按 offload 状态选择 DeepSpeedCPUAdam/Torch AdamW 的最新逻辑；确认主机 `available` 内存至少 64 GiB 后，原 Python 命令不变地重跑完整单 batch train step，反馈返回码、`free -h`、CPUAdam 编译信息、GPU 峰值、首个 loss、完整日志和初始化 JSON。
+- M3 先准备单任务极小样本过拟合和保存/恢复门禁；运行反馈必须显式包含 `git rev-parse HEAD`、返回码、`free -h`、完整解析配置、连续 loss、GPU 峰值、吞吐和 checkpoint 路径。
 - 不在本轮运行闭环 simulator；新版在线 16D observation 提取将在 M4 实现和验收。
 
 ## 当前执行过程
@@ -173,3 +182,4 @@ M2 单步训练第三次启动反馈：
 11. 第一次启动在可选 TensorBoard logger 构造阶段退出；Codex 改为 smoke 显式关闭 TensorBoard，等待同命令重跑。
 12. 第二次启动已完成 forward/backward，在首次 AdamW optimizer state 初始化时因 80GB 显存容量不足退出；Codex 改为 ZeRO-2 CPU optimizer offload，等待单 batch 参数更新复测。
 13. 第三次启动在 DeepSpeed 初始化阶段因 offload 仍收到 Torch AdamW 而退出；Codex 将 M2 offload 分支切换为 DeepSpeedCPUAdam，正式配置保持 Torch AdamW，等待复测。
+14. 第四次启动已用 DeepSpeedCPUAdam 完成真实 batch 的 forward、backward 和 optimizer update；CUDA allocated peak 30.677 GiB、首个 loss 2.979639，M2 关闭并进入 M3 准备。

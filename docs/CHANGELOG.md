@@ -1,5 +1,26 @@
 # 变更记录
 
+## 2026-08-06 — M2 单步训练集群验收通过
+
+- 分支：`dev/atomic-robocasa365`
+- 测试逻辑：包含 commit `2c107b2` 新增的 `Optimizer backend: deepspeed_cpu_adam`；反馈未单独附 `git rev-parse HEAD`
+- 运行状态：`pass`；M2 关闭，下一阶段进入 M3 RGB-only 训练烟测
+
+### 星光验收证据
+
+- 真实数据为 `CloseFridge/20250819`，配置固定 RGB-only、12D action、16D proprio、batch size 1、单 GPU 和一步训练。
+- X-WAM checkpoint adapter 报告 `mode=xwam_pretrained, result=pass`；模型为 5.0B trainable、6.4B non-trainable、11.4B total。
+- DeepSpeed 正确解析 ZeRO-2 CPU optimizer offload、1e8 allgather/reduce bucket 和关闭 overlap；optimizer backend 为 `deepspeed_cpu_adam`。
+- 训练输出 video loss `0.191945`、action loss `1.254097`、proprio loss `1.533597`、depth loss `0.000`、总 loss `2.979639`，分项求和与总 loss 一致。
+- `Trainer.fit` 以 `max_steps=1 reached` 正常停止且没有 traceback，证明真实 batch 的 forward、backward 和第一次 optimizer update 均已完成。
+- CUDA peak allocated `30.677 GiB`、reserved `40.076 GiB`；相比 GPU AdamW 首次更新失败时的 allocated `77.645 GiB`，单卡 debug 显存策略已验证有效。
+
+### 边界、兼容性和后续
+
+- BF16 model summary 估算、0-worker、冻结模块 eval mode、TF32 deprecated 和 val interval 提示均未阻塞训练；0 worker 是 M2 smoke 的显式设置，T5/VAE 为预期冻结模块。
+- 本轮没有显式 `train_exit_code`、`free -h` 或单独的 `git rev-parse HEAD`；正常 `max_steps` 退出和最终 CUDA peak 已足够关闭单步计算门禁，但这些字段在 M3 性能/复现记录中必须补齐。
+- 本次只记录集群证据，不修改模型、数据、optimizer 或配置逻辑。正式默认配置仍为 offload false 和 Torch AdamW；H100 多卡策略在 M3/M6 单独冻结。
+
 ## 2026-08-06 — M2 offload optimizer 选择 DeepSpeedCPUAdam
 
 - 分支：`dev/atomic-robocasa365`
