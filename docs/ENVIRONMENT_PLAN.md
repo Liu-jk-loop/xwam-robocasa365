@@ -2,9 +2,9 @@
 
 ## 一、结论
 
-优先审计并复用现有 `abot_m05`，但不直接在原环境中安装或升级包。审计通过后使用 Conda clone 创建独立的 `xwam-robocasa365` policy 环境；审计失败时根据 JSON 报告只处理不兼容项。
+`abot_m05` 已完成首轮审计，结论为“可以作为 clone 底座，但不能原样运行 X-WAM”。不要直接在原环境中安装或升级包；使用 Conda clone 创建独立的 `xwam-robocasa365` policy 环境后，再按报告处理不兼容项。
 
-不要在拿到审计报告前执行 `pip install -r requirements.txt`，避免升级已有 Torch、NumPy、DeepSpeed 或 FlashAttention 并破坏可复用的二进制扩展。
+已确认可复用的核心是 Python 3.10.20、Torch 2.9.0+cu128、A800 CUDA runtime 和 FlashAttention 2.8.3。原环境没有安装 DeepSpeed，因此不存在可继承的 DeepSpeed 编译产物；不要为了补包修改 `abot_m05`。
 
 官方依据：
 
@@ -53,20 +53,36 @@ conda activate abot_m05
 python scripts/audit_starlight_environment.py \
   --require-gpu \
   --include-deepspeed-report \
-  --output /tmp/abot_m05_xwam_environment.json
+  --log-file logs/cluster/abot_m05_xwam_environment.json
 ```
 
-该命令只读取环境信息、执行 `pip check`，并在隔离子进程中测试关键 import；它不安装包，也不会主动编译 DeepSpeed op。返回非零不代表要重建环境，应先查看 JSON 的 `errors` 和 `warnings`。
+该命令只读取环境信息、执行 `pip check`，并在隔离子进程中测试关键 import；它不安装包，也不会主动编译 DeepSpeed op。脚本会先原子写入项目下的持久化日志，再向终端打印 JSON。`logs/cluster/` 已加入 `.gitignore`，不会把集群日志提交到 Git。
+
+返回非零表示环境尚不能直接运行 X-WAM，不等于不能作为 clone 底座。查看以下字段：
+
+- `ok`：当前环境是否已经满足全部 X-WAM 依赖。
+- `clone_base_ok`：Python/Torch/CUDA 核心是否足以作为 clone 底座。
+- `reuse_recommendation`：`clone_ready`、`clone_then_patch` 或需要重建。
 
 需要反馈：
 
 1. `git rev-parse HEAD`。
-2. `/tmp/abot_m05_xwam_environment.json` 完整内容。
+2. `logs/cluster/abot_m05_xwam_environment.json` 完整内容。
 3. 若命令异常退出，附完整 traceback。
 
 ## 四、E1：复用判定
 
-满足以下条件时采用 clone：
+首轮报告（commit `16ff913`）已经确认：
+
+- `abot_m05` 使用 Python 3.10.20。
+- Torch 2.9.0+cu128、torchvision 0.24.0、torchaudio 2.9.0 均可 import。
+- Torch 正确识别 A800 80GB，compute capability 为 8.0。
+- 系统 nvcc 与 Torch CUDA 均为 12.8。
+- FlashAttention 2.8.3 可 import。
+- `pip check` 通过。
+- 需要在 clone 中处理 NumPy 1.26.4、Transformers 4.55.2，并补 Lightning、DeepSpeed、SciPy、Decord、OmegaConf 等包。
+
+因此采用 `clone_then_patch`。完成补包后，目标环境需要满足：
 
 - Python 为 3.10。
 - Torch 至少为 2.4，Torch runtime 能识别 A800。
@@ -76,7 +92,7 @@ python scripts/audit_starlight_environment.py \
 - FlashAttention、Lightning、Diffusers、Decord 等关键 import 成功。
 - `pip check` 不存在依赖冲突。
 
-审计 `ok=true` 后才执行：
+源环境的新版持久化报告确认 `clone_base_ok=true` 后执行：
 
 ```bash
 conda create -n xwam-robocasa365 --clone abot_m05
@@ -88,7 +104,7 @@ cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
 python scripts/audit_starlight_environment.py \
   --require-gpu \
   --include-deepspeed-report \
-  --output /tmp/xwam_robocasa365_environment.json
+  --log-file logs/cluster/xwam_robocasa365_environment.json
 python -m pip check
 ```
 
@@ -97,6 +113,7 @@ clone 会保留环境中已安装的 Python 包和二进制扩展。`TORCH_EXTEN
 ## 五、DeepSpeed 处理原则
 
 - 不设置 `DS_BUILD_OPS=1`，不预编译全部 op。
+- `abot_m05` 当前没有安装 DeepSpeed；在 clone 中安装 Python 包时默认不会预编译全部 CUDA op。
 - 当前 X-WAM 使用 `torch.optim.AdamW`，且 `DeepSpeedStrategy` 尚未配置 CPU/NVMe offload；因此 CPUAdam、AIO 等未安装不构成当前烟测失败。
 - 先用 `ds_report` 查看 installed/compatible 状态，再由真实一步训练确定实际需要的 op。
 - 若某个必需 op 首次 JIT 过慢，只编译该 op，或为相同 Python/Torch/CUDA/GPU 架构构建一次 wheel 后复用。

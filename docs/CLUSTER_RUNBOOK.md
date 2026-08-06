@@ -44,7 +44,7 @@ python scripts/audit_robocasa365_dataset.py \
 
 ## X-WAM Conda 环境
 
-先按 `docs/ENVIRONMENT_PLAN.md` 的 E0 步骤审计当前 `abot_m05`。收到 JSON 报告并确认 `ok=true` 后，再 clone 为独立的 `xwam-robocasa365` 环境。不要在 `abot_m05` 中直接运行全量依赖安装。
+先按 `docs/ENVIRONMENT_PLAN.md` 的 E0 步骤审计当前 `abot_m05`，日志写入 `logs/cluster/`。`ok=false` 只表示不能直接运行；当 `clone_base_ok=true` 且 `reuse_recommendation=clone_then_patch` 时，可以 clone 为独立环境后补依赖。不要在 `abot_m05` 中直接运行全量依赖安装。
 
 ## 外部模型路径
 

@@ -143,6 +143,37 @@ def evaluate_packages(
     return results, errors, warnings
 
 
+def classify_clone_base(
+    python_ok: bool,
+    packages: list[dict[str, Any]],
+    torch_probe: dict[str, Any],
+    *,
+    require_gpu: bool,
+) -> tuple[bool, list[str]]:
+    """区分“可 clone 后修补”与 Python/Torch/CUDA 核心底座不可复用。"""
+    hard_blockers: list[str] = []
+    if not python_ok:
+        hard_blockers.append("Python 主次版本不满足 policy 环境契约")
+
+    by_distribution = {item["distribution"]: item for item in packages}
+    for distribution in ("torch", "torchvision", "torchaudio"):
+        item = by_distribution.get(distribution)
+        if item is None or item.get("installed") is None:
+            hard_blockers.append(f"缺少 CUDA 核心包：{distribution}")
+            continue
+        if not item.get("constraint_ok"):
+            hard_blockers.append(f"CUDA 核心包版本不兼容：{distribution}")
+        runtime_import = item.get("runtime_import")
+        if runtime_import is not None and not runtime_import.get("ok"):
+            hard_blockers.append(f"CUDA 核心包 import 失败：{distribution}")
+
+    if not torch_probe.get("ok"):
+        hard_blockers.append("Torch runtime probe 失败")
+    elif require_gpu and not torch_probe.get("details", {}).get("cuda_available"):
+        hard_blockers.append("Torch 无法识别当前 CUDA GPU")
+    return not hard_blockers, hard_blockers
+
+
 def probe_torch() -> dict[str, Any]:
     code = """
 import json
@@ -247,12 +278,26 @@ def audit_environment(
     if not nvcc["ok"]:
         warnings.append("未找到可用 nvcc；若需要编译 FlashAttention/DeepSpeed op，将无法完成。")
 
+    clone_base_ok, hard_blockers = classify_clone_base(
+        python_ok,
+        packages,
+        torch_probe,
+        require_gpu=require_gpu,
+    )
     ok = not errors
+    if ok:
+        reuse_recommendation = "clone_ready"
+    elif clone_base_ok:
+        reuse_recommendation = "clone_then_patch"
+    else:
+        reuse_recommendation = "select_another_base_or_rebuild"
     return {
         "schema_version": 1,
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "ok": ok,
-        "reuse_recommendation": "clone_abot_m05" if ok else "inspect_errors_before_clone",
+        "clone_base_ok": clone_base_ok,
+        "reuse_recommendation": reuse_recommendation,
+        "hard_blockers": hard_blockers,
         "environment": {
             "conda_default_env": os.environ.get("CONDA_DEFAULT_ENV"),
             "conda_prefix": os.environ.get("CONDA_PREFIX"),

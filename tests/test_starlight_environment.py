@@ -1,8 +1,21 @@
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
+import tempfile
 import unittest
+from pathlib import Path
 
-from project_tools.starlight_environment import evaluate_packages, version_key, version_satisfies
+from project_tools.starlight_environment import (
+    classify_clone_base,
+    evaluate_packages,
+    version_key,
+    version_satisfies,
+)
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class StarlightEnvironmentTest(unittest.TestCase):
@@ -37,6 +50,63 @@ class StarlightEnvironmentTest(unittest.TestCase):
         self.assertEqual(len(results), 3)
         self.assertTrue(any("numpy" in error for error in errors))
         self.assertTrue(any("ninja" in warning for warning in warnings))
+
+    def test_missing_patchable_packages_do_not_reject_clone_base(self) -> None:
+        packages = [
+            {"distribution": name, "installed": version, "constraint_ok": True, "runtime_import": {"ok": True}}
+            for name, version in (
+                ("torch", "2.9.0"),
+                ("torchvision", "0.24.0"),
+                ("torchaudio", "2.9.0"),
+            )
+        ]
+        packages.append({"distribution": "deepspeed", "installed": None, "constraint_ok": False})
+        clone_base_ok, blockers = classify_clone_base(
+            True,
+            packages,
+            {"ok": True, "details": {"cuda_available": True}},
+            require_gpu=True,
+        )
+        self.assertTrue(clone_base_ok)
+        self.assertEqual(blockers, [])
+
+    def test_broken_torch_rejects_clone_base(self) -> None:
+        packages = [
+            {"distribution": "torch", "installed": "2.9.0", "constraint_ok": True, "runtime_import": {"ok": False}},
+            {"distribution": "torchvision", "installed": "0.24.0", "constraint_ok": True},
+            {"distribution": "torchaudio", "installed": "2.9.0", "constraint_ok": True},
+        ]
+        clone_base_ok, blockers = classify_clone_base(
+            True,
+            packages,
+            {"ok": False},
+            require_gpu=True,
+        )
+        self.assertFalse(clone_base_ok)
+        self.assertTrue(any("torch" in blocker.lower() for blocker in blockers))
+
+    def test_cli_persists_report_before_returning_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "cluster" / "environment.json"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(REPO_ROOT / "scripts" / "audit_starlight_environment.py"),
+                    "--skip-runtime-imports",
+                    "--output",
+                    str(output),
+                ],
+                cwd=REPO_ROOT,
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertIn(result.returncode, (0, 1), result.stderr)
+            self.assertTrue(output.is_file())
+            report = json.loads(output.read_text(encoding="utf-8"))
+            self.assertIn("ok", report)
+            self.assertIn(str(output.resolve()), result.stderr)
 
 
 if __name__ == "__main__":

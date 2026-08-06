@@ -5,6 +5,7 @@ CLAUDE.md
 
 experiments/
 eval_results/
+logs/cluster/
 checkpoints/
 sft_datasets/
 pretrain_datasets/

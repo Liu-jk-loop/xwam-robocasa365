@@ -1,5 +1,48 @@
 # 变更记录
 
+## 2026-08-06 — 环境日志持久化与 `abot_m05` 复用结论
+
+- 分支：`dev/atomic-robocasa365`
+- 基线 commit：`16ff913`
+- 运行状态：A800 环境审计已完成；clone 环境尚未创建
+
+### 问题
+
+环境 audit 将 JSON 写入容器根目录的 `/tmp`。该目录不在项目路径下，换 Pod 后可能消失，用户也容易在当前工作目录中找不到它。同时原报告只有 `ok=false`，无法区分“核心底座不可复用”和“可以 clone 后补包”。
+
+### 新增和修改逻辑
+
+- 默认将报告写入项目下 `logs/cluster/starlight_environment_latest.json`，并支持 `--log-file` 别名。
+- 输出改为先原子落盘、再打印；意外 Python 异常也生成包含 traceback 的持久化报告。
+- `logs/cluster/` 加入 `.gitignore`，防止完整集群日志进入 Git。
+- 增加 `clone_base_ok`、`hard_blockers` 和三态 `reuse_recommendation`。
+- 记录 commit `16ff913` 的真实环境证据，并将 `abot_m05` 判定为 `clone_then_patch`。
+
+### 环境结论
+
+- 可复用核心：Python 3.10.20、Torch 2.9.0+cu128、A800 80GB、nvcc 12.8、FlashAttention 2.8.3。
+- 原环境没有 DeepSpeed，不存在需要保留的 DeepSpeed 编译产物。
+- clone 后需要修正 NumPy/Transformers 并补齐 Lightning、DeepSpeed、SciPy、Decord、OmegaConf 等依赖。
+- 原 `abot_m05` 不做任何安装或降级。
+
+### 涉及文件
+
+- 审计逻辑：`project_tools/starlight_environment.py`、`scripts/audit_starlight_environment.py`。
+- 测试：`tests/test_starlight_environment.py`。
+- 日志隔离：`.gitignore`。
+- 文档：`docs/ENVIRONMENT_PLAN.md`、`docs/CLUSTER_RUNBOOK.md`、`docs/PROGRESS.md`。
+
+### 验证
+
+- 环境审计相关测试：7 项通过，包含失败报告持久化测试。
+- 既有数据契约测试：6 项通过。
+- Python compile 和 Git diff check：通过。
+- 新版脚本星光日志路径：`cluster-pending`。
+
+### 回滚
+
+回退本次 commit；不会删除已有日志、修改 Conda 环境或影响外部数据/权重。
+
 ## 2026-08-06 — M1 集群证据与星光环境复用审计
 
 - 分支：`dev/atomic-robocasa365`
