@@ -46,6 +46,34 @@ python scripts/audit_robocasa365_dataset.py \
 
 先按 `docs/ENVIRONMENT_PLAN.md` 的 E0 步骤审计当前 `abot_m05`，日志写入 `logs/cluster/`。`ok=false` 只表示不能直接运行；当 `clone_base_ok=true` 且 `reuse_recommendation=clone_then_patch` 时，可以 clone 为独立环境后补依赖。不要在 `abot_m05` 中直接运行全量依赖安装。
 
+当前 A800 日志已经满足 clone 条件。执行以下完整命令；它不会取消现有代理：
+
+```bash
+conda env list
+conda create -n xwam-robocasa365 --clone abot_m05
+conda activate xwam-robocasa365
+
+export TORCH_EXTENSIONS_DIR=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/.cache/torch_extensions/xwam-robocasa365
+
+cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+bash scripts/install_starlight_dependencies.sh dry-run
+bash scripts/install_starlight_dependencies.sh apply
+
+python scripts/audit_starlight_environment.py \
+  --require-gpu \
+  --include-deepspeed-report \
+  --log-file logs/cluster/xwam_robocasa365_environment.json
+```
+
+如果同名环境已经存在，跳过 `conda create`，直接激活并从 `dry-run` 开始。不要为了重试自行删除环境。反馈以下文件：
+
+1. `logs/cluster/xwam_dependency_dry-run_*.log`。
+2. `logs/cluster/xwam_dependency_apply_*.log`。
+3. `logs/cluster/xwam_dependency_apply_*_after.txt`。
+4. `logs/cluster/xwam_robocasa365_environment.json`。
+
+安装脚本会拒绝在 `abot_m05` 中执行；核心约束文件会阻止 pip 替换已验证的 Torch、torchvision、torchaudio 和 FlashAttention。
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：

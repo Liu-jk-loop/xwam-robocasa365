@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,39 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class StarlightEnvironmentTest(unittest.TestCase):
+    def test_cluster_constraints_protect_audited_cuda_stack(self) -> None:
+        constraints = (
+            REPO_ROOT / "configs" / "environment" / "xwam_starlight_constraints.txt"
+        ).read_text(encoding="utf-8")
+        for expected in (
+            "torch==2.9.0",
+            "torchvision==0.24.0",
+            "torchaudio==2.9.0",
+            "flash-attn==2.8.3",
+            "numpy==1.23.5",
+            "transformers==4.51.3",
+        ):
+            self.assertIn(expected, constraints)
+
+    def test_dependency_installer_refuses_source_environment(self) -> None:
+        environment = os.environ.copy()
+        environment["CONDA_DEFAULT_ENV"] = "abot_m05"
+        result = subprocess.run(
+            [
+                "bash",
+                str(REPO_ROOT / "scripts" / "install_starlight_dependencies.sh"),
+                "dry-run",
+            ],
+            cwd=REPO_ROOT,
+            env=environment,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("只读母环境", result.stderr)
+
     def test_version_key_handles_cuda_and_build_suffixes(self) -> None:
         self.assertEqual(version_key("2.8.0+cu128"), (2, 8, 0, 0))
         self.assertEqual(version_key("4.51.3.dev0"), (4, 51, 3, 0))

@@ -82,35 +82,52 @@ python scripts/audit_starlight_environment.py \
 - `pip check` 通过。
 - 需要在 clone 中处理 NumPy 1.26.4、Transformers 4.55.2，并补 Lightning、DeepSpeed、SciPy、Decord、OmegaConf 等包。
 
-因此采用 `clone_then_patch`。完成补包后，目标环境需要满足：
+因此采用 `clone_then_patch`。环境日志对应 commit `d5cef4d`，没有 hard blocker；DeepSpeed 报错仅由包尚未安装引起。完成补包后，目标环境需要满足：
 
 - Python 为 3.10。
 - Torch 至少为 2.4，Torch runtime 能识别 A800。
 - NumPy 位于 `[1.23.5, 1.26.0)`。
 - Transformers 位于 `[4.49.0, 4.51.3]`。
-- DeepSpeed 至少为 0.16，`deepspeed` import 和 `ds_report` 成功。
+- Lightning 位于 `[2.5, 2.7)`，DeepSpeed 位于 `[0.18, 0.20)`，`deepspeed` import 和 `ds_report` 成功。
 - FlashAttention、Lightning、Diffusers、Decord 等关键 import 成功。
 - `pip check` 不存在依赖冲突。
 
-源环境的新版持久化报告确认 `clone_base_ok=true` 后执行：
+## 五、E2：clone 与增量安装
+
+环境创建、依赖解析和安装均在登录到 A800 任务节点后执行。现有代理保持不变，不执行 `unset http_proxy`、`unset https_proxy` 或类似命令。
+
+先创建独立环境；如果 `conda env list` 已存在同名环境，不要重复 clone，也不要删除，先激活后运行 audit 判断其状态：
 
 ```bash
+conda env list
 conda create -n xwam-robocasa365 --clone abot_m05
 conda activate xwam-robocasa365
 
 export TORCH_EXTENSIONS_DIR=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/.cache/torch_extensions/xwam-robocasa365
 
 cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+bash scripts/install_starlight_dependencies.sh dry-run
+bash scripts/install_starlight_dependencies.sh apply
+```
+
+clone 会保留环境中已安装的 Python 包和二进制扩展。安装脚本只允许在 `xwam-robocasa365` 中运行，会拒绝修改 `abot_m05`；它使用 `configs/environment/xwam_starlight_constraints.txt` 保护已经验证的 Torch 2.9.0、torchvision 0.24.0、torchaudio 2.9.0、FlashAttention 2.8.3 以及 CUDA 12.8 组合。pip 子进程显式使用 `DS_BUILD_OPS=0`，避免安装阶段预编译 DeepSpeed CUDA op；脚本不会修改代理变量。
+
+`dry-run` 只进行 pip 依赖解析，结果写入 `logs/cluster/xwam_dependency_dry-run_<UTC时间>.log`。`apply` 执行相同解析并安装，随后运行 `pip check`，同时写入安装前后 `pip freeze`。首次集群烟测通过后，以 `*_after.txt` 为依据生成完整锁文件；在此之前，Lightning/DeepSpeed 使用经过约束的稳定版本区间，而不是假装已有集群验证的精确版本。
+
+安装完成后执行验收：
+
+```bash
 python scripts/audit_starlight_environment.py \
   --require-gpu \
   --include-deepspeed-report \
   --log-file logs/cluster/xwam_robocasa365_environment.json
+
 python -m pip check
 ```
 
-clone 会保留环境中已安装的 Python 包和二进制扩展。`TORCH_EXTENSIONS_DIR` 使用独立目录，避免其他环境留下的 Torch/CUDA JIT 缓存造成 ABI 冲突。
+预期 `ok=true`、`reuse_recommendation=clone_ready`。`ds_report` 中当前未使用的 CPUAdam、AIO 等 op 显示未安装不等于失败；以报告命令返回码、DeepSpeed import 和后续真实一步训练为准。`TORCH_EXTENSIONS_DIR` 使用独立目录，避免其他环境留下的 Torch/CUDA JIT 缓存造成 ABI 冲突。
 
-## 五、DeepSpeed 处理原则
+## 六、DeepSpeed 处理原则
 
 - 不设置 `DS_BUILD_OPS=1`，不预编译全部 op。
 - `abot_m05` 当前没有安装 DeepSpeed；在 clone 中安装 Python 包时默认不会预编译全部 CUDA op。
@@ -120,7 +137,7 @@ clone 会保留环境中已安装的 Python 包和二进制扩展。`TORCH_EXTEN
 - 禁止使用 `DS_SKIP_CUDA_CHECK=1` 掩盖 CUDA 不匹配。
 - A800 为 Ampere（SM80），H100 为 Hopper（SM90）；若后续必须自行编译 CUDA 扩展，构建产物必须覆盖实际训练卡架构。
 
-## 六、全新环境后备方案
+## 七、全新环境后备方案
 
 仅当 `abot_m05` 的 Python/Torch ABI 或核心依赖无法兼容时启用：
 
@@ -130,4 +147,4 @@ clone 会保留环境中已安装的 Python 包和二进制扩展。`TORCH_EXTEN
 - FlashAttention 2.8.3。
 - 其余依赖遵守 `configs/environment/xwam_starlight.json`。
 
-具体安装命令要等 E0 报告后生成，避免无依据地重装 DeepSpeed/FlashAttention。
+该方案当前不启用；现有报告已证明 clone 底座可用。

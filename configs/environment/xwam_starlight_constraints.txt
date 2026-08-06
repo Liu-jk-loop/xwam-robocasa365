@@ -1,0 +1,27 @@
+# abot_m05 clone 的核心包保护约束。
+#
+# 这些版本来自 2026-08-06 的 A800 环境审计。安装 X-WAM 依赖时必须通过
+# `python -m pip install -c <本文件> -r requirements.txt` 使用，防止 pip
+# 替换已经验证可用的 Torch/CUDA/FlashAttention 组合。
+torch==2.9.0
+torchvision==0.24.0
+torchaudio==2.9.0
+flash-attn==2.8.3
+
+# X-WAM upstream 明确测试或限制的版本。
+numpy==1.23.5
+transformers==4.51.3
+
+# abot_m05 中已经通过 import 的 Python 侧依赖；保留版本以缩小变更面。
+diffusers==0.38.0
+tokenizers==0.21.4
+accelerate==1.14.0
+opencv-python==4.11.0.86
+imageio==2.37.4
+imageio-ffmpeg==0.6.0
+einops==0.8.2
+ninja==1.13.0
+
+# 限制到当前稳定主版本；集群烟测通过后再根据 freeze 生成完整锁文件。
+lightning>=2.5,<2.7
+deepspeed>=0.18,<0.20

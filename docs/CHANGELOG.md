@@ -1,5 +1,42 @@
 # 变更记录
 
+## 2026-08-06 — 星光 clone 环境增量安装方案
+
+- 分支：`dev/atomic-robocasa365`
+- 环境证据 commit：`d5cef4d`
+- 运行状态：本地静态验证完成；依赖解析、安装和 GPU audit 为 `cluster-pending`
+
+### 问题
+
+真实环境报告已证明 `abot_m05` 可作为 clone 底座，但原环境的 NumPy/Transformers 越界，并缺少 Lightning、DeepSpeed 等 X-WAM 依赖。直接执行未约束的 `pip install -r requirements.txt` 可能替换已经验证的 Torch/CUDA/FlashAttention 栈，也缺少安装日志和前后环境快照。
+
+### 新增和修改逻辑
+
+- 增加 `abot_m05` 审计版本约束，保护 Torch 2.9.0、torchvision 0.24.0、torchaudio 2.9.0、FlashAttention 2.8.3 及已验证 Python 依赖。
+- 将 NumPy 固定为 upstream 测试的 1.23.5，将 Transformers 固定为允许上界 4.51.3。
+- Lightning/DeepSpeed 使用稳定主版本区间，首次集群烟测后再依据安装后 freeze 锁定完整精确环境。
+- 增加依赖安装脚本，支持 `dry-run` 和 `apply`；强制目标环境名为 `xwam-robocasa365`，明确拒绝修改 `abot_m05`。
+- dry-run、apply、pip check 和安装前后 freeze 都写入项目 `logs/cluster/`；不修改代理，并以 `DS_BUILD_OPS=0` 禁止安装阶段预编译 DeepSpeed op。
+- 根据真实报告补全中文 clone、安装、验收和反馈命令。
+
+### 涉及文件
+
+- 约束与契约：`configs/environment/xwam_starlight_constraints.txt`、`configs/environment/xwam_starlight.json`。
+- 安装入口：`scripts/install_starlight_dependencies.sh`。
+- 测试：`tests/test_starlight_environment.py`。
+- 文档：`docs/ENVIRONMENT_PLAN.md`、`docs/CLUSTER_RUNBOOK.md`、`docs/PROGRESS.md`。
+
+### 兼容性、风险和验证
+
+- 不修改源环境、外部数据、模型权重或代理变量。
+- DeepSpeed 默认安装不预编译全部 CUDA op；真实训练需要的 op 仍可能在首次使用时 JIT 编译。
+- 本地验证安装器能够拒绝 `abot_m05`，核心约束存在，shell 语法、无 Torch 单元测试、文档门禁和 Git diff 检查通过。
+- pip resolver、DeepSpeed import、`ds_report`、A800 CUDA import 和最终 `ok=true` 均为 `cluster-pending`。
+
+### 回滚
+
+回退本次 commit。若集群 apply 已执行，只删除 clone 出的独立环境才会回滚外部环境；不要修改或删除 `abot_m05`。
+
 ## 2026-08-06 — 环境日志持久化与 `abot_m05` 复用结论
 
 - 分支：`dev/atomic-robocasa365`
