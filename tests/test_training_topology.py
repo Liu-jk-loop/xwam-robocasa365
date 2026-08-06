@@ -3,10 +3,54 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from project_tools.training_topology import resolve_training_topology
+from project_tools.training_topology import (
+    resolve_deepspeed_options,
+    resolve_training_topology,
+)
 
 
 class TrainingTopologyTest(unittest.TestCase):
+    def test_legacy_deepspeed_defaults_are_unchanged(self) -> None:
+        options = resolve_deepspeed_options({})
+        self.assertEqual(options["stage"], 2)
+        self.assertFalse(options["offload_optimizer"])
+        self.assertTrue(options["overlap_comm"])
+        self.assertEqual(options["allgather_bucket_size"], 500_000_000)
+        self.assertEqual(options["reduce_bucket_size"], 500_000_000)
+
+    def test_m2_smoke_offloads_optimizer_and_reduces_buckets(self) -> None:
+        options = resolve_deepspeed_options(
+            {
+                "deepspeed_stage": 2,
+                "deepspeed_offload_optimizer": True,
+                "deepspeed_offload_optimizer_device": "cpu",
+                "deepspeed_overlap_comm": False,
+                "deepspeed_bucket_size": 100_000_000,
+            }
+        )
+        self.assertTrue(options["offload_optimizer"])
+        self.assertEqual(options["offload_optimizer_device"], "cpu")
+        self.assertFalse(options["overlap_comm"])
+        self.assertEqual(options["allgather_bucket_size"], 100_000_000)
+
+    def test_rejects_invalid_deepspeed_values(self) -> None:
+        for config in (
+            {"deepspeed_stage": 0},
+            {"deepspeed_bucket_size": 0},
+            {"deepspeed_offload_optimizer_device": "cuda"},
+        ):
+            with self.subTest(config=config), self.assertRaises(ValueError):
+                resolve_deepspeed_options(config)
+
+    def test_m2_config_and_entrypoint_wire_optimizer_offload(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        config = (repo_root / "configs/model/wan22_5b_robocasa365_atomic_m2.yaml").read_text()
+        train_entrypoint = (repo_root / "scripts/train_sft.py").read_text()
+        self.assertIn("deepspeed_offload_optimizer: true", config)
+        self.assertIn("deepspeed_bucket_size: 100000000", config)
+        self.assertIn("resolve_deepspeed_options(config)", train_entrypoint)
+        self.assertIn("DeepSpeedStrategy(**deepspeed_options)", train_entrypoint)
+
     def test_m2_smoke_disables_optional_tensorboard_logger(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
         config = (repo_root / "configs/model/wan22_5b_robocasa365_atomic_m2.yaml").read_text()

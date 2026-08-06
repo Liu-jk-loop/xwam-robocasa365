@@ -1,5 +1,29 @@
 # 变更记录
 
+## 2026-08-06 — M2 optimizer-step OOM 与 ZeRO-2 CPU offload
+
+- 分支：`dev/atomic-robocasa365`
+- 运行状态：真实 batch forward/backward 通过；首次 optimizer step OOM，CPU offload 复测为 `cluster-pending`
+
+### 问题与诊断
+
+- A800 80GB 在 forward/backward 后达到 allocated 77.645 GiB、reserved 77.748 GiB；AdamW 初始化 `exp_avg_sq` 时还需 18.77 GiB，因只剩约 239 MiB 而退出。
+- reserved-but-unallocated 仅约 103 MiB，排除 allocator 碎片为主因；这是约 37.5 GiB 两组 FP32 Adam moment 的真实容量问题。
+- 模型构造、checkpoint 迁移、数据读取、12D/16D 契约和反向计算均已越过，不需要修改 RoboCasa365 数据或启用 depth。
+
+### 新增和修改逻辑
+
+- 训练入口把 DeepSpeed stage、optimizer offload、offload device、pin memory、communication overlap 和 bucket size 改为显式配置并在启动时打印解析结果。
+- M2 单卡 smoke 使用 ZeRO-2 CPU optimizer offload；bucket 从 5e8 降为 1e8，并关闭 overlap，避免通信 buffer 进一步挤占显存。
+- upstream legacy 配置显式保留原 ZeRO-2 GPU optimizer、5e8 bucket 和 overlap 行为，避免改变既有训练实验。
+- 增加无 Torch 配置解析和入口 wiring 测试；runbook 要求运行前确认主机可用内存，建议至少 64 GiB。
+
+### 验证、风险和回滚
+
+- 本地没有 Torch；解析、静态 wiring、Python compile、完整无 Torch 单元测试和 diff 检查通过后发布，真实 DeepSpeed offload 参数更新为 `cluster-pending`。
+- CPU offload 预计使用约 37.5 GiB optimizer moment 内存，并会降低单步速度；主机内存不足时禁止启动，优先改为多 GPU ZeRO 或后续评估 ZeRO-3，而不是修改数据语义。
+- 将 `deepspeed_offload_optimizer` 设回 `false` 并恢复 bucket/overlap 可回退；这会重现单卡 80GB optimizer-step OOM。
+
 ## 2026-08-06 — M2 smoke 解除可选 TensorBoard 依赖
 
 - 分支：`dev/atomic-robocasa365`

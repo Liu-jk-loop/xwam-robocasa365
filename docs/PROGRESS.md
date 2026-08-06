@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：M2——PandaOmron schema、normalization 与 checkpoint 适配
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1 全部门禁通过；M2 contract、`xwam_pretrained` 与 `wan_base` 初始化均已通过，单步反传待执行
+- 超算运行状态：M1 全部门禁通过；M2 contract、两种初始化及真实 batch forward/backward 已通过，首次 optimizer step 因 Adam state 显存不足待复测
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -16,8 +16,8 @@
 | --- | --- | --- | --- |
 | M0 工程与协作基线 | 已完成 | 主仓库已 clone | 模拟器阶段开始时确认第三方子模块 |
 | M1 原生 RoboCasa365 loader | 已完成 | commit `e4249b9` 真实 batch `ok=true` | 已关闭 |
-| M2 动作与 checkpoint 适配 | contract 已通过；训练归一化、14D→12D loader、双初始化和完整 12D 执行已实现 | commit `4951844` 两种初始化均为 `ok=true`；反传待验证 | 单 batch forward/backward |
-| M3 RGB-only 训练烟测 | 未开始 | 待验证 | A100/A800 单 batch forward/backward |
+| M2 动作与 checkpoint 适配 | contract 已通过；训练归一化、14D→12D loader、双初始化和完整 12D 执行已实现 | 两种初始化和 forward/backward 已通过；首次 optimizer step OOM | CPU offload 下完成单 batch 参数更新 |
+| M3 RGB-only 训练烟测 | 未开始 | 待验证 | A100/A800 短程连续训练 |
 | M4 闭环评测器 | 未开始 | 待验证 | 完成一个 atomic 闭环 rollout |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
 | M6 Atomic 正式训练与评测 | 未开始 | 待验证 | 通过 H100 正式训练门禁 |
@@ -136,9 +136,18 @@ M2 单步训练第一次启动反馈：
 - 已有 Torch/CUDA/DeepSpeed/FlashAttention 和两种模型初始化证据仍然有效；该错误不表示核心训练环境损坏。
 - M2 smoke 显式设置 `enable_tensorboard=false`，保留 `ConsoleLogger` 与 `tee` 日志；正式 upstream 配置显式保持 `enable_tensorboard=true`。
 
+M2 单步训练第二次启动反馈：
+
+- 真实 `CloseFridge` batch、X-WAM checkpoint 适配、GPU forward 和 backward 均已完成；数据、RGB-only、12D action 和 16D proprio 链路没有发现新错误。
+- OOM 精确发生在首次 `optimizer.step()`：Torch AdamW 为 5B trainable parameters 初始化 `exp_avg_sq` 时尝试再申请 18.77 GiB；当时 allocated 77.645 GiB、reserved 77.748 GiB、空闲约 239 MiB。
+- reserved-but-unallocated 仅约 103 MiB，因此不是 CUDA allocator 碎片问题；设置 `expandable_segments` 不能解决约 18.77 GiB 的真实容量缺口。
+- 两组 FP32 Adam moment 合计约 37.5 GiB。M2 单卡配置改用 ZeRO-2 CPU optimizer offload，同时把 allgather/reduce bucket 从 5e8 降为 1e8 并关闭通信 overlap，为参数更新留出显存余量。
+- upstream legacy 配置仍保持 ZeRO-2、GPU optimizer、5e8 bucket 和 overlap；本次只改变 atomic M2 单卡 smoke。
+- 新配置需要主机提供足够内存，运行前以 `free -h` 确认可用内存，建议至少 64 GiB；真实参数更新仍为 `cluster-pending`。
+
 ## 待提供输入
 
-- 拉取关闭可选 TensorBoard logger 的最新单卡 smoke 配置后，原命令不变地重跑 `xwam_pretrained` 单 batch forward/backward；反馈返回码、GPU 峰值、首个 loss、完整日志和初始化 JSON。
+- 拉取启用 ZeRO-2 CPU optimizer offload 的最新单卡 smoke 配置；确认主机 `available` 内存至少 64 GiB 后，原 Python 命令不变地重跑完整单 batch train step，反馈返回码、`free -h`、GPU 峰值、首个 loss、完整日志和初始化 JSON。
 - 不在本轮运行闭环 simulator；新版在线 16D observation 提取将在 M4 实现和验收。
 
 ## 当前执行过程
@@ -154,3 +163,4 @@ M2 单步训练第一次启动反馈：
 9. 用户已完成 `wan_base` 初始化 audit，确认只加载 Wan2.2 base 且机器人模块由代码初始化，门禁通过。
 10. Codex 将 M2 smoke 固定为单 GPU；用户执行 `xwam_pretrained` 单 batch forward/backward，通过后关闭 M2 并进入 M3。
 11. 第一次启动在可选 TensorBoard logger 构造阶段退出；Codex 改为 smoke 显式关闭 TensorBoard，等待同命令重跑。
+12. 第二次启动已完成 forward/backward，在首次 AdamW optimizer state 初始化时因 80GB 显存容量不足退出；Codex 改为 ZeRO-2 CPU optimizer offload，等待单 batch 参数更新复测。

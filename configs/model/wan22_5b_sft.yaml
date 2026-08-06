@@ -43,6 +43,12 @@ gradient_clip_algorithm: "norm"
 batch_size_per_gpu: 4
 num_workers_per_gpu: 8
 prefetch_factor: 4
+deepspeed_stage: 2
+deepspeed_offload_optimizer: false
+deepspeed_offload_optimizer_device: cpu
+deepspeed_pin_memory: false
+deepspeed_overlap_comm: true
+deepspeed_bucket_size: 500000000
 rf_distribution: "uniform" # choose from "uniform", "beta"
 time_shifting: 5.0
 

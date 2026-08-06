@@ -5,6 +5,40 @@ from __future__ import annotations
 from typing import Any
 
 
+def resolve_deepspeed_options(config: Any) -> dict[str, Any]:
+    """Resolve memory-sensitive DeepSpeed options without importing Torch/Lightning."""
+    stage = int(config.get("deepspeed_stage", 2))
+    if stage not in {1, 2, 3}:
+        raise ValueError(f"DeepSpeed stage 只允许 1、2 或 3，当前为 {stage}")
+
+    bucket_size = int(config.get("deepspeed_bucket_size", 500_000_000))
+    if bucket_size <= 0:
+        raise ValueError(
+            f"DeepSpeed bucket size 必须为正整数，当前为 {bucket_size}"
+        )
+
+    offload_device = str(
+        config.get("deepspeed_offload_optimizer_device", "cpu")
+    ).lower()
+    if offload_device not in {"cpu", "nvme"}:
+        raise ValueError(
+            "DeepSpeed optimizer offload device 只允许 cpu 或 nvme，"
+            f"当前为 {offload_device}"
+        )
+
+    return {
+        "stage": stage,
+        "offload_optimizer": bool(
+            config.get("deepspeed_offload_optimizer", False)
+        ),
+        "offload_optimizer_device": offload_device,
+        "pin_memory": bool(config.get("deepspeed_pin_memory", False)),
+        "overlap_comm": bool(config.get("deepspeed_overlap_comm", True)),
+        "allgather_bucket_size": bucket_size,
+        "reduce_bucket_size": bucket_size,
+    }
+
+
 def resolve_training_topology(
     *,
     visible_devices: int,

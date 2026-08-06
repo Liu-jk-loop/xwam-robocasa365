@@ -152,15 +152,19 @@ python scripts/audit_xwam_checkpoint_loading.py \
   --output logs/cluster/wan_base_panda_omron_loading.json
 ```
 
-两份加载报告都通过后，再执行一次真实 `CloseFridge` batch 的 forward/backward。该 M2 配置只运行一步、batch size 1、0 worker、RGB-only、gradient checkpointing，并关闭大 checkpoint 保存：
+两份加载报告都通过后，再执行一次真实 `CloseFridge` batch 的完整训练 step。该 M2 配置只运行一步、batch size 1、0 worker、RGB-only、gradient checkpointing，并关闭大 checkpoint 保存。
 
 M2 smoke 还显式设置 `enable_tensorboard=false`：只保留控制台/`tee` 日志，不要求环境安装可选的 `tensorboard` 或 `tensorboardX`。正式训练配置仍默认启用 TensorBoard。
 
+第一次 A800 运行已经完成 forward/backward，但 AdamW 在首次创建约 37.5 GiB 两组 FP32 moment state 时 OOM。新版 smoke 因此使用 ZeRO-2 CPU optimizer offload、1e8 communication bucket 并关闭 overlap；只改变优化器/通信内存位置，不改变数据、12D action、16D proprio、模型输入或 loss。运行前确认主机可用内存，建议 `available` 至少 64 GiB；不足时不要启动：
+
 ```bash
+free -h
+
 mkdir -p logs/cluster
 set -o pipefail
 
-/usr/bin/time -v python scripts/train_sft.py \
+python scripts/train_sft.py \
   model_config=configs/model/wan22_5b_robocasa365_atomic_m2.yaml \
   wan_checkpoint_dir=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/Wan-AI/Wan2.2-TI2V-5B \
   pretrained_checkpoint=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/x-wam/xwam_checkpoints \
@@ -172,7 +176,7 @@ set -o pipefail
 echo "train_exit_code=${PIPESTATUS[0]}"
 ```
 
-反馈三份 JSON/配置、完整终端日志、返回码、CPU 内存峰值、GPU 峰值和首个 loss。若第一条加载 audit 失败，不要继续训练，也不要改为 `strict=False` 或手动删除报错参数。
+日志中必须出现 `offload_optimizer: True`、`offload_optimizer_device: cpu` 和 `allgather_bucket_size: 100000000`。反馈三份 JSON/配置、完整终端日志、返回码、`free -h`、GPU 峰值和首个 loss。若第一条加载 audit 失败，不要继续训练，也不要改为 `strict=False` 或手动删除报错参数。
 
 ## X-WAM Conda 环境
 

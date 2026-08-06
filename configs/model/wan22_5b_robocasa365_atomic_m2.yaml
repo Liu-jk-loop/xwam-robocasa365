@@ -44,6 +44,12 @@ devices: 1
 num_workers_per_gpu: 0
 prefetch_factor: 2
 use_gradient_checkpointing: true
+deepspeed_stage: 2
+deepspeed_offload_optimizer: true
+deepspeed_offload_optimizer_device: cpu
+deepspeed_pin_memory: false
+deepspeed_overlap_comm: false
+deepspeed_bucket_size: 100000000
 
 # losses / flow matching
 rf_distribution: uniform

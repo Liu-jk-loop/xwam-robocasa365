@@ -20,7 +20,10 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.strategies import DeepSpeedStrategy
 
 from data.dataset_factory import build_dataset
-from project_tools.training_topology import resolve_training_topology
+from project_tools.training_topology import (
+    resolve_deepspeed_options,
+    resolve_training_topology,
+)
 from runners.xwam_runner import XWAMRunner
 from utils.console_logger import ConsoleLogger
 from utils.xwam_checkpoint_loader import initialize_xwam_runner
@@ -62,6 +65,7 @@ def _resolve_trainer_topology(config):
 def main():
     config = _load_config()
     topology = _resolve_trainer_topology(config)
+    deepspeed_options = resolve_deepspeed_options(config)
 
     pprint(OmegaConf.to_container(config))
 
@@ -154,14 +158,12 @@ def main():
         f"trainer_devices: {topology['trainer_devices']}, "
         f"visible_devices: {topology['visible_devices']}"
     )
+    print(f"DeepSpeed options: {deepspeed_options}")
 
     trainer = L.Trainer(
         accelerator="auto",
         devices=topology["trainer_devices"],
-        strategy=DeepSpeedStrategy(
-            allgather_bucket_size=5e8,
-            reduce_bucket_size=5e8,
-        ),
+        strategy=DeepSpeedStrategy(**deepspeed_options),
         precision="bf16-mixed",
         num_nodes=topology["num_nodes"],
         max_steps=config.num_training_steps,
