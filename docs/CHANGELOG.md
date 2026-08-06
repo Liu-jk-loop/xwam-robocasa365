@@ -1,5 +1,51 @@
 # 变更记录
 
+## 2026-08-06 — M1 集群证据与星光环境复用审计
+
+- 分支：`dev/atomic-robocasa365`
+- 基线 commit：`219916c`
+- 运行状态：真实 RoboCasa365 metadata audit 通过；X-WAM runtime 环境待审计
+
+### 问题
+
+星光已在 `abot_m05` 和 A800 上成功审计一份真实 `CloseFridge` 数据，但反馈缺少 Git commit 和完整 Python/Torch/DeepSpeed/FlashAttention 环境信息。直接修改 `abot_m05` 或全量重装可能破坏已有 DeepSpeed/FlashAttention 二进制扩展。
+
+### 新增和修改逻辑
+
+- 记录 `CloseFridge/20250819` 的真实数据契约证据：106 episodes、26888 frames、16D state、12D action、106 个 Parquet、三路相机各 106 个 MP4，`ok=true`。
+- 增加版本化的星光 X-WAM policy 环境 manifest，固定 Python/依赖边界、simulator 独立环境契约和 CUDA 12.8 后备版本。
+- 增加无侵入环境 audit：检查包版本、隔离 runtime import、Torch CUDA/GPU、`nvidia-smi`、`nvcc`、`pip check`、DeepSpeed `ds_report`、Git commit 和子模块 gitlink。
+- 增加 `abot_m05` 先审计、后 clone、只按报告补依赖的中文方案。
+- 明确禁止预编译全部 DeepSpeed ops；当前使用 `torch.optim.AdamW` 且未启用 CPU/NVMe offload。
+- 修正 M1 数据 audit 示例，使其指向包含日期层的单任务目录。
+
+### 涉及文件
+
+- 环境契约：`configs/environment/xwam_starlight.json`。
+- 环境审计：`project_tools/starlight_environment.py`、`scripts/audit_starlight_environment.py`。
+- 测试：`tests/test_starlight_environment.py`。
+- 文档：`docs/ENVIRONMENT_PLAN.md`、`docs/CLUSTER_RUNBOOK.md`、`docs/IMPLEMENTATION_PLAN.md`、`docs/PROGRESS.md`。
+
+### 兼容性和风险
+
+- audit 不安装包、不修改 Conda 环境，也不主动编译 DeepSpeed op。
+- runtime import 在隔离子进程中执行，坏 ABI 不会直接终止主审计进程。
+- simulator 依赖继续与 X-WAM policy 环境分离。
+- 本地没有 Torch/GPU，真实 runtime 验证保持 `cluster-pending`。
+- 数据 audit 的 commit 尚未提供，因此证据先标记为“通过、commit 待补”。
+
+### 验证
+
+- 环境契约/版本比较单元测试：4 项通过。
+- 既有 RoboCasa365 数据契约测试：6 项通过。
+- 环境 audit 本地负路径：正确返回非零并生成可解析 JSON。
+- CLI help、Python compile 和 Git diff check：通过。
+- `abot_m05` 环境 audit：`cluster-pending`。
+
+### 回滚
+
+回退本次 commit；不会修改服务器 Conda 环境、外部数据、权重或运行任务。
+
 ## 2026-08-05 — 各阶段执行过程中文化
 
 - 分支：`dev/atomic-robocasa365`

@@ -95,9 +95,10 @@ RoboCasa365 原生数据
 1. 用户提供一个真实 atomic 任务的数据路径，以及最小 episode、元数据和三路 RGB 视频。
 2. Codex 先实现不依赖 Torch 的 metadata audit，固定任务范围、目录结构和维度契约。
 3. 用户在星光上运行 audit，并反馈 commit、命令、JSON 报告及目录结构。
-4. Codex 根据真实报告实现 Parquet/MP4 到 X-WAM tensor 的原生 adapter，并补充合成数据测试。
-5. 用户在 A100/A800 上读取一个真实 RGB-only batch，反馈 shape、dtype、帧序、动作窗口和错误日志。
-6. Codex 修正问题并记录集群证据；全部 M1 验收项通过后进入 M2。
+4. Codex 记录真实数据证据并提供无侵入环境 audit；用户先审计 `abot_m05`，通过后 clone 为独立 X-WAM policy 环境。
+5. Codex 根据真实报告实现 Parquet/MP4 到 X-WAM tensor 的原生 adapter，并补充合成数据测试。
+6. 用户在 A100/A800 上读取一个真实 RGB-only batch，反馈 shape、dtype、帧序、动作窗口和错误日志。
+7. Codex 修正问题并记录集群证据；全部 M1 验收项通过后进入 M2。
 
 需要的超算输入：
 

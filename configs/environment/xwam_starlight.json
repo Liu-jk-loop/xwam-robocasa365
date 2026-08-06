@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "name": "xwam_starlight_policy",
+  "role": "X-WAM policy 训练与推理环境；不安装 RoboCasa simulator",
+  "python": {
+    "min": "3.10.0",
+    "max_exclusive": "3.11.0",
+    "tested": "3.10"
+  },
+  "packages": [
+    {"distribution": "torch", "module": "torch", "min": "2.4.0", "tested": "2.8.0", "runtime_import": true},
+    {"distribution": "torchvision", "module": "torchvision", "tested": "0.23.0", "runtime_import": true},
+    {"distribution": "torchaudio", "module": "torchaudio", "tested": "2.8.0", "runtime_import": true},
+    {"distribution": "numpy", "module": "numpy", "min": "1.23.5", "max_exclusive": "1.26.0", "tested": "1.23.5", "runtime_import": true},
+    {"distribution": "diffusers", "module": "diffusers", "min": "0.31.0", "tested": "0.38.0", "runtime_import": true},
+    {"distribution": "transformers", "module": "transformers", "min": "4.49.0", "max_inclusive": "4.51.3", "tested": "4.51.3", "runtime_import": true},
+    {"distribution": "tokenizers", "module": "tokenizers", "min": "0.20.3", "runtime_import": true},
+    {"distribution": "accelerate", "module": "accelerate", "min": "1.1.1", "runtime_import": true},
+    {"distribution": "lightning", "module": "lightning", "runtime_import": true},
+    {"distribution": "deepspeed", "module": "deepspeed", "min": "0.16.0", "runtime_import": true},
+    {"distribution": "flash-attn", "module": "flash_attn", "tested": "2.8.3", "runtime_import": true},
+    {"distribution": "opencv-python", "module": "cv2", "min": "4.9.0.80"},
+    {"distribution": "scipy", "module": "scipy", "min": "1.13.1"},
+    {"distribution": "decord", "module": "decord", "runtime_import": true},
+    {"distribution": "imageio", "module": "imageio"},
+    {"distribution": "imageio-ffmpeg", "module": "imageio_ffmpeg"},
+    {"distribution": "easydict", "module": "easydict"},
+    {"distribution": "ftfy", "module": "ftfy"},
+    {"distribution": "dashscope", "module": "dashscope"},
+    {"distribution": "h5py", "module": "h5py"},
+    {"distribution": "tyro", "module": "tyro"},
+    {"distribution": "omegaconf", "module": "omegaconf"},
+    {"distribution": "einops", "module": "einops"},
+    {"distribution": "ninja", "module": "ninja", "required": false}
+  ],
+  "simulator_contract": {
+    "separate_environment": true,
+    "robocasa": {"version": "0.2.0", "commit": "756598a5be52e052339bb2d957426e39015c2afb"},
+    "robosuite": {"version": "1.5.2", "commit": "232ce7d4a6ed89c949a9aba024a05c8c32fdd08b"},
+    "mujoco": {"version": "3.2.6"},
+    "robotwin_commit": "c3ddfa8b97d5519efa828b075999bd0006778e5e"
+  },
+  "fallback": {
+    "reason": "仅在 abot_m05 不能复用时采用；Torch 版本与 X-WAM upstream 测试一致，CUDA wheel 与星光 12.8 一致。",
+    "torch": "2.8.0",
+    "torchvision": "0.23.0",
+    "torchaudio": "2.8.0",
+    "torch_index_url": "https://download.pytorch.org/whl/cu128",
+    "flash_attn": "2.8.3"
+  }
+}

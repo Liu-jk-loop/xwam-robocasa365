@@ -24,7 +24,7 @@ git status --short --branch
 
 ```bash
 python scripts/audit_robocasa365_dataset.py \
-  --dataset /ABSOLUTE/PATH/TO/ONE/ROBOCASA365/TASK \
+  --dataset /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/robocasa/robocasa/datasets/v1.0/pretrain/atomic/CloseFridge/20250819 \
   --task-name CloseFridge \
   --require-data \
   --require-videos \
@@ -39,6 +39,12 @@ python scripts/audit_robocasa365_dataset.py \
 2. 完整 audit 命令和返回码。
 3. `/tmp/robocasa365_close_fridge_audit.json` 内容。
 4. 实际数据路径及 `meta/`、`data/`、`videos/` 的两级目录结构。
+
+任务目录通常包含日期层，例如 `CloseFridge/20250819`。audit 的 `--dataset` 必须指向该日期目录或其中的 `lerobot/`，不能只指向 `pretrain/atomic/` 总目录。
+
+## X-WAM Conda 环境
+
+先按 `docs/ENVIRONMENT_PLAN.md` 的 E0 步骤审计当前 `abot_m05`。收到 JSON 报告并确认 `ok=true` 后，再 clone 为独立的 `xwam-robocasa365` 环境。不要在 `abot_m05` 中直接运行全量依赖安装。
 
 ## 外部模型路径
 
