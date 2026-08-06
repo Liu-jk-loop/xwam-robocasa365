@@ -1,5 +1,43 @@
 # 变更记录
 
+## 2026-08-06 — M1 原生 LeRobot v2.1 Parquet/MP4 batch adapter
+
+- 分支：`dev/atomic-robocasa365`
+- 基线 commit：`f856401`
+- 运行状态：本地静态验证完成；真实 RoboCasa365 batch 为 `cluster-pending`
+
+### 问题
+
+此前只有不读取张量的 metadata audit，以及旧 JSON+video loader 的 RGB-only 修复。官方 RoboCasa365 数据是 LeRobot v2.1 的 episode Parquet 加三路 MP4，不能直接进入旧 loader；同时 16D PandaOmron state 和 12D action 的语义及 normalization 尚未在 M2 冻结，误启动训练会产生不可解释输入。
+
+### 新增和修改逻辑
+
+- 增加无 Torch 的 v2.1 episode index：读取 `info.json`、`tasks.jsonl`、`episodes.jsonl`，解析官方路径模板、任务语言、chunk 和 clip 起点。
+- 固定时间窗契约：默认九个观测帧、`frame_skip=4`、`action_skip=1`，对应 32 个逐帧 action；边界 clip 不越过 episode。
+- 增加原生 runtime adapter：PyArrow 直接读取 `observation.state`、`action`、`frame_index` 和 `episode_index`；Decord 同步读取配置指定的三路 MP4。
+- 对 episode 长度、连续帧号、episode ID、有限数值、16D state、12D action、媒体长度和文件存在性进行失败即停校验。
+- 输出既有 X-WAM batch key：RGB `[V,T,C,H,W]`、state/action、有效 mask、固定 camera type mask、fps、语言和 episode key；depth 关闭时不检查也不输出任何 depth。
+- 增加小型 Parquet/Video LRU cache，并在 DataLoader 序列化时清空运行时 reader cache。
+- 训练入口改为 dataset factory，legacy 行为保持；模型和数据 action/proprio 维度不一致时提前报错。
+- 原生配置保持 `training_ready=false` 和 `normalization=none`，本轮只允许专用 batch audit，M2 前禁止正式训练。
+- 新增持久化 batch audit，报告 commit、依赖版本、解析配置、文件路径、shape/dtype/range、帧序、动作序列、确定性和完整 traceback。
+- 新增 PyArrow 16.1.0 依赖并纳入星光约束和环境 manifest；不会替换已验证 Torch/CUDA/FlashAttention/DeepSpeed 栈。
+
+### 涉及文件与验证
+
+- 数据逻辑：`data/robocasa365_index.py`、`data/robocasa365_dataset.py`、`data/dataset_factory.py`、`scripts/train_sft.py`。
+- 配置与依赖：`configs/data/robocasa365.yaml`、`requirements.txt`、星光 constraints/manifest。
+- 验收入口：`scripts/audit_robocasa365_batch.py`。
+- 测试：`tests/test_robocasa365_index.py`，覆盖 prompt/path/chunk、clip 边界、帧/动作 ID 和版本拒绝。
+- 本地 22 项 dependency-free 测试和 Python compile 通过；本地没有 Torch/PyArrow runtime，真实 batch 标记为 `cluster-pending`。
+
+### 风险与回滚
+
+- 当前只支持 LeRobot v2.x episode-per-file 布局；v3 分片数据会明确拒绝，不会套用错误路径。
+- 当前 state/action 为原始值，不能用于训练；M2 必须依据真实 `modality.json` 建立命名 schema、normalization 和 checkpoint 映射。
+- 首次真实 batch 可能暴露 Parquet 列型或视频长度差异，audit 会持久化实际列名与完整异常供修正。
+- 回退本次 commit 即恢复旧 dataset 入口；不会修改外部数据、模型或现有 Conda 环境。
+
 ## 2026-08-06 — Policy 环境集群验收与 pip check 精确策略
 
 - 分支：`dev/atomic-robocasa365`

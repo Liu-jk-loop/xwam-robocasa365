@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：M1——RoboCasa365 数据契约与原生 loader
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1 metadata 与 policy 环境核心门禁已通过；原生 loader 待实现
+- 超算运行状态：M1 metadata 与 policy 环境核心门禁已通过；原生 loader 已实现，真实 batch 待验收
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -15,7 +15,7 @@
 | 阶段 | 当前状态 | 超算状态 | 下一门禁 |
 | --- | --- | --- | --- |
 | M0 工程与协作基线 | 已完成 | 主仓库已 clone | 模拟器阶段开始时确认第三方子模块 |
-| M1 原生 RoboCasa365 loader | metadata 门禁通过，原生 loader 待实现 | 环境 kernel/解码门禁通过；新版 audit 待复跑 | 读取一个真实 RGB-only batch |
+| M1 原生 RoboCasa365 loader | 原生 v2.1 Parquet/MP4 adapter 与 batch audit 已实现 | 环境 kernel/解码门禁通过；真实 batch 为 `cluster-pending` | 读取一个真实 RGB-only batch |
 | M2 动作与 checkpoint 适配 | 未开始 | 待验证 | 冻结官方 PandaOmron schema |
 | M3 RGB-only 训练烟测 | 未开始 | 待验证 | A100/A800 单 batch forward/backward |
 | M4 闭环评测器 | 未开始 | 待验证 | 完成一个 atomic 闭环 rollout |
@@ -60,17 +60,28 @@
 - 唯一剩余原始 `pip check` 输出是 Decord 0.6.0 旧 wheel tag；已有 runtime import 和真实解码证据，按精确白名单降级为 warning。
 - 结论：policy 环境核心门禁通过；需要拉取新版 audit 并复跑，生成机器可读的最终 `ok=true` 证据。
 
+M1 原生 loader 本地证据：
+
+- 新增 LeRobot v2.1 episode 索引、路径模板、语言任务解析和 clip 时间窗逻辑。
+- 新增 PyArrow Parquet 读取与三路 Decord MP4 同步解码，输出 X-WAM 既有 batch key。
+- 默认窗口为 9 个观测帧、`frame_skip=4`、32 个 12D action；state 为 9 个 16D 向量。
+- 相机顺序固定为左 agentview、右 agentview、eye-in-hand；类型 mask 为 `[0,0,1]`。
+- `use_depth=false`，batch 中不产生 `depths`；augmentation 关闭时重复读取必须逐项完全一致。
+- M1 state/action 尚未归一化，原生配置以 `training_ready=false` 阻止误启动训练；M2 冻结 schema 后解除。
+- 本地 22 项无 Torch 测试和 Python 语法编译通过；真实 Parquet/MP4 batch 为 `cluster-pending`。
+
 ## 待提供输入
 
 - 早先数据 audit 所在的 `git rev-parse HEAD`（如仍可确认）。
 - 按 `docs/CLUSTER_RUNBOOK.md` 中的路径检查确认 X-WAM pretrained 文件。
 - 拉取新版 audit 后复跑，反馈最终 `ok=true` 报告。
-- M1 原生 loader 实现后读取一个真实 RGB-only batch。
+- 安装新增的 PyArrow 16.1.0，并运行 M1 真实 RGB-only batch audit。
 
 ## 当前执行过程
 
 1. 用户已完成独立环境增量安装，并移除 clone 中冲突的 ABot `wam`。
 2. 用户已通过 Torch/FlashAttention CUDA kernel 和真实 Decord MP4 解码。
 3. Codex 发布只允许 Decord 精确旧 wheel tag warning 的 audit，并修复安装后 freeze 留存。
-4. 用户拉取后复跑环境 audit，形成最终机器可读证据。
-5. Codex 基于已验证环境和真实数据 schema 实现原生 Parquet tensor adapter。
+4. Codex 已实现原生 Parquet/MP4 tensor adapter、固定时间窗和 batch audit，并保留训练门禁。
+5. 用户拉取指定 commit，在独立 policy 环境补装受约束的 PyArrow，读取真实 `CloseFridge` batch。
+6. Codex 根据报告核对 shape、dtype、帧序、动作窗口和确定性，通过后关闭 M1 并进入 M2。

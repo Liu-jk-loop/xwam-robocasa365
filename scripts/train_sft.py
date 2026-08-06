@@ -19,7 +19,7 @@ from lightning.pytorch.callbacks import (
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.strategies import DeepSpeedStrategy
 
-from data.robot_dataset import RobotDataset
+from data.dataset_factory import build_dataset
 from runners.xwam_runner import XWAMRunner
 from utils.console_logger import ConsoleLogger
 
@@ -64,39 +64,18 @@ def main():
     ]
     logging.getLogger("lightning.pytorch").setLevel(logging.INFO)
 
-    train_dataset = RobotDataset(
-        dataset_path=config.dataset.dataset_path,
-        sequence_length=config.dataset.sequence_length,
-        frame_skip=config.dataset.frame_skip,
-        video_size=config.dataset.video_size,
-        action_skip=config.dataset.action_skip,
-        augment=config.dataset.augment,
-        crop_ratio=config.dataset.crop_ratio,
-        brightness=config.dataset.brightness,
-        contrast=config.dataset.contrast,
-        saturation=config.dataset.saturation,
-        hue=config.dataset.hue,
-        inverse_gripper=config.dataset.inverse_gripper,
-        use_depth=config.use_depth,
-        normalize_depths_per_view=config.dataset.normalize_depths_per_view,
-        shuffle_view_order=config.dataset.shuffle_view_order,
-        statistics=OmegaConf.to_container(config.dataset.statistics, resolve=True),
-    )
+    train_dataset = build_dataset(config.dataset, use_depth=config.use_depth)
     config.action_num = train_dataset.action_num
+    if int(config.action_dim) != int(train_dataset.action_dim):
+        raise ValueError(
+            f"模型 action_dim={config.action_dim} 与数据 action_dim={train_dataset.action_dim} 不一致"
+        )
+    if int(config.proprio_dim) != int(train_dataset.proprio_dim):
+        raise ValueError(
+            f"模型 proprio_dim={config.proprio_dim} 与数据 proprio_dim={train_dataset.proprio_dim} 不一致"
+        )
 
-    val_dataset = RobotDataset(
-        dataset_path=config.dataset.dataset_path,
-        sequence_length=config.dataset.sequence_length,
-        frame_skip=config.dataset.frame_skip,
-        video_size=config.dataset.video_size,
-        action_skip=config.dataset.action_skip,
-        augment=False,
-        inverse_gripper=config.dataset.inverse_gripper,
-        use_depth=config.use_depth,
-        normalize_depths_per_view=config.dataset.normalize_depths_per_view,
-        shuffle_view_order=config.dataset.shuffle_view_order,
-        statistics=OmegaConf.to_container(config.dataset.statistics, resolve=True),
-    )
+    val_dataset = build_dataset(config.dataset, use_depth=config.use_depth, augment=False)
 
     train_dataloader = DataLoader(
         train_dataset,

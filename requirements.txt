@@ -9,6 +9,7 @@ tokenizers>=0.20.3
 accelerate>=1.1.1
 tqdm
 decord
+pyarrow>=16.0.0,<17
 imageio[ffmpeg]
 easydict
 ftfy

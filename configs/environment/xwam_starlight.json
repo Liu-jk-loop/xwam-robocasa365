@@ -22,6 +22,7 @@
     {"distribution": "opencv-python", "module": "cv2", "min": "4.9.0.80"},
     {"distribution": "scipy", "module": "scipy", "min": "1.13.1"},
     {"distribution": "decord", "module": "decord", "runtime_import": true},
+    {"distribution": "pyarrow", "module": "pyarrow", "min": "16.0.0", "max_exclusive": "17.0.0", "tested": "16.1.0", "runtime_import": true},
     {"distribution": "imageio", "module": "imageio"},
     {"distribution": "imageio-ffmpeg", "module": "imageio_ffmpeg"},
     {"distribution": "easydict", "module": "easydict"},

@@ -42,6 +42,46 @@ python scripts/audit_robocasa365_dataset.py \
 
 任务目录通常包含日期层，例如 `CloseFridge/20250819`。audit 的 `--dataset` 必须指向该日期目录或其中的 `lerobot/`，不能只指向 `pretrain/atomic/` 总目录。
 
+## M1 原生 RGB-only batch 验收
+
+本批新增 PyArrow 16.1.0，用于直接读取官方 LeRobot Parquet。已有独立环境不需要重建；拉取代码后在该环境内重新执行受约束安装器：
+
+```bash
+conda activate xwam-robocasa365
+export TORCH_EXTENSIONS_DIR=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/.cache/torch_extensions/xwam-robocasa365
+
+cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+git rev-parse HEAD
+
+bash scripts/install_starlight_dependencies.sh dry-run
+bash scripts/install_starlight_dependencies.sh apply
+```
+
+该操作沿用现有约束，不替换 Torch 2.9.0、CUDA、FlashAttention 或 DeepSpeed。随后读取一个真实 `CloseFridge` clip 和 DataLoader batch：
+
+```bash
+python scripts/audit_robocasa365_batch.py \
+  --dataset /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/robocasa/robocasa/datasets/v1.0/pretrain/atomic/CloseFridge/20250819 \
+  --task-name CloseFridge \
+  --index 0 \
+  --num-workers 0 \
+  --log-file logs/cluster/robocasa365_close_fridge_batch.json
+```
+
+预期核心证据：
+
+- `video`: `[3, 9, 3, 256, 320]`、`float32`、范围在 `[-1,1]`。
+- `proprios`: `[9,16]`；`actions`: `[32,12]`。
+- `frame_ids`: `[0,4,8,12,16,20,24,28,32]`；`action_ids`: `[0..31]`。
+- `camera_type_mask`: `[0,0,1]`；batch 不含 `depths`。
+- 关闭 augmentation 后，同一索引重复读取完全一致。
+- 最终 `result=pass`、`ok=true`，完整报告持久化在项目 `logs/cluster/`。
+
+本轮不要运行 `scripts/train_sft.py`。M1 只验证原始 16D state 和 12D action 的读取、时序与维度；`configs/data/robocasa365.yaml` 以 `training_ready: false` 明确阻止在 M2 normalization/action schema 完成前训练。
+
+反馈以下内容：commit SHA、完整命令和返回码、`logs/cluster/robocasa365_close_fridge_batch.json`。如果失败，保留完整 `error` 和 `traceback`，不要只截取最后一行。
+
 ## X-WAM Conda 环境
 
 先按 `docs/ENVIRONMENT_PLAN.md` 的 E0 步骤审计当前 `abot_m05`，日志写入 `logs/cluster/`。`ok=false` 只表示不能直接运行；当 `clone_base_ok=true` 且 `reuse_recommendation=clone_then_patch` 时，可以 clone 为独立环境后补依赖。不要在 `abot_m05` 中直接运行全量依赖安装。

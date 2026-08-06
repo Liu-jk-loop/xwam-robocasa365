@@ -23,6 +23,14 @@ The X-WAM backbone should consume validated tensors and remain free of dataset-p
 - Depth has two legal modes: `disabled` and `cached`. Online simulator rendering in a data-loader worker is forbidden.
 - Normalization statistics are generated for an immutable dataset/task manifest and stored with provenance.
 
+### M1 native loader boundary
+
+- `data/robocasa365_index.py` owns dependency-free LeRobot v2.1 episode indexing, prompt parsing, path templates, and temporal windows.
+- `data/robocasa365_dataset.py` owns runtime Parquet/MP4 decoding and emits the existing X-WAM batch keys without converting the dataset to legacy JSON.
+- The current M1 tensor contract is RGB `[V,T,C,H,W]`, raw state `[T,16]`, raw action `[Ta,12]`, and explicit validity/camera masks. Camera order is configured and never shuffled.
+- Raw state/action are intentionally restricted to the batch-audit path. `configs/data/robocasa365.yaml` remains `training_ready: false` until M2 freezes named PandaOmron slices and normalization.
+- Only LeRobot v2.x episode-per-file data is accepted by the native loader. A v3 dataset must use a separate indexed shard adapter rather than silently assuming v2 paths.
+
 ## Action contract
 
 - Never preserve the legacy evaluator behavior that copies only the first seven predicted values.
