@@ -1,5 +1,34 @@
 # 变更记录
 
+## 2026-08-07 — M3.2 FP32 单 clip 过拟合曲线门禁
+
+- 分支：`dev/atomic-robocasa365`
+- 基线 commit：`fabaaba`
+- 运行状态：M3.1 resume-to-10 通过；M3.2 本地静态验证完成，A800 50-step 曲线为 `cluster-pending`
+
+### M3.1 集群关闭证据
+
+- 原 step-8 checkpoint 在修复后成功恢复：定向 loader 只放行 438 个冻结 T5/VAE 参数，非冻结 missing 与 unexpected 均为 0；DeepSpeed 随后报告全部状态恢复，generator state 也明确应用。
+- step 8～9 连续执行，Trainer 正常达到 `max_steps=10`；global step 10 的 checkpoint start/complete 均存在，run result 为 `pass`。
+- CUDA peak allocated/reserved 为 `30.677/40.076 GiB`，保存期 RSS 约 97.3 GB。M3.1 的低内存保存与 resume 工程门禁通过，但 BF16 optimizer state 不能作为正式数值结论。
+
+### M3.2 新增和修改逻辑
+
+- 新增独立 50-step 单 clip experiment 配置，使用原 `a800_80gb_debug` FP32 CPUAdam profile，并显式关闭 checkpoint；训练阶段曾在 120 GiB 主机通过，已知风险集中在 FP32 state 保存峰值，因此本轮隔离数值收敛与保存问题。
+- 诊断配置将 `clean_action_ratio` 临时设为 0，让 batch size 1 的每个 step 都计算 action/proprio loss；该修改只用于过拟合门禁，M3.3 和正式训练恢复模型层默认 0.5。
+- Runner 新增 `train/action_proprio_supervision_ratio`，使 loss 为 0 时可以区分设计采样、无效数据 mask 和恢复错误。
+- 新增 dependency-free 日志 parser 与 CLI audit：验证 50 个连续 step、必需指标、有限值、监督比例、RGB-only depth=0、Trainer/result 正常退出，并计算前后各 10 step 的均值和相对下降。
+- M3.2 通过阈值固定为 video/action/proprio/total 四项后窗均值相对前窗至少下降 10%；audit 失败时不自动放宽。
+
+### 涉及文件、兼容性和回滚
+
+- 配置：`configs/experiment/robocasa365_close_fridge_m3_overfit_curve.yaml`。
+- 训练日志：`runners/xwam_runner.py`。
+- 审计与测试：`project_tools/training_curve.py`、`scripts/audit_m3_overfit_curve.py`、`tests/test_training_curve.py`、`tests/test_training_run.py`。
+- 文档：`docs/ARCHITECTURE.md`、`docs/PROGRESS.md`、`docs/CLUSTER_RUNBOOK.md`。
+- 不修改 Dataset、normalization、12D action、16D proprio、checkpoint loader、模型结构或正式默认采样分布；原 M3.1 checkpoint 保留。
+- 本地没有 Torch；真实 FP32 CPUAdam 50-step 内存和曲线为 `cluster-pending`。回退本次 commit 即移除 M3.2 配置、指标和 audit，不影响外部数据、权重与 checkpoint。
+
 ## 2026-08-07 — M3.1 排除冻结参数 checkpoint 的定向恢复
 
 - 分支：`dev/atomic-robocasa365`

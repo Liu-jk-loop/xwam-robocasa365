@@ -306,6 +306,7 @@ class XWAMRunner(L.LightningModule):
         video_mask = (1 - latent_mask).float().expand_as(vt_latents)
         # When actions are treated as clean conditions, do not train action denoising on those samples.
         action_proprio_loss_sample_mask = action_proprio_loss_sample_mask.to(self.device).view(B, 1, 1)
+        action_proprio_supervision_ratio = action_proprio_loss_sample_mask.float().mean()
         action_mask_f = (
             (action_proprio_loss_sample_mask * (1 - action_mask) * action_valid_mask).float().expand_as(vt_actions)
         )
@@ -347,6 +348,12 @@ class XWAMRunner(L.LightningModule):
         self.log("train/video_loss", video_loss, prog_bar=True, sync_dist=True)
         self.log("train/action_loss", action_loss, prog_bar=True, sync_dist=True)
         self.log("train/proprio_loss", proprio_loss, prog_bar=True, sync_dist=True)
+        self.log(
+            "train/action_proprio_supervision_ratio",
+            action_proprio_supervision_ratio,
+            prog_bar=False,
+            sync_dist=True,
+        )
         self.log("train/depth_loss", depth_loss, prog_bar=True, sync_dist=True)
         if dct_loss_weight > 0:
             self.log("train/dct_loss", dct_loss, prog_bar=True, sync_dist=True)

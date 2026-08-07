@@ -280,6 +280,50 @@ echo "resume_exit_code=${PIPESTATUS[0]}"
 
 该门禁通过后，记录为“120 GiB BF16 optimizer state 工程恢复通过”。正式 H100 profile 必须显式设置 `deepspeed_fp32_optimizer_states=true` 并重新执行短程 checkpoint/resume；禁止将本 profile 用于正式训练或指标对比。
 
+## M3.2：FP32 单 clip RGB-only 过拟合曲线
+
+M3.1 已验证保存和完整恢复 wiring。M3.2 改回 `a800_80gb_debug.yaml` 的 FP32 CPUAdam state，但关闭 checkpoint；因此只验证固定 clip 的数值收敛，不产生可恢复训练 checkpoint，也不使用 120 GiB BF16 optimizer state 作为数值证据。
+
+```bash
+cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+git rev-parse HEAD
+git status --short
+
+mkdir -p logs/cluster
+set -o pipefail
+
+python scripts/train_sft.py \
+  model_config=configs/model/wan22_5b_robocasa365_atomic.yaml \
+  hardware_config=configs/hardware/a800_80gb_debug.yaml \
+  experiment_config=configs/experiment/robocasa365_close_fridge_m3_overfit_curve.yaml \
+  wan_checkpoint_dir=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/Wan-AI/Wan2.2-TI2V-5B \
+  pretrained_checkpoint=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/x-wam/xwam_checkpoints \
+  dataset.dataset_path=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/robocasa/robocasa/datasets/v1.0/pretrain/atomic/CloseFridge/20250819 \
+  exp_root=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365 \
+  exp_name=close_fridge_m3_overfit_fp32_curve \
+  2>&1 | tee logs/cluster/close_fridge_m3_overfit_fp32_curve.log
+
+echo "train_exit_code=${PIPESTATUS[0]}"
+```
+
+解析后的配置必须包含 `deepspeed_fp32_optimizer_states=true`、`deepspeed_exclude_frozen_parameters=false`、`clean_action_ratio=0.0`、`enable_checkpointing=false` 和 `trainer_max_steps=50`。日志的 step 0～49 都必须显示 `train/action_proprio_supervision_ratio: 1`，depth loss 恒为 0，并以 result `pass/global_step=50` 正常退出。
+
+训练返回码为 0 后执行机器审计：
+
+```bash
+python scripts/audit_m3_overfit_curve.py \
+  --log logs/cluster/close_fridge_m3_overfit_fp32_curve.log \
+  --expected-steps 50 \
+  --window-size 10 \
+  --minimum-relative-drop 0.10 \
+  --output logs/cluster/close_fridge_m3_overfit_fp32_curve_audit.json
+
+echo "audit_exit_code=$?"
+```
+
+audit 只有在 step 连续、指标有限、每一步都有 action/proprio 监督、RGB-only depth loss 恒为 0，并且 video/action/proprio/total 后 10 step 均值相对前 10 step 至少下降 10% 时才返回 `pass`。若失败，反馈原始日志和 audit JSON，不要自行降低阈值、增加训练步数或改学习率。
+
 ## X-WAM Conda 环境
 
 先按 `docs/ENVIRONMENT_PLAN.md` 的 E0 步骤审计当前 `abot_m05`，日志写入 `logs/cluster/`。`ok=false` 只表示不能直接运行；当 `clone_base_ok=true` 且 `reuse_recommendation=clone_then_patch` 时，可以 clone 为独立环境后补依赖。不要在 `abot_m05` 中直接运行全量依赖安装。
