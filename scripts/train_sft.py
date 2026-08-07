@@ -213,6 +213,13 @@ def main():
     logging.getLogger("lightning.pytorch").setLevel(logging.INFO)
 
     base_train_dataset = build_dataset(config.dataset, use_depth=config.use_depth)
+    dataset_provenance = (
+        base_train_dataset.provenance()
+        if callable(getattr(base_train_dataset, "provenance", None))
+        else None
+    )
+    if dataset_provenance is not None:
+        print(f"Training dataset provenance: {dataset_provenance}")
     config.action_num = base_train_dataset.action_num
     if int(config.action_dim) != int(base_train_dataset.action_dim):
         raise ValueError(
@@ -286,6 +293,7 @@ def main():
                 "task_manifest": config.dataset.get("task_manifest"),
                 "schema_path": config.dataset.get("schema_path"),
                 "use_depth": bool(config.use_depth),
+                "adapter_provenance": dataset_provenance,
             },
             "checkpoint": {
                 "initialization_mode": config.get("initialization_mode"),

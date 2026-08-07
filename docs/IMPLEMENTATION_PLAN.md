@@ -151,20 +151,20 @@ RoboCasa365 原生数据
 - 为只有 120 GiB 主机内存的 A800 门禁提供独立低内存 profile；该 profile 可降低 CPUAdam state 精度，但不得继承到 H100 正式训练。
 - 完成显存测量后提供 H100 profile。
 - 增加确定性 seed、resume、checkpoint 元数据和简洁日志。
-- 先对极小样本过拟合，再进行三个任务的短训练。
+- 先用极小样本确认 loss 有限、监督分支生效并观察短程下降趋势，再进行三个任务的短训练；烟测不冒充完整收敛实验。
 
 阶段执行过程：
 
 1. Codex 准备 A100/A800 debug 配置、确定性 seed、断点恢复和日志记录逻辑。
 2. 用户先运行 batch size 1 的单步训练，反馈显存峰值、耗时和首个 loss。
 3. Codex 根据 40GB/80GB 显存结果调整 gradient checkpointing、梯度累积或 offload。
-4. 用户运行单任务极小样本过拟合，确认 loss 可持续下降且未读取 depth；若使用低精度 optimizer state，只验收工程恢复能力并显式记录。
+4. 用户运行单任务极小样本训练，确认 loss 有限、监督 step 可更新且未读取 depth；若使用低精度 optimizer state，只验收工程恢复能力并显式记录。
 5. 用户运行三个 atomic 任务的短训练，并执行一次保存/恢复测试。
 6. Codex 记录稳定配置和集群证据；短训练及恢复门禁通过后进入 M4。
 
 验收条件：
 
-- 极小样本 loss 持续下降并能过拟合。
+- 极小样本训练 loss 有限，action/proprio 监督分支实际出现，短程趋势与参数更新无异常；不以十步烟测宣称完全过拟合。
 - checkpoint 保存/恢复后的下一步行为在容差范围内一致。
 - 记录 A100/A800 显存峰值和吞吐。
 - RGB-only 训练不读取任何 depth 文件。

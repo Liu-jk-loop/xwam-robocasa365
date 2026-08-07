@@ -1,0 +1,28 @@
+# M3.2 三个 atomic 任务的短训练配置；真实路径由集群审计生成的 manifest 提供。
+format: robocasa365_lerobot_v21
+training_ready: true
+multitask_manifest: logs/cluster/robocasa365_m3_three_task_manifest.json
+expected_task_count: 3
+task_manifest: configs/tasks/robocasa365_atomic_seen.json
+camera_keys:
+  - observation.images.robot0_agentview_left
+  - observation.images.robot0_agentview_right
+  - observation.images.robot0_eye_in_hand
+camera_types:
+  - static
+  - static
+  - dynamic
+sequence_length: 9
+frame_skip: 4
+action_skip: 1
+video_size: [256, 320]
+augment: false
+crop_ratio: 0.95
+brightness: 0.2
+contrast: 0.2
+saturation: 0.2
+hue: 0.05
+normalization: panda_omron_v1
+schema_path: configs/schemas/robocasa365_panda_omron_v1.json
+parquet_cache_size: 4
+video_cache_size: 6

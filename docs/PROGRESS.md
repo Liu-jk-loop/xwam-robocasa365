@@ -5,9 +5,9 @@
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：M3.2——单任务极小样本 FP32 过拟合曲线门禁
+- 当前阶段：M3.2——三个 atomic 任务的 RGB-only 短训练门禁
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1、M2 全部门禁通过；M3.1 120 GiB checkpoint/resume 已在 commit `fabaaba` 恢复到 step 10 并通过；M3.2 FP32 单 clip 曲线待运行
+- 超算运行状态：M1、M2 全部门禁通过；M3.1 120 GiB checkpoint/resume 已在 commit `fabaaba` 恢复到 step 10 并通过；M3.2 三任务数据 manifest 与 12-step FP32 短训练待运行
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -17,7 +17,7 @@
 | M0 工程与协作基线 | 已完成 | 主仓库已 clone | 模拟器阶段开始时确认第三方子模块 |
 | M1 原生 RoboCasa365 loader | 已完成 | commit `e4249b9` 真实 batch `ok=true` | 已关闭 |
 | M2 动作与 checkpoint 适配 | 已完成 | 两种初始化、完整动作契约及 DeepSpeedCPUAdam 单 batch 参数更新均通过 | 已关闭 |
-| M3 RGB-only 训练烟测 | M3.2 过拟合曲线准备完成 | M3.1 step 8 保存、恢复到 step 10 和再次保存均通过 | FP32/no-checkpoint 固定 clip 训练 50 step 并审计曲线 |
+| M3 RGB-only 训练烟测 | M3.2 三任务短训练本地准备完成 | M3.1 step 8 保存、恢复到 step 10 和再次保存均通过 | 审计三个任务并运行 12-step FP32/no-checkpoint 短训练 |
 | M4 闭环评测器 | 未开始 | 待验证 | 完成一个 atomic 闭环 rollout |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
 | M6 Atomic 正式训练与评测 | 未开始 | 待验证 | 通过 H100 正式训练门禁 |
@@ -187,14 +187,17 @@ M3.1 resume 修复验收证据：
 
 M3.2 本地准备：
 
-- 新增 50-step 固定 clip 过拟合配置，改用原 A800 FP32 CPUAdam hardware profile 并关闭 checkpoint 保存，避免已确认的 FP32 保存期主机内存峰值。
-- 诊断配置临时设置 `clean_action_ratio=0`，确保 batch size 1 时每一步都监督 action/proprio；训练日志新增 `train/action_proprio_supervision_ratio`。M3.3 和正式训练必须恢复默认 0.5。
-- 新增无 Torch 曲线审计：要求 step 0～49 完整、所有指标有限、depth loss 恒为 0、监督比例恒为 1，且 video/action/proprio/total 的后 10 step 均值相对前 10 step 至少下降 10%。真实运行是 `cluster-pending`。
+- 根据用户确认，M3.1 已有 10 个 step 中 5 个 action/proprio 监督 step，加上 M2 单步共 6 个有效监督更新，足以作为短程 loss/参数更新 smoke；取消尚未运行的 50-step、`clean_action_ratio=0` 人工过拟合诊断，不宣称已完成严格过拟合。
+- 新增三个 Atomic-Seen 任务 manifest：默认选择 `PickPlaceCounterToCabinet`、`OpenCabinet`、`TurnOnMicrowave`，分别覆盖取放、关节物体和电器操作；自动解析唯一日期目录，多日期并存时强制显式选择。
+- 新增平衡轮询 adapter，顺序固定为 `0→1→2`。三个子 Dataset 分别执行既有 PandaOmron schema 与 task-local normalization，外层不修改 12D action、16D proprio 或 RGB tensor 合同。
+- 新增 12-step FP32/no-checkpoint 配置，保持原 X-WAM `clean_action_ratio=0.5`，每个任务执行四步；训练日志增加监督比例、task index 和 manifest provenance。
+- 新增无 Torch 机器审计：要求 step 0～11 完整、三个 task index 平衡轮询、两类监督分支均出现且与 action/proprio loss 对应、全部 loss 有限、depth loss 恒为 0、Trainer/result 正常结束。真实运行状态为 `cluster-pending`。
 
 ## 待提供输入
 
-- 拉取 M3.2 commit 后，使用 `a800_80gb_debug.yaml` 与新 overfit-curve experiment 配置从公开 X-WAM checkpoint 运行固定 clip 50 step；本轮不 resume、不保存训练 checkpoint。
-- 运行曲线审计并反馈训练日志、audit JSON、run config/metadata/result、退出码和 CPU/CUDA 峰值。audit 失败时保留完整日志，不自行提高步数或修改阈值。
+- 拉取 M3.2 commit 后，先从 atomic 根目录生成并反馈三任务 manifest；任一任务缺失或存在多个日期目录时按 audit 提示显式指定路径，不自动选择最新日期。
+- 使用 `a800_80gb_debug.yaml`、三任务 data config 和 12-step experiment 从公开 X-WAM checkpoint 运行；本轮不 resume、不保存训练 checkpoint。
+- 运行短训练审计并反馈训练日志、manifest/audit JSON、run config/metadata/result、退出码和 CPU/CUDA 峰值。audit 失败时保留原始证据，不修改采样比例或步数。
 - 不在本轮运行闭环 simulator；新版在线 16D observation 提取将在 M4 实现和验收。
 
 ## 当前执行过程
@@ -218,4 +221,5 @@ M3.2 本地准备：
 17. 120 GiB profile 的 fresh experiment 已完成 step 8、checkpoint 保存和正常退出，证明低内存保存门禁通过。
 18. 首次 resume 因 DeepSpeed 严格要求 checkpoint 包含已主动排除的冻结 T5/VAE 参数而失败；Codex 已实现定向严格恢复和 generator hook 时序修复，等待从原 step-8 checkpoint 复测到 step 10。
 19. commit `fabaaba` 已成功恢复 step 8～9，并在 global step 10 完成 checkpoint 保存和正常退出；M3.1 关闭。
-20. Codex 已准备 M3.2 FP32/no-checkpoint 单 clip 50-step 过拟合曲线和机器审计，等待 A800 运行。
+20. 用户决定保留原 `clean_action_ratio=0.5`，并以已有 6 个有效监督更新结束单任务趋势 smoke；未运行的 50-step/clean-ratio-zero 诊断被取消。
+21. Codex 已准备 M3.2 三个 atomic 任务的 manifest、平衡轮询 adapter、12-step FP32/no-checkpoint 配置与机器审计，等待 A800 运行。

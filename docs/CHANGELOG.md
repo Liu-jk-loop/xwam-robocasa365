@@ -1,10 +1,40 @@
 # 变更记录
 
+## 2026-08-07 — M3.2 三个 atomic 任务短训练
+
+- 分支：`dev/atomic-robocasa365`
+- 基线 commit：`3bbd621`
+- 运行状态：本地静态验证完成；三任务数据审计和 A800 12-step 训练为 `cluster-pending`
+
+### 方案修正
+
+- 用户确认原 X-WAM 训练应保持 `clean_action_ratio=0.5`，且 M3.1 十步与 M2 单步已经提供 6 个 action/proprio 有效监督更新；因此取消从未在超算运行的 50-step、`clean_action_ratio=0` 单 clip 诊断。
+- 删除该诊断专用配置、曲线 parser/audit 和测试。保留 `train/action_proprio_supervision_ratio`，因为它只增加可观测性，不改变训练采样或 loss。
+- M3 单任务证据只称为“短程趋势和参数更新 smoke”，不称为严格过拟合或收敛；下一门禁直接进入三个 atomic 任务。
+
+### 新增和修改逻辑
+
+- 新增 atomic-only 三任务 manifest 生成器，默认任务为 `PickPlaceCounterToCabinet`、`OpenCabinet` 和 `TurnOnMicrowave`。工具校验 Atomic-Seen 范围、完整数据/视频合同与唯一日期目录；多个日期目录时拒绝猜测，要求 `--task-path`。
+- Dataset 工厂新增 manifest 路径：为每个任务独立构造既有 `RoboCasa365Dataset`，从而保留 task-local PandaOmron normalization；外层 `BalancedRoundRobinDataset` 按 `0→1→2` 确定性轮询，并检查 action/proprio tensor 合同一致。
+- 训练入口将 manifest、任务名、原始/平衡样本数写入 provenance；runner 记录 `train/task_index`。单任务配置和 legacy Dataset 不受影响。
+- 新增 12-step FP32/no-checkpoint 配置，保持 `clean_action_ratio=0.5`、RGB-only 和每任务四步。checkpoint/resume 已由 M3.1 单独通过，本轮隔离多任务数据与训练链路。
+- 新增 dependency-free 日志审计，检查 12 个连续 step、平衡 task index、监督比例与 action/proprio loss 对应、两类采样分支、有限 loss、depth=0 和正常退出；不设置 loss 降幅阈值。
+
+### 文件、验证、风险和回滚
+
+- 数据边界：`data/robocasa365_multitask.py`、`data/dataset_factory.py`。
+- 配置与入口：`configs/data/robocasa365_m3_three_task.yaml`、`configs/experiment/robocasa365_m3_three_task_short.yaml`、`scripts/train_sft.py`、`runners/xwam_runner.py`。
+- 审计与测试：`scripts/audit_m3_multitask_dataset.py`、`project_tools/multitask_training.py`、`scripts/audit_m3_multitask_short.py`、`tests/test_m3_multitask.py`、`tests/test_training_run.py`。
+- 本地没有 Torch；真实 Parquet/Decord 三任务构造、DeepSpeed FP32 state 内存和 CUDA 训练为 `cluster-pending`。task-local normalization 仅用于 M3 smoke，M6 前必须生成并冻结跨任务正式统计。
+- 回退本次 commit 可恢复单任务路径；不会删除或修改服务器数据、权重与 checkpoint。
+
 ## 2026-08-07 — M3.2 FP32 单 clip 过拟合曲线门禁
+
+> 状态：已被上方三任务方案取代，未在超算运行；相关专用文件已删除，不应执行本节旧命令。
 
 - 分支：`dev/atomic-robocasa365`
 - 基线 commit：`fabaaba`
-- 运行状态：M3.1 resume-to-10 通过；M3.2 本地静态验证完成，A800 50-step 曲线为 `cluster-pending`
+- 运行状态：M3.1 resume-to-10 通过；本条 M3.2 方案在集群运行前取消
 
 ### M3.1 集群关闭证据
 
@@ -27,7 +57,7 @@
 - 审计与测试：`project_tools/training_curve.py`、`scripts/audit_m3_overfit_curve.py`、`tests/test_training_curve.py`、`tests/test_training_run.py`。
 - 文档：`docs/ARCHITECTURE.md`、`docs/PROGRESS.md`、`docs/CLUSTER_RUNBOOK.md`。
 - 不修改 Dataset、normalization、12D action、16D proprio、checkpoint loader、模型结构或正式默认采样分布；原 M3.1 checkpoint 保留。
-- 本地没有 Torch；真实 FP32 CPUAdam 50-step 内存和曲线为 `cluster-pending`。回退本次 commit 即移除 M3.2 配置、指标和 audit，不影响外部数据、权重与 checkpoint。
+- 本地没有 Torch；真实 FP32 CPUAdam 50-step 未运行，相关专用文件已由后续三任务 commit 删除；外部数据、权重与 checkpoint 不受影响。
 
 ## 2026-08-07 — M3.1 排除冻结参数 checkpoint 的定向恢复
 

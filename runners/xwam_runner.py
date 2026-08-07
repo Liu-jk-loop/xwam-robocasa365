@@ -354,6 +354,13 @@ class XWAMRunner(L.LightningModule):
             prog_bar=False,
             sync_dist=True,
         )
+        if "task_index" in batch:
+            self.log(
+                "train/task_index",
+                batch["task_index"].float().mean(),
+                prog_bar=False,
+                sync_dist=True,
+            )
         self.log("train/depth_loss", depth_loss, prog_bar=True, sync_dist=True)
         if dct_loss_weight > 0:
             self.log("train/dct_loss", dct_loss, prog_bar=True, sync_dist=True)

@@ -30,10 +30,6 @@ class TrainingRunTest(unittest.TestCase):
             repo_root
             / "configs/experiment/robocasa365_close_fridge_m3_overfit.yaml"
         ).read_text()
-        overfit_curve = (
-            repo_root
-            / "configs/experiment/robocasa365_close_fridge_m3_overfit_curve.yaml"
-        ).read_text()
         self.assertIn("action_dim: 12", model)
         self.assertIn("use_depth: false", model)
         self.assertNotIn("deepspeed_offload_optimizer", model)
@@ -48,10 +44,6 @@ class TrainingRunTest(unittest.TestCase):
         self.assertIn("num_training_steps: 10", experiment)
         self.assertIn("persist_generator_state: true", experiment)
         self.assertIn("save_last: link", experiment)
-        self.assertIn("num_training_steps: 50", overfit_curve)
-        self.assertIn("clean_action_ratio: 0.0", overfit_curve)
-        self.assertIn("enable_checkpointing: false", overfit_curve)
-        self.assertIn("persist_generator_state: false", overfit_curve)
 
     def test_training_entry_wires_layers_subset_resume_and_run_artifacts(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
@@ -81,6 +73,24 @@ class TrainingRunTest(unittest.TestCase):
         self.assertIn("Excluded-frozen resume load accepted", runner)
         self.assertIn("self._apply_restored_generator_state()", runner)
         self.assertIn("train/action_proprio_supervision_ratio", runner)
+        self.assertIn("train/task_index", runner)
+
+    def test_m3_three_task_short_config_preserves_original_training_semantics(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        data_config = (
+            repo_root / "configs/data/robocasa365_m3_three_task.yaml"
+        ).read_text()
+        experiment = (
+            repo_root / "configs/experiment/robocasa365_m3_three_task_short.yaml"
+        ).read_text()
+        factory = (repo_root / "data/dataset_factory.py").read_text()
+        self.assertIn("multitask_manifest:", data_config)
+        self.assertIn("expected_task_count: 3", data_config)
+        self.assertIn("BalancedRoundRobinDataset", factory)
+        self.assertIn("clean_action_ratio: 0.5", experiment)
+        self.assertIn("trainer_max_steps: 12", experiment)
+        self.assertIn("train_shuffle: false", experiment)
+        self.assertIn("enable_checkpointing: false", experiment)
 
     def test_schedule_separates_scheduler_horizon_from_invocation_limit(self) -> None:
         self.assertEqual(

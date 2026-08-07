@@ -36,8 +36,38 @@ def build_dataset(config: Any, *, use_depth: bool, augment: bool | None = None):
                 "RoboCasa365 M1 配置目前仅供 batch audit；M2 完成 state/action schema 与 normalization 后才允许训练"
             )
         from data.robocasa365_dataset import RoboCasa365Dataset
+        from data.robocasa365_multitask import (
+            BalancedRoundRobinDataset,
+            load_multitask_dataset_manifest,
+        )
 
         payload["use_depth"] = bool(use_depth)
+        multitask_manifest_path = payload.pop("multitask_manifest", None)
+        expected_task_count = payload.pop("expected_task_count", None)
+        if multitask_manifest_path is not None:
+            if "dataset_path" in payload or "task_name" in payload:
+                raise ValueError(
+                    "multitask_manifest 不能与单任务 dataset_path/task_name 同时配置"
+                )
+            atomic_task_manifest = payload.get("task_manifest")
+            if not atomic_task_manifest:
+                raise ValueError("多任务 Dataset 必须配置 atomic task_manifest")
+            manifest = load_multitask_dataset_manifest(
+                multitask_manifest_path,
+                atomic_task_manifest=atomic_task_manifest,
+                expected_task_count=expected_task_count,
+            )
+            datasets = []
+            for entry in manifest.tasks:
+                child_payload = dict(payload)
+                child_payload["dataset_path"] = entry.dataset_path
+                child_payload["task_name"] = entry.task_name
+                datasets.append(RoboCasa365Dataset(**child_payload))
+            return BalancedRoundRobinDataset(
+                datasets,
+                task_names=[entry.task_name for entry in manifest.tasks],
+                manifest_path=manifest.source_path,
+            )
         return RoboCasa365Dataset(**payload)
 
     raise ValueError(f"不支持的数据格式：{dataset_format!r}")

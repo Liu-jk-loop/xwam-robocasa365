@@ -280,9 +280,11 @@ echo "resume_exit_code=${PIPESTATUS[0]}"
 
 该门禁通过后，记录为“120 GiB BF16 optimizer state 工程恢复通过”。正式 H100 profile 必须显式设置 `deepspeed_fp32_optimizer_states=true` 并重新执行短程 checkpoint/resume；禁止将本 profile 用于正式训练或指标对比。
 
-## M3.2：FP32 单 clip RGB-only 过拟合曲线
+## M3.2：三个 atomic 任务 RGB-only 短训练
 
-M3.1 已验证保存和完整恢复 wiring。M3.2 改回 `a800_80gb_debug.yaml` 的 FP32 CPUAdam state，但关闭 checkpoint；因此只验证固定 clip 的数值收敛，不产生可恢复训练 checkpoint，也不使用 120 GiB BF16 optimizer state 作为数值证据。
+M3.1 已验证保存和完整恢复 wiring，也提供了 6 个 action/proprio 有效监督更新。M3.2 不再运行 50-step 单 clip 诊断，保持原训练语义 `clean_action_ratio=0.5`，直接验证取放、关节物体和电器三类 atomic 数据能否进入同一个训练过程。
+
+先拉取指定开发分支，并生成三任务 manifest：
 
 ```bash
 cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
@@ -291,38 +293,60 @@ git rev-parse HEAD
 git status --short
 
 mkdir -p logs/cluster
+
+python scripts/audit_m3_multitask_dataset.py \
+  --dataset-root /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/robocasa/robocasa/datasets/v1.0/pretrain/atomic \
+  --output logs/cluster/robocasa365_m3_three_task_manifest.json
+
+echo "dataset_audit_exit_code=$?"
+```
+
+默认三个任务是 `PickPlaceCounterToCabinet`、`OpenCabinet`、`TurnOnMicrowave`。audit 会为每个任务寻找唯一的日期目录并检查 Parquet、三路视频、16D state 和 12D action。若某任务存在多个日期目录，命令会返回 `fail`；根据报告显式补充路径，例如：
+
+```bash
+python scripts/audit_m3_multitask_dataset.py \
+  --dataset-root /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/robocasa/robocasa/datasets/v1.0/pretrain/atomic \
+  --task-path PickPlaceCounterToCabinet=/HOME/完整路径/日期目录 \
+  --task-path OpenCabinet=/HOME/完整路径/日期目录 \
+  --task-path TurnOnMicrowave=/HOME/完整路径/日期目录 \
+  --output logs/cluster/robocasa365_m3_three_task_manifest.json
+```
+
+不要把示例中的 `/HOME/完整路径/日期目录` 原样执行；用 audit 列出的真实目录替换。manifest 的 `ok/result` 必须是 `true/pass`，三个任务的 warnings/errors 必须为空。
+
+数据审计通过后，在 A800 上运行 12-step FP32/no-checkpoint 短训练：
+
+```bash
 set -o pipefail
 
 python scripts/train_sft.py \
   model_config=configs/model/wan22_5b_robocasa365_atomic.yaml \
+  data_config=configs/data/robocasa365_m3_three_task.yaml \
   hardware_config=configs/hardware/a800_80gb_debug.yaml \
-  experiment_config=configs/experiment/robocasa365_close_fridge_m3_overfit_curve.yaml \
+  experiment_config=configs/experiment/robocasa365_m3_three_task_short.yaml \
   wan_checkpoint_dir=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/Wan-AI/Wan2.2-TI2V-5B \
   pretrained_checkpoint=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/x-wam/xwam_checkpoints \
-  dataset.dataset_path=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/robocasa/robocasa/datasets/v1.0/pretrain/atomic/CloseFridge/20250819 \
   exp_root=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365 \
-  exp_name=close_fridge_m3_overfit_fp32_curve \
-  2>&1 | tee logs/cluster/close_fridge_m3_overfit_fp32_curve.log
+  exp_name=robocasa365_m3_three_task_short \
+  2>&1 | tee logs/cluster/robocasa365_m3_three_task_short.log
 
 echo "train_exit_code=${PIPESTATUS[0]}"
 ```
 
-解析后的配置必须包含 `deepspeed_fp32_optimizer_states=true`、`deepspeed_exclude_frozen_parameters=false`、`clean_action_ratio=0.0`、`enable_checkpointing=false` 和 `trainer_max_steps=50`。日志的 step 0～49 都必须显示 `train/action_proprio_supervision_ratio: 1`，depth loss 恒为 0，并以 result `pass/global_step=50` 正常退出。
+解析后的配置必须包含 `deepspeed_fp32_optimizer_states=true`、`deepspeed_exclude_frozen_parameters=false`、`clean_action_ratio=0.5`、`enable_checkpointing=false`、`trainer_max_steps=12` 和 `train_shuffle=false`。日志还应打印三任务 dataset provenance。
 
 训练返回码为 0 后执行机器审计：
 
 ```bash
-python scripts/audit_m3_overfit_curve.py \
-  --log logs/cluster/close_fridge_m3_overfit_fp32_curve.log \
-  --expected-steps 50 \
-  --window-size 10 \
-  --minimum-relative-drop 0.10 \
-  --output logs/cluster/close_fridge_m3_overfit_fp32_curve_audit.json
+python scripts/audit_m3_multitask_short.py \
+  --log logs/cluster/robocasa365_m3_three_task_short.log \
+  --manifest logs/cluster/robocasa365_m3_three_task_manifest.json \
+  --output logs/cluster/robocasa365_m3_three_task_short_audit.json
 
-echo "audit_exit_code=$?"
+echo "training_audit_exit_code=$?"
 ```
 
-audit 只有在 step 连续、指标有限、每一步都有 action/proprio 监督、RGB-only depth loss 恒为 0，并且 video/action/proprio/total 后 10 step 均值相对前 10 step 至少下降 10% 时才返回 `pass`。若失败，反馈原始日志和 audit JSON，不要自行降低阈值、增加训练步数或改学习率。
+audit 要求 step 0～11 完整、task index 为 `0,1,2` 循环四次、监督与 clean-action 两个分支都出现、action/proprio loss 与监督比例一致、所有 loss 有限、depth loss 恒为 0，并以 result `pass/global_step=12` 退出。它不要求短程 loss 达到固定降幅，也不保存 checkpoint。反馈 manifest、训练日志、audit JSON，以及实验 `runs/` 下的 config/metadata/result JSON。
 
 ## X-WAM Conda 环境
 
