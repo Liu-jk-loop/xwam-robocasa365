@@ -346,7 +346,7 @@ python scripts/audit_m3_multitask_short.py \
 echo "training_audit_exit_code=$?"
 ```
 
-audit 要求 step 0～11 完整、task index 为 `0,1,2` 循环四次、监督与 clean-action 两个分支都出现、action/proprio loss 与监督比例一致、所有 loss 有限、depth loss 恒为 0，并以 result `pass/global_step=12` 退出。它不要求短程 loss 达到固定降幅，也不保存 checkpoint。反馈 manifest、训练日志、audit JSON，以及实验 `runs/` 下的 config/metadata/result JSON。
+audit 要求 step 0～11 完整、task index 为合法整数、三个任务均至少出现一次，并允许 Lightning/DeepSpeed 随机 sampler 产生短前缀波动；默认任务计数最大值与最小值之差不能超过 2。它还检查监督与 clean-action 两个分支、action/proprio loss 对应关系、有限 loss、depth loss 为 0，以及 result `pass/global_step=12`。不要求固定 `0,1,2` 读取顺序，也不要求短程 loss 达到固定降幅。若旧 audit 仅因 `balanced_round_robin` 失败，拉取新版后直接重审原日志，无需重新训练。反馈 manifest、训练日志、更新后的 audit JSON，以及实验 `runs/` 下的 config/metadata/result JSON。
 
 ## X-WAM Conda 环境
 

@@ -87,8 +87,8 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - `a800_80gb_120g_debug` 是独立的低内存工程门禁：CPUAdam momentum/variance 随 BF16 参数保存，并在 DeepSpeed checkpoint 中排除冻结 T5/VAE。它只验证连续训练和完整恢复 wiring，不作为正式优化器数值配置。
 - 低内存 checkpoint 恢复不能全局关闭严格加载。只有同时满足“本次为 resume”及“保存配置排除冻结参数”时，runner 才允许 state dict 缺少当前模型中 `requires_grad=false` 的参数；缺少任一可训练参数、buffer 或出现额外 key 仍立即失败，shape mismatch 继续由 PyTorch 阻塞。
 - 单卡 generator state 的恢复必须兼容 Lightning/DeepSpeed 的两种 hook 顺序：`on_load_checkpoint` 先运行时延迟到 generator 创建后应用，`on_fit_start` 先运行时则在 checkpoint hook 中立即覆盖种子初始化状态。
-- M3.2 使用三个 Atomic-Seen 任务的显式 manifest。每个子任务由独立 `RoboCasa365Dataset` 保持 task-local normalization，外层 `BalancedRoundRobinDataset` 只按固定 `0→1→2` 次序平衡采样并记录 task provenance；这只用于短程工程烟测，M6 正式训练前仍需冻结跨任务统计与正式采样策略。
-- M3.2 保持原训练语义 `clean_action_ratio=0.5`，同时记录 action/proprio 监督比例和 task index。12-step FP32/no-checkpoint 门禁验证三个任务各执行四步、两类采样分支、有限 loss 与 RGB-only depth=0；不设置人为 loss 降幅阈值，也不把短烟测解释为收敛。
+- M3.2 使用三个 Atomic-Seen 任务的显式 manifest。每个子任务由独立 `RoboCasa365Dataset` 保持 task-local normalization，外层 `BalancedRoundRobinDataset` 用 `0→1→2` 虚拟索引布局保证完整数据集中的任务样本总量相等，并记录 task provenance；Lightning/DeepSpeed 的训练 sampler 可以随机重排这些索引，不能把实际 step 顺序解释为固定轮询。这只用于短程工程烟测，M6 正式训练前仍需冻结跨任务统计与正式采样策略。
+- M3.2 保持原训练语义 `clean_action_ratio=0.5`，同时记录 action/proprio 监督比例和 task index。12-step FP32/no-checkpoint 门禁要求三个任务均被采到、task index 合法且任务计数最大差不超过 2，并验证两类采样分支、有限 loss 与 RGB-only depth=0；不设置人为 loss 降幅阈值，也不把短烟测解释为收敛。
 - CPUAdam 默认和原有 A800/M2/upstream profile 均保持 `fp32_optimizer_states=true`。H100 正式门禁必须显式使用 FP32 optimizer state 并重新验证 checkpoint/resume，禁止从 120 GiB profile 隐式继承 BF16 state。
 - 每次 DeepSpeed checkpoint 保存前后向独立 JSONL fsync 写入 process RSS、cgroup memory current/peak/max/events。缺少 `checkpoint_save_complete` 时，结合 `oom_kill` 和 checkpoint 文件结构区分保存期 OOM 与普通 Python 异常。
 

@@ -4,7 +4,7 @@
 
 - 分支：`dev/atomic-robocasa365`
 - 基线 commit：`3bbd621`
-- 运行状态：三任务真实数据审计通过；A800 12-step 训练为 `cluster-pending`
+- 运行状态：三任务数据和 12-step 训练已运行；audit 固定顺序误判已修复，更新后的集群 audit JSON 待生成
 
 ### 方案修正
 
@@ -32,7 +32,15 @@
 
 - commit `3d49c970a00317b3adb466ae8c139d5912946e96` 生成的 manifest 返回 `ok=true/result=pass`、errors 为空，范围为 `atomic_only`，采样为 `balanced_round_robin`。
 - `PickPlaceCounterToCabinet`、`OpenCabinet`、`TurnOnMicrowave` 三个日期目录共 322 episodes、75,727 frames；每个任务均满足 16D state、12D action 与三路配置相机合同。
-- 数据门禁通过，只关闭 M3.2 的 manifest 子门禁；真实 Dataset 构造、FP32 CPUAdam 内存、12-step loss 和正常退出仍待 A800 训练日志验证。
+- 数据门禁通过，只关闭 M3.2 的 manifest 子门禁；后续真实训练结论记录在下一小节，不由 manifest 单独推断。
+
+### 12-step 训练反馈与 audit 误判修复
+
+- A800 日志完成 step 0～11、`max_steps=12` 和 run result `pass`；CUDA peak allocated/reserved 为 `30.677/40.076 GiB`。全部指标有限、depth loss 为 0，`clean_action_ratio=0.5` 的两类监督分支及 action/proprio loss 对应关系均通过。
+- 实际三个任务计数为 `3/5/4`。旧 audit 要求 task index 严格按 `0,1,2` 循环，但 Lightning/DeepSpeed 会为训练 DataLoader 自动使用随机分布式 sampler；`train_shuffle=false` 只描述构造时 DataLoader，不能保证 Trainer 消费顺序。
+- 不修改 Trainer、Dataset 或真实训练 shuffle。audit 改为分别检查 task index 为整数且位于合法范围、三个任务均至少出现一次、12-step 任务计数最大差不超过默认容差 2，并输出具名 `task_counts`。
+- CLI 新增 `--max-task-count-spread`，默认 2；非法 task index、任务缺失或超出计数容差仍失败。使用原始日志回归得到计数 `PickPlaceCounterToCabinet=3`、`OpenCabinet=5`、`TurnOnMicrowave=4`，所有检查通过。
+- 本次仅修复 dependency-free 审计和记录，不需要重新运行 5B 训练。更新后的集群 audit JSON 与原 run metadata/result 仍待反馈；训练 commit 在 metadata 到达前不推断。
 
 ## 2026-08-07 — M3.2 FP32 单 clip 过拟合曲线门禁
 

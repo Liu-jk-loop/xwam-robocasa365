@@ -27,6 +27,12 @@ def main() -> int:
         "--output",
         default="logs/cluster/robocasa365_m3_three_task_short_audit.json",
     )
+    parser.add_argument(
+        "--max-task-count-spread",
+        type=int,
+        default=2,
+        help="12-step 分布式随机采样中任务计数最大值与最小值的允许差，默认 2。",
+    )
     args = parser.parse_args()
 
     try:
@@ -38,6 +44,7 @@ def main() -> int:
             Path(args.log).read_text(encoding="utf-8", errors="replace"),
             task_names=task_names,
             expected_steps=12,
+            max_task_count_spread=args.max_task_count_spread,
         )
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         report = {

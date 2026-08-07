@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：M3.2——三个 atomic 任务的 RGB-only 短训练门禁
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1、M2 全部门禁通过；M3.1 120 GiB checkpoint/resume 已在 commit `fabaaba` 恢复到 step 10 并通过；M3.2 三任务数据 manifest 已通过，12-step FP32 短训练待运行
+- 超算运行状态：M1、M2 全部门禁通过；M3.1 checkpoint/resume 通过；M3.2 三任务数据和 12-step 训练均已运行，旧 audit 顺序误判已修正，更新后的集群 audit JSON 待生成
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -17,7 +17,7 @@
 | M0 工程与协作基线 | 已完成 | 主仓库已 clone | 模拟器阶段开始时确认第三方子模块 |
 | M1 原生 RoboCasa365 loader | 已完成 | commit `e4249b9` 真实 batch `ok=true` | 已关闭 |
 | M2 动作与 checkpoint 适配 | 已完成 | 两种初始化、完整动作契约及 DeepSpeedCPUAdam 单 batch 参数更新均通过 | 已关闭 |
-| M3 RGB-only 训练烟测 | M3.2 三任务数据审计通过 | M3.1 恢复通过；commit `3d49c97` 三任务 manifest `pass` | 运行并审计 12-step FP32/no-checkpoint 短训练 |
+| M3 RGB-only 训练烟测 | M3.2 训练完成、audit 修复待复跑 | 12 step/result 通过；任务计数 3/5/4，旧固定顺序检查误判 | 用新 audit 重审原日志并补 run metadata |
 | M4 闭环评测器 | 未开始 | 待验证 | 完成一个 atomic 闭环 rollout |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
 | M6 Atomic 正式训练与评测 | 未开始 | 待验证 | 通过 H100 正式训练门禁 |
@@ -189,9 +189,9 @@ M3.2 本地准备：
 
 - 根据用户确认，M3.1 已有 10 个 step 中 5 个 action/proprio 监督 step，加上 M2 单步共 6 个有效监督更新，足以作为短程 loss/参数更新 smoke；取消尚未运行的 50-step、`clean_action_ratio=0` 人工过拟合诊断，不宣称已完成严格过拟合。
 - 新增三个 Atomic-Seen 任务 manifest：默认选择 `PickPlaceCounterToCabinet`、`OpenCabinet`、`TurnOnMicrowave`，分别覆盖取放、关节物体和电器操作；自动解析唯一日期目录，多日期并存时强制显式选择。
-- 新增平衡轮询 adapter，顺序固定为 `0→1→2`。三个子 Dataset 分别执行既有 PandaOmron schema 与 task-local normalization，外层不修改 12D action、16D proprio 或 RGB tensor 合同。
-- 新增 12-step FP32/no-checkpoint 配置，保持原 X-WAM `clean_action_ratio=0.5`，每个任务执行四步；训练日志增加监督比例、task index 和 manifest provenance。
-- 新增无 Torch 机器审计：要求 step 0～11 完整、三个 task index 平衡轮询、两类监督分支均出现且与 action/proprio loss 对应、全部 loss 有限、depth loss 恒为 0、Trainer/result 正常结束。真实运行状态为 `cluster-pending`。
+- 新增平衡索引 adapter，虚拟索引按 `0→1→2` 布局，使完整 Dataset 的三个任务样本总量相等。三个子 Dataset 分别执行既有 PandaOmron schema 与 task-local normalization，外层不修改 12D action、16D proprio 或 RGB tensor 合同；Lightning/DeepSpeed sampler 可在训练时随机重排索引。
+- 新增 12-step FP32/no-checkpoint 配置，保持原 X-WAM `clean_action_ratio=0.5`；训练日志增加监督比例、task index 和 manifest provenance。
+- 无 Torch 机器审计要求 step 0～11 完整、task index 合法、三个任务均覆盖且计数最大差不超过 2；同时检查两类监督分支、有限 loss、depth loss 恒为 0 和 Trainer/result 正常结束，不要求固定取样顺序。
 
 M3.2 三任务数据审计证据：
 
@@ -200,11 +200,18 @@ M3.2 三任务数据审计证据：
 - 合计 322 episodes、75,727 frames；三个任务均为 16D state、12D action，且相机顺序一致为 left agentview、right agentview、eye-in-hand。
 - 三个任务均属于版本化 Atomic-Seen 清单；真实数据/视频门禁通过，可以进入 12-step RGB-only 训练。该结论不代表训练运行已经通过。
 
+M3.2 12-step 训练反馈与 audit 修正：
+
+- 训练日志完整包含 step 0～11，Trainer 达到 `max_steps=12`，run result 为 `pass`；CUDA peak allocated/reserved 为 `30.677/40.076 GiB`，没有 traceback、NaN、OOM 或 depth 读取。
+- `clean_action_ratio=0.5` 保持不变；监督 step 为 0、1、5、7、8，其他 step 的 action/proprio loss 按设计为 0，监督比例和 loss 对应关系通过。
+- 实际 task index 为 `0,2,1,1,1,1,1,0,2,2,0,2`，三个任务计数为 `3/5/4`。旧 audit 错把 Dataset 的平衡索引布局当成 Trainer 的固定读取顺序，因此只有 `balanced_round_robin` 一项误报失败。
+- 修正后保留真实 Lightning/DeepSpeed shuffle，只检查合法索引、三个任务覆盖和计数最大差不超过 2；同一原始日志在本地 dependency-free 重审为 `ok=true/result=pass`。集群需拉取新 commit 后只重跑 audit，无需重新训练。
+- 当前反馈未附 run metadata JSON，训练 Git commit 仍需从 metadata 的 `git.commit` 补齐后关闭 M3.2。
+
 ## 待提供输入
 
-- 拉取包含本次证据记录的最新 commit；已生成的 `logs/cluster/robocasa365_m3_three_task_manifest.json` 可以直接复用，不要重新选择任务或日期目录。
-- 使用 `a800_80gb_debug.yaml`、三任务 data config 和 12-step experiment 从公开 X-WAM checkpoint 运行；本轮不 resume、不保存训练 checkpoint。
-- 运行短训练审计并反馈训练日志、manifest/audit JSON、run config/metadata/result、退出码和 CPU/CUDA 峰值。audit 失败时保留原始证据，不修改采样比例或步数。
+- 拉取 audit 修复 commit，不重新训练；直接用新 `scripts/audit_m3_multitask_short.py` 重审已有日志。
+- 反馈更新后的 audit JSON，以及日志中所列 `20260807T105307Z_metadata.json` 和对应 result JSON，用 metadata 的 `git.commit` 完成运行 provenance。
 - 不在本轮运行闭环 simulator；新版在线 16D observation 提取将在 M4 实现和验收。
 
 ## 当前执行过程
@@ -231,3 +238,4 @@ M3.2 三任务数据审计证据：
 20. 用户决定保留原 `clean_action_ratio=0.5`，并以已有 6 个有效监督更新结束单任务趋势 smoke；未运行的 50-step/clean-ratio-zero 诊断被取消。
 21. Codex 已准备 M3.2 三个 atomic 任务的 manifest、平衡轮询 adapter、12-step FP32/no-checkpoint 配置与机器审计，等待 A800 运行。
 22. 用户已在 commit `3d49c97` 完成三任务真实数据审计；322 episodes、75,727 frames、16D/12D/三相机合同全部通过，下一步为 12-step 训练。
+23. 三任务 12-step 训练正常完成；旧 audit 因 Lightning/DeepSpeed 随机 sampler 打乱固定顺序而误报。Codex 已改为覆盖与短前缀计数容差审计，同一日志本地重审通过，等待服务器生成正式 audit JSON 并补 metadata。

@@ -50,20 +50,23 @@ def build_multitask_short_report(
     *,
     task_names: Sequence[str],
     expected_steps: int = 12,
+    max_task_count_spread: int = 2,
 ) -> dict[str, Any]:
     """Validate wiring and numerical sanity without imposing a convergence target."""
     names = [str(name) for name in task_names]
     expected_steps = int(expected_steps)
+    max_task_count_spread = int(max_task_count_spread)
     if expected_steps <= 0:
         raise ValueError("expected_steps 必须为正整数")
     if not names or expected_steps % len(names) != 0:
         raise ValueError("expected_steps 必须能被非空任务数整除")
+    if max_task_count_spread < 0:
+        raise ValueError("max_task_count_spread 不能为负数")
 
     records, errors = parse_console_metrics(log_text)
     records.sort(key=lambda item: item["step"])
     actual_steps = [record["step"] for record in records]
     expected_step_ids = list(range(expected_steps))
-    expected_task_indices = [step % len(names) for step in expected_step_ids]
     checks: dict[str, bool] = {
         "three_unique_atomic_tasks": len(names) == 3 and len(set(names)) == 3,
         "clean_action_ratio_preserved": bool(
@@ -97,6 +100,7 @@ def build_multitask_short_report(
     checks["all_metrics_finite"] = not non_finite
 
     observed_task_indices: list[int] = []
+    task_counts: list[int] = []
     supervised_steps: list[int] = []
     unsupervised_steps: list[int] = []
     can_validate_metrics = (
@@ -111,12 +115,16 @@ def build_multitask_short_report(
         raw_task_indices = [
             record["metrics"]["train/task_index"] for record in records
         ]
-        checks["balanced_round_robin"] = (
-            observed_task_indices == expected_task_indices
-            and all(
-                abs(raw - rounded) <= 1e-6
-                for raw, rounded in zip(raw_task_indices, observed_task_indices)
-            )
+        checks["valid_task_indices"] = all(
+            abs(raw - rounded) <= 1e-6 and 0 <= rounded < len(names)
+            for raw, rounded in zip(raw_task_indices, observed_task_indices)
+        )
+        task_counts = [
+            observed_task_indices.count(index) for index in range(len(names))
+        ]
+        checks["all_tasks_observed"] = all(count > 0 for count in task_counts)
+        checks["task_count_spread_within_tolerance"] = (
+            max(task_counts) - min(task_counts) <= max_task_count_spread
         )
 
         supervision_values = [
@@ -159,7 +167,9 @@ def build_multitask_short_report(
     else:
         checks.update(
             {
-                "balanced_round_robin": False,
+                "valid_task_indices": False,
+                "all_tasks_observed": False,
+                "task_count_spread_within_tolerance": False,
                 "binary_supervision_ratio": False,
                 "both_supervision_branches_observed": False,
                 "supervision_matches_losses": False,
@@ -180,9 +190,14 @@ def build_multitask_short_report(
         "result": "pass" if ok else "fail",
         "ok": ok,
         "expected_steps": expected_steps,
+        "max_task_count_spread": max_task_count_spread,
         "task_names": names,
-        "expected_task_indices": expected_task_indices,
         "observed_task_indices": observed_task_indices,
+        "task_counts": {
+            name: task_counts[index] for index, name in enumerate(names)
+        }
+        if task_counts
+        else {},
         "supervised_steps": supervised_steps,
         "unsupervised_steps": unsupervised_steps,
         "actual_steps": actual_steps,

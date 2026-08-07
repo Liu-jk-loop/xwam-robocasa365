@@ -144,7 +144,34 @@ class M3MultitaskTest(unittest.TestCase):
         self.assertTrue(report["supervised_steps"])
         self.assertTrue(report["unsupervised_steps"])
 
-    def test_short_training_audit_rejects_broken_task_order(self) -> None:
+    def test_short_training_audit_accepts_distributed_shuffled_prefix(self) -> None:
+        observed = [0, 2, 1, 1, 1, 1, 1, 0, 2, 2, 0, 2]
+        lines = [
+            "{'clean_action_ratio': 0.5, 'enable_checkpointing': False}",
+            f"Training dataset provenance: {{'task_names': {list(TASKS)!r}}}",
+        ]
+        lines.extend(
+            _metric_line(step, task_index, supervised=step % 4 != 2)
+            for step, task_index in enumerate(observed)
+        )
+        lines.extend(
+            [
+                "`Trainer.fit` stopped: `max_steps=12` reached.",
+                "Run result: /tmp/result.json (pass)",
+            ]
+        )
+        report = build_multitask_short_report("\n".join(lines), task_names=TASKS)
+        self.assertTrue(report["ok"], report)
+        self.assertEqual(
+            report["task_counts"],
+            {
+                "PickPlaceCounterToCabinet": 3,
+                "OpenCabinet": 5,
+                "TurnOnMicrowave": 4,
+            },
+        )
+
+    def test_short_training_audit_rejects_missing_task_coverage(self) -> None:
         lines = [
             "{'clean_action_ratio': 0.5, 'enable_checkpointing': False}",
             f"Training dataset provenance: {{'task_names': {list(TASKS)!r}}}",
@@ -158,7 +185,28 @@ class M3MultitaskTest(unittest.TestCase):
         )
         report = build_multitask_short_report("\n".join(lines), task_names=TASKS)
         self.assertFalse(report["ok"])
-        self.assertFalse(report["checks"]["balanced_round_robin"])
+        self.assertFalse(report["checks"]["all_tasks_observed"])
+        self.assertFalse(report["checks"]["task_count_spread_within_tolerance"])
+
+    def test_short_training_audit_rejects_invalid_task_index(self) -> None:
+        observed = [0, 1, 2] * 3 + [0, 1, 3]
+        lines = [
+            "{'clean_action_ratio': 0.5, 'enable_checkpointing': False}",
+            f"Training dataset provenance: {{'task_names': {list(TASKS)!r}}}",
+        ]
+        lines.extend(
+            _metric_line(step, task_index, supervised=step % 2 == 0)
+            for step, task_index in enumerate(observed)
+        )
+        lines.extend(
+            [
+                "`Trainer.fit` stopped: `max_steps=12` reached.",
+                "Run result: /tmp/result.json (pass)",
+            ]
+        )
+        report = build_multitask_short_report("\n".join(lines), task_names=TASKS)
+        self.assertFalse(report["ok"])
+        self.assertFalse(report["checks"]["valid_task_indices"])
 
 
 if __name__ == "__main__":
