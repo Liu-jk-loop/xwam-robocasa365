@@ -1,13 +1,13 @@
 # 项目进度
 
-更新时间：2026-08-06
+更新时间：2026-08-07
 
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：M3.1——单任务极小样本、checkpoint 与 resume 门禁
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1、M2 全部门禁通过；M3.1 FP32 CPUAdam 已完成 8 个训练 step，但在 step 8 checkpoint/退出阶段失去 Pod，120 GiB 低内存修复待验证
+- 超算运行状态：M1、M2 全部门禁通过；M3.1 120 GiB profile 已完成 step 8 与 checkpoint 保存，首次 resume 因冻结 T5/VAE 被 DeepSpeed 严格加载拒绝；定向兼容补丁待复测
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -17,7 +17,7 @@
 | M0 工程与协作基线 | 已完成 | 主仓库已 clone | 模拟器阶段开始时确认第三方子模块 |
 | M1 原生 RoboCasa365 loader | 已完成 | commit `e4249b9` 真实 batch `ok=true` | 已关闭 |
 | M2 动作与 checkpoint 适配 | 已完成 | 两种初始化、完整动作契约及 DeepSpeedCPUAdam 单 batch 参数更新均通过 | 已关闭 |
-| M3 RGB-only 训练烟测 | M3.1 低内存修复中 | FP32 CPUAdam 完成 step 0～7；checkpoint/result 未通过 | 120 GiB profile 保存 step 8，再恢复到 step 10 |
+| M3 RGB-only 训练烟测 | M3.1 resume 修复中 | 120 GiB profile 的 step 8/checkpoint 已通过；resume 在模型状态加载阶段失败 | 使用原 step-8 checkpoint 恢复到 step 10 |
 | M4 闭环评测器 | 未开始 | 待验证 | 完成一个 atomic 闭环 rollout |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
 | M6 Atomic 正式训练与评测 | 未开始 | 待验证 | 通过 H100 正式训练门禁 |
@@ -170,10 +170,18 @@ M3.1 首次 8-step/checkpoint 反馈：
 - 新增独立 `a800_80gb_120g_debug` profile：只在 M3 工程门禁使用 BF16 CPUAdam state，并排除冻结 T5/VAE checkpoint；原 A800、M2 和 upstream profile 保持 FP32。
 - checkpoint 事件将 fsync 写入 JSONL；真实保存和 resume 仍为 `cluster-pending`。正式 H100 必须恢复 FP32 optimizer state 并重新通过保存/恢复门禁。
 
+M3.1 120 GiB 保存与首次 resume 证据：
+
+- 基于 commit `54d1f01` 的低内存 profile 已在固定 clip 上正常达到 `global_step=8`，`checkpoint_save_start`、`checkpoint_save_complete` 和 run result `pass` 均存在；保存时进程 RSS 约 97.4 GB，CUDA peak allocated/reserved 为 `30.677/40.076 GiB`。
+- step-8 checkpoint 路径可被 DeepSpeed 解析，首次 resume 进入模型状态恢复后失败；没有开始 step 8/9，也没有进入 optimizer/scheduler state 恢复，不是 CUDA/主机 OOM。
+- 缺失 key 全部属于已冻结的 `text_encoder.model.*` 和 `vae.model.*`，与保存侧 `exclude_frozen_parameters=true` 一致；日志没有显示 `model.*` 可训练参数缺失。
+- 当前补丁仅在“resume + exclude frozen”组合下按当前 `requires_grad` 集合放行冻结参数缺失，并继续拒绝可训练参数、buffer、unexpected key 和 shape mismatch；同时修正 generator state 在 DeepSpeed 实际 hook 顺序下的应用。
+- 原 step-8 checkpoint 保留并复用；补丁后的 resume-to-10 为 `cluster-pending`。
+
 ## 待提供输入
 
-- 拉取 M3.1 120 GiB 修复 commit 后，使用新的实验名和低内存 hardware profile 对固定 `CloseFridge` clip 训练到 step 8；只有 checkpoint、`checkpoint_save_complete` 和 result JSON 均通过才恢复到 step 10。
-- 反馈 `git rev-parse HEAD`、两次返回码、`free -h`/`df -h`、两份完整日志、全部 run config/metadata/result JSON、连续 loss、checkpoint 目录大小和最终 CUDA 峰值。
+- 拉取 M3.1 resume 修复 commit 后，直接复用 `close_fridge_m3_overfit_120g_gate1` 的原 step-8 checkpoint 恢复到 step 10；不要重新执行前 8 step，也不要删除原 checkpoint。
+- 反馈 `git rev-parse HEAD`、resume 返回码、完整日志、新增的 config/metadata/result/event 文件、step 8～9 loss、checkpoint 目录大小和最终 CPU/CUDA 峰值。
 - 不在本轮运行闭环 simulator；新版在线 16D observation 提取将在 M4 实现和验收。
 
 ## 当前执行过程
@@ -194,3 +202,5 @@ M3.1 首次 8-step/checkpoint 反馈：
 14. 第四次启动已用 DeepSpeedCPUAdam 完成真实 batch 的 forward、backward 和 optimizer update；CUDA allocated peak 30.677 GiB、首个 loss 2.979639，M2 关闭并进入 M3 准备。
 15. Codex 已实现 M3.1 分层配置、固定单 clip、8/10 step 调度边界、DeepSpeed resume、自定义 RNG state 恢复和运行 provenance；等待 A800 两段式验收。
 16. 第一次 M3.1 运行完成 8 个训练 step，但 Pod 在 checkpoint/退出阶段失效；Codex 已实现 120 GiB 独立低内存 profile、冻结参数排除和 checkpoint cgroup/RSS 诊断，等待 fresh experiment 复测。
+17. 120 GiB profile 的 fresh experiment 已完成 step 8、checkpoint 保存和正常退出，证明低内存保存门禁通过。
+18. 首次 resume 因 DeepSpeed 严格要求 checkpoint 包含已主动排除的冻结 T5/VAE 参数而失败；Codex 已实现定向严格恢复和 generator hook 时序修复，等待从原 step-8 checkpoint 复测到 step 10。

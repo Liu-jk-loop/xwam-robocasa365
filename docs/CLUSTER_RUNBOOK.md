@@ -268,7 +268,15 @@ python scripts/train_sft.py \
 echo "resume_exit_code=${PIPESTATUS[0]}"
 ```
 
-第二段必须出现 `deferred_to_trainer`、`Restored training generator state`、step 8～9、`max_steps=10`、第二组 start/complete event 和 result `pass/global_step=10`。反馈两份日志、`runs/` 下全部 config/metadata/result/event 文件、`du -shL last.ckpt`、两次退出码和资源检查结果。
+第二段必须出现：
+
+- `deferred_to_trainer`。
+- `Excluded-frozen resume load accepted`，且明确为 `missing_non_frozen=0, unexpected=0`；如果报告可训练参数、buffer、额外 key 或 shape mismatch，立即停止。
+- `Restored training generator state`；早先出现一次 seed 初始化日志不代表失败，checkpoint hook 随后必须明确覆盖它。
+- step 8～9、`max_steps=10`、第二组 start/complete event 和 result `pass/global_step=10`。
+- result JSON 的 `resume_module_load.mode=excluded_frozen_parameters`，并且 `missing_frozen_count` 为正数。
+
+反馈 resume 日志、这次新增的 config/metadata/result/event 文件、`du -shL last.ckpt`、退出码和资源检查结果。原 step-8 checkpoint 可以直接复用，不需要重新训练前 8 step。
 
 该门禁通过后，记录为“120 GiB BF16 optimizer state 工程恢复通过”。正式 H100 profile 必须显式设置 `deepspeed_fp32_optimizer_states=true` 并重新执行短程 checkpoint/resume；禁止将本 profile 用于正式训练或指标对比。
 

@@ -156,6 +156,10 @@ def main():
     if bool(config.get("persist_generator_state", False)) and topology["world_size"] != 1:
         raise ValueError("persist_generator_state 当前只允许 M3 单 GPU 确定性恢复门禁")
     deepspeed_options = resolve_deepspeed_options(config)
+    allow_missing_frozen_resume_parameters = bool(
+        resume_checkpoint is not None
+        and deepspeed_options["exclude_frozen_parameters"]
+    )
 
     pprint(OmegaConf.to_container(config))
 
@@ -288,6 +292,9 @@ def main():
                 "pretrained_checkpoint": config.get("pretrained_checkpoint"),
                 "resume_checkpoint": resume_checkpoint,
                 "events": str(checkpoint_events_path.resolve()),
+                "allow_missing_frozen_resume_parameters": (
+                    allow_missing_frozen_resume_parameters
+                ),
             },
             "environment": {
                 "python": platform.python_version(),
@@ -315,6 +322,8 @@ def main():
     print(f"Run metadata: {run_metadata_path}")
 
     model = XWAMRunner(config, run_depth=bool(config.use_depth))
+    if allow_missing_frozen_resume_parameters:
+        model.enable_excluded_frozen_resume_loading()
     initialization_report = config.get("checkpoint_initialization_report")
     if initialization_report is None:
         initialization_report = os.path.join(
@@ -404,6 +413,9 @@ def main():
             "cuda_peak_allocated_gib": allocated_gib,
             "cuda_peak_reserved_gib": reserved_gib,
             "resume_checkpoint": resume_checkpoint,
+            "resume_module_load": getattr(
+                model, "_excluded_frozen_resume_report", None
+            ),
             "last_checkpoint": (
                 checkpoint_callback.last_model_path if checkpoint_callback is not None else None
             ),

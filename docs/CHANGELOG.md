@@ -1,5 +1,39 @@
 # 变更记录
 
+## 2026-08-07 — M3.1 排除冻结参数 checkpoint 的定向恢复
+
+- 分支：`dev/atomic-robocasa365`
+- 基线 commit：`54d1f01`
+- 运行状态：本地静态验证完成；复用原 step-8 checkpoint 的 resume-to-10 为 `cluster-pending`
+
+### 问题与集群证据
+
+- 120 GiB profile 已在固定 RGB clip 上完成 step 0～7、step-8 checkpoint 保存和正常退出；`checkpoint_save_start/complete`、result `pass/global_step=8` 均存在，说明上一轮保存期内存修复有效。
+- 首次 resume 能解析 `epoch=7-step=8.ckpt`，但在 DeepSpeed `load_module_state_dict` 阶段失败；optimizer、scheduler 和后续训练 step 尚未恢复，CUDA peak 仍为 `30.677/40.076 GiB`，不是本轮 OOM。
+- 报错缺失项全部是冻结的 `text_encoder.model.*` 与 `vae.model.*`。保存侧按 `exclude_frozen_parameters=true` 主动省略这些参数，而 Lightning/DeepSpeed 恢复侧默认传入 `strict=true`，两者合同不一致。
+- 日志还显示 `on_fit_start` 的 generator 种子初始化早于 checkpoint module load；旧 `on_load_checkpoint` 只缓存状态，不能保证它在 generator 已存在时真正应用。
+
+### 新增和修改逻辑
+
+- 增加无 Torch 的 resume key validator：只允许缺失当前模型中 `requires_grad=false` 的参数；缺少可训练参数或 buffer、出现 unexpected key 时立即失败并给出计数和样例。
+- Runner 仅在训练入口同时检测到 `resume_checkpoint` 与 `exclude_frozen_parameters=true` 时启用定向非严格底层加载；其他初始化、普通 resume、M2、upstream 和正式 profile 保持原严格语义。
+- 在底层加载前后各验证一次 key 集合；tensor shape mismatch 继续由 PyTorch `load_state_dict` 阻塞，不会被放宽。
+- 成功恢复时输出 `missing_frozen/missing_non_frozen/unexpected` 摘要，并把完整允许清单写入 result JSON 的 `resume_module_load`，metadata 同时记录该模式是否启用。
+- generator 恢复改为顺序无关：checkpoint hook 先到时在 `on_fit_start` 创建后应用，fit hook 先到时由 checkpoint hook 立即覆盖种子状态。
+
+### 涉及文件
+
+- 恢复合同：`project_tools/training_run.py`、`runners/xwam_runner.py`、`scripts/train_sft.py`。
+- 回归测试：`tests/test_training_run.py`。
+- 架构、进度和超算验收：`docs/ARCHITECTURE.md`、`docs/PROGRESS.md`、`docs/CLUSTER_RUNBOOK.md`。
+
+### 验证、风险和回滚
+
+- 聚焦无 Torch 测试覆盖冻结缺失通过、可训练缺失拒绝、unexpected key 拒绝和入口 wiring；Python compile、完整无 Torch 测试、文档门禁和 diff 检查在发布前执行。
+- 本地没有 Torch/Lightning/DeepSpeed，真实 5B module、optimizer、scheduler、loop 和 generator 完整恢复仍为 `cluster-pending`。
+- 原 step-8 checkpoint 不需要重建；它依赖 Wan2.2 路径重新构造冻结 T5/VAE，再由训练 checkpoint 恢复 X-WAM 可训练状态。
+- 回退本次 commit 即恢复 DeepSpeed 默认严格加载；不会删除或改写外部 checkpoint、数据和模型权重。
+
 ## 2026-08-06 — M3.1 120 GiB checkpoint 低内存门禁
 
 - 分支：`dev/atomic-robocasa365`

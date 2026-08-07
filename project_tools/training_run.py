@@ -61,6 +61,33 @@ def resolve_resume_checkpoint(value: str | os.PathLike[str] | None) -> str | Non
     return str(path)
 
 
+def validate_excluded_frozen_resume_keys(
+    *,
+    missing_keys: list[str] | tuple[str, ...] | set[str],
+    unexpected_keys: list[str] | tuple[str, ...] | set[str],
+    frozen_parameter_names: list[str] | tuple[str, ...] | set[str],
+) -> dict[str, Any]:
+    """Allow only frozen parameters intentionally omitted by DeepSpeed saves."""
+    missing = set(missing_keys)
+    unexpected = set(unexpected_keys)
+    frozen = set(frozen_parameter_names)
+    disallowed_missing = missing - frozen
+    if disallowed_missing or unexpected:
+        raise RuntimeError(
+            "resume checkpoint 与当前模型不兼容："
+            f"非冻结缺失参数={sorted(disallowed_missing)[:10]} "
+            f"(共 {len(disallowed_missing)} 项)，"
+            f"额外参数={sorted(unexpected)[:10]} (共 {len(unexpected)} 项)"
+        )
+    allowed_missing = sorted(missing)
+    return {
+        "mode": "excluded_frozen_parameters",
+        "missing_frozen_count": len(allowed_missing),
+        "missing_frozen_parameters": allowed_missing,
+        "unexpected_count": 0,
+    }
+
+
 def resolve_save_last(value: bool | str | None) -> bool | str:
     if value == "link":
         return "link"

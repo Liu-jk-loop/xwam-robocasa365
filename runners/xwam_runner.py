@@ -16,6 +16,7 @@ from project_tools.training_topology import (
     resolve_cpu_adam_options,
     resolve_optimizer_backend,
 )
+from project_tools.training_run import validate_excluded_frozen_resume_keys
 
 
 class XWAMRunner(L.LightningModule):
@@ -24,6 +25,8 @@ class XWAMRunner(L.LightningModule):
         self.config = config
         self.run_depth = bool(config.use_depth) if run_depth is None else bool(run_depth)
         self._restored_generator_state = None
+        self._allow_missing_frozen_resume_parameters = False
+        self._excluded_frozen_resume_report = None
 
         # TODO: remove hard-coded views and modalities
         self.num_views = 3
@@ -63,6 +66,38 @@ class XWAMRunner(L.LightningModule):
             self.model.gradient_checkpointing = True
 
         self.model.train()
+
+    def enable_excluded_frozen_resume_loading(self):
+        """Permit only frozen parameters omitted by a low-memory DeepSpeed save."""
+        self._allow_missing_frozen_resume_parameters = True
+
+    def load_state_dict(self, state_dict, strict=True, assign=False):
+        if not (strict and self._allow_missing_frozen_resume_parameters):
+            return super().load_state_dict(state_dict, strict=strict, assign=assign)
+
+        target_keys = set(super().state_dict().keys())
+        source_keys = set(state_dict.keys())
+        frozen_parameter_names = {
+            name for name, parameter in self.named_parameters() if not parameter.requires_grad
+        }
+        report = validate_excluded_frozen_resume_keys(
+            missing_keys=target_keys - source_keys,
+            unexpected_keys=source_keys - target_keys,
+            frozen_parameter_names=frozen_parameter_names,
+        )
+        incompatible = super().load_state_dict(state_dict, strict=False, assign=assign)
+        validate_excluded_frozen_resume_keys(
+            missing_keys=incompatible.missing_keys,
+            unexpected_keys=incompatible.unexpected_keys,
+            frozen_parameter_names=frozen_parameter_names,
+        )
+        self._excluded_frozen_resume_report = report
+        print(
+            "Excluded-frozen resume load accepted: "
+            f"missing_frozen={report['missing_frozen_count']}, "
+            "missing_non_frozen=0, unexpected=0"
+        )
+        return incompatible
 
     def configure_optimizers(self):
         optimizer_backend = resolve_optimizer_backend(self.config)
@@ -108,11 +143,17 @@ class XWAMRunner(L.LightningModule):
     def on_fit_start(self):
         seed = self.config.seed + self.global_rank
         self.generator_per_rank = torch.Generator(device="cpu").manual_seed(seed)
-        if self._restored_generator_state is not None:
-            self.generator_per_rank.set_state(self._restored_generator_state.cpu())
-            print(f"Restored training generator state for rank {self.global_rank}")
-        else:
+        if not self._apply_restored_generator_state():
             print(f"Setting generator for rank {self.global_rank} with seed {seed}")
+
+    def _apply_restored_generator_state(self):
+        if self._restored_generator_state is None or not hasattr(
+            self, "generator_per_rank"
+        ):
+            return False
+        self.generator_per_rank.set_state(self._restored_generator_state.cpu())
+        print(f"Restored training generator state for rank {self.global_rank}")
+        return True
 
     def on_save_checkpoint(self, checkpoint):
         if bool(getattr(self.config, "persist_generator_state", False)) and hasattr(
@@ -125,6 +166,7 @@ class XWAMRunner(L.LightningModule):
             if "xwam_generator_state" not in checkpoint:
                 raise RuntimeError("resume checkpoint 缺少 xwam_generator_state")
             self._restored_generator_state = checkpoint["xwam_generator_state"]
+            self._apply_restored_generator_state()
 
     def training_step(self, batch, batch_idx):
         # 1. prepare condition
