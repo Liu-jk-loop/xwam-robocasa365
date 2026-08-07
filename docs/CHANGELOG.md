@@ -4,7 +4,7 @@
 
 - 分支：`dev/atomic-robocasa365`
 - 基线 commit：`3bbd621`
-- 运行状态：本地静态验证完成；三任务数据审计和 A800 12-step 训练为 `cluster-pending`
+- 运行状态：三任务真实数据审计通过；A800 12-step 训练为 `cluster-pending`
 
 ### 方案修正
 
@@ -27,6 +27,12 @@
 - 审计与测试：`scripts/audit_m3_multitask_dataset.py`、`project_tools/multitask_training.py`、`scripts/audit_m3_multitask_short.py`、`tests/test_m3_multitask.py`、`tests/test_training_run.py`。
 - 本地没有 Torch；真实 Parquet/Decord 三任务构造、DeepSpeed FP32 state 内存和 CUDA 训练为 `cluster-pending`。task-local normalization 仅用于 M3 smoke，M6 前必须生成并冻结跨任务正式统计。
 - 回退本次 commit 可恢复单任务路径；不会删除或修改服务器数据、权重与 checkpoint。
+
+### 三任务集群数据证据
+
+- commit `3d49c970a00317b3adb466ae8c139d5912946e96` 生成的 manifest 返回 `ok=true/result=pass`、errors 为空，范围为 `atomic_only`，采样为 `balanced_round_robin`。
+- `PickPlaceCounterToCabinet`、`OpenCabinet`、`TurnOnMicrowave` 三个日期目录共 322 episodes、75,727 frames；每个任务均满足 16D state、12D action 与三路配置相机合同。
+- 数据门禁通过，只关闭 M3.2 的 manifest 子门禁；真实 Dataset 构造、FP32 CPUAdam 内存、12-step loss 和正常退出仍待 A800 训练日志验证。
 
 ## 2026-08-07 — M3.2 FP32 单 clip 过拟合曲线门禁
 

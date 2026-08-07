@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：M3.2——三个 atomic 任务的 RGB-only 短训练门禁
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1、M2 全部门禁通过；M3.1 120 GiB checkpoint/resume 已在 commit `fabaaba` 恢复到 step 10 并通过；M3.2 三任务数据 manifest 与 12-step FP32 短训练待运行
+- 超算运行状态：M1、M2 全部门禁通过；M3.1 120 GiB checkpoint/resume 已在 commit `fabaaba` 恢复到 step 10 并通过；M3.2 三任务数据 manifest 已通过，12-step FP32 短训练待运行
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -17,7 +17,7 @@
 | M0 工程与协作基线 | 已完成 | 主仓库已 clone | 模拟器阶段开始时确认第三方子模块 |
 | M1 原生 RoboCasa365 loader | 已完成 | commit `e4249b9` 真实 batch `ok=true` | 已关闭 |
 | M2 动作与 checkpoint 适配 | 已完成 | 两种初始化、完整动作契约及 DeepSpeedCPUAdam 单 batch 参数更新均通过 | 已关闭 |
-| M3 RGB-only 训练烟测 | M3.2 三任务短训练本地准备完成 | M3.1 step 8 保存、恢复到 step 10 和再次保存均通过 | 审计三个任务并运行 12-step FP32/no-checkpoint 短训练 |
+| M3 RGB-only 训练烟测 | M3.2 三任务数据审计通过 | M3.1 恢复通过；commit `3d49c97` 三任务 manifest `pass` | 运行并审计 12-step FP32/no-checkpoint 短训练 |
 | M4 闭环评测器 | 未开始 | 待验证 | 完成一个 atomic 闭环 rollout |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
 | M6 Atomic 正式训练与评测 | 未开始 | 待验证 | 通过 H100 正式训练门禁 |
@@ -193,9 +193,16 @@ M3.2 本地准备：
 - 新增 12-step FP32/no-checkpoint 配置，保持原 X-WAM `clean_action_ratio=0.5`，每个任务执行四步；训练日志增加监督比例、task index 和 manifest provenance。
 - 新增无 Torch 机器审计：要求 step 0～11 完整、三个 task index 平衡轮询、两类监督分支均出现且与 action/proprio loss 对应、全部 loss 有限、depth loss 恒为 0、Trainer/result 正常结束。真实运行状态为 `cluster-pending`。
 
+M3.2 三任务数据审计证据：
+
+- 测试 commit：`3d49c970a00317b3adb466ae8c139d5912946e96`；manifest schema 1、`scope=atomic_only`、`sampling=balanced_round_robin`、`ok=true`、`result=pass`，errors 为空。
+- `PickPlaceCounterToCabinet/20250819`：108 episodes、24,225 frames；`OpenCabinet/20250819`：107 episodes、37,492 frames；`TurnOnMicrowave/20250819`：107 episodes、14,010 frames。
+- 合计 322 episodes、75,727 frames；三个任务均为 16D state、12D action，且相机顺序一致为 left agentview、right agentview、eye-in-hand。
+- 三个任务均属于版本化 Atomic-Seen 清单；真实数据/视频门禁通过，可以进入 12-step RGB-only 训练。该结论不代表训练运行已经通过。
+
 ## 待提供输入
 
-- 拉取 M3.2 commit 后，先从 atomic 根目录生成并反馈三任务 manifest；任一任务缺失或存在多个日期目录时按 audit 提示显式指定路径，不自动选择最新日期。
+- 拉取包含本次证据记录的最新 commit；已生成的 `logs/cluster/robocasa365_m3_three_task_manifest.json` 可以直接复用，不要重新选择任务或日期目录。
 - 使用 `a800_80gb_debug.yaml`、三任务 data config 和 12-step experiment 从公开 X-WAM checkpoint 运行；本轮不 resume、不保存训练 checkpoint。
 - 运行短训练审计并反馈训练日志、manifest/audit JSON、run config/metadata/result、退出码和 CPU/CUDA 峰值。audit 失败时保留原始证据，不修改采样比例或步数。
 - 不在本轮运行闭环 simulator；新版在线 16D observation 提取将在 M4 实现和验收。
@@ -223,3 +230,4 @@ M3.2 本地准备：
 19. commit `fabaaba` 已成功恢复 step 8～9，并在 global step 10 完成 checkpoint 保存和正常退出；M3.1 关闭。
 20. 用户决定保留原 `clean_action_ratio=0.5`，并以已有 6 个有效监督更新结束单任务趋势 smoke；未运行的 50-step/clean-ratio-zero 诊断被取消。
 21. Codex 已准备 M3.2 三个 atomic 任务的 manifest、平衡轮询 adapter、12-step FP32/no-checkpoint 配置与机器审计，等待 A800 运行。
+22. 用户已在 commit `3d49c97` 完成三任务真实数据审计；322 episodes、75,727 frames、16D/12D/三相机合同全部通过，下一步为 12-step 训练。
