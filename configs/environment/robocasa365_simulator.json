@@ -24,6 +24,23 @@
     "official_repository": "https://github.com/robocasa/robocasa",
     "robosuite_repository": "https://github.com/ARISE-Initiative/robosuite"
   },
+  "cluster_validated": {
+    "date": "2026-08-07",
+    "environment": "robocasa-abot",
+    "python": "3.11.15",
+    "robocasa": "1.0.1",
+    "robocasa_commit": "be22d659b02db8f6d7f3a3c3edc742934fdcbaae",
+    "robosuite": "1.5.2",
+    "robosuite_commit": "aaa8b9b214ce8e77e82926d677b4d61d55e577ab",
+    "mujoco": "3.3.1",
+    "numpy": "2.2.5",
+    "gymnasium": "0.29.1",
+    "imageio": "2.37.4",
+    "imageio_ffmpeg": "0.6.0",
+    "pyzmq": "27.1.0",
+    "mujoco_gl": "egl",
+    "result": "reuse_ready"
+  },
   "task_manifest": "configs/tasks/robocasa365_atomic_seen.json",
   "runtime_smoke": {
     "task": "CloseFridge",

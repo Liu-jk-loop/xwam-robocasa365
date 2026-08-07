@@ -5,9 +5,9 @@
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：M4.0——已有 RoboCasa simulator 环境复用审计
+- 当前阶段：M4.1——RoboCasa365 atomic benchmark adapter 与随机 rollout 门禁
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1、M2、M3 全部门禁通过；M4 尚未开始集群验证
+- 超算运行状态：M1、M2、M3 全部门禁通过；M4.0 simulator 环境门禁通过
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -18,7 +18,7 @@
 | M1 原生 RoboCasa365 loader | 已完成 | commit `e4249b9` 真实 batch `ok=true` | 已关闭 |
 | M2 动作与 checkpoint 适配 | 已完成 | 两种初始化、完整动作契约及 DeepSpeedCPUAdam 单 batch 参数更新均通过 | 已关闭 |
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
-| M4 闭环评测器 | M4.0 审计器已实现 | simulator 环境待验证 | 至少一个候选环境 `reuse_ready` |
+| M4 闭环评测器 | M4.0 已关闭，M4.1 准备实现 | `robocasa-abot` 为 `reuse_ready` | 随机策略写出一个完整 atomic rollout |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
 | M6 Atomic 正式训练与评测 | 未开始 | 待验证 | 通过 H100 正式训练门禁 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
@@ -59,6 +59,15 @@
 - 已从 clone 环境移除 ABot editable `wam`；原 `abot_m05` 未修改。
 - 唯一剩余原始 `pip check` 输出是 Decord 0.6.0 旧 wheel tag；已有 runtime import 和真实解码证据，按精确白名单降级为 warning。
 - 结论：policy 环境核心门禁通过；需要拉取新版 audit 并复跑，生成机器可读的最终 `ok=true` 证据。
+
+M4.0 simulator 环境验证证据：
+
+- 测试实现 commit：`8c42521e8fc38570bc0e4d8fa500494c73e7558f`；环境为 `robocasa-abot`、Python 3.11.15。
+- 版本为 RoboCasa 1.0.1、robosuite 1.5.2、MuJoCo 3.3.1、NumPy 2.2.5、Gymnasium 0.29.1、ImageIO 2.37.4、ImageIO-FFmpeg 0.6.0 和 PyZMQ 27.1.0；所有依赖约束通过。
+- Atomic-Seen 18 全部注册；`CloseFridge(target, seed=0)` 在 `MUJOCO_GL=egl` 下成功 reset、执行一条动作并关闭，runtime 返回码为 0。
+- 在线 observation 为五个具名分量、合计 16D；Gym 动作为五个具名分量、合计 12D；三路 RGB 与 render 均为 `[256,256,3] uint8`，runtime `errors=[]`。
+- 最终报告为 `ok=true`、`reuse_recommendation=reuse_ready`、`blockers=[]`、`warnings=[]`；M4.0 运行能力门禁关闭。
+- `robosuite_models`、GR1 mink 和 Gym observation-space warning 不阻塞 PandaOmron runtime；正式 benchmark 前仍需解释 robosuite editable 工作区的大量 tracked 修改，当前不执行 reset 或覆盖。
 
 M1 原生 loader 本地证据：
 
@@ -215,8 +224,8 @@ M3.2 12-step 训练反馈与 audit 修正：
 ## 待提供输入
 
 - M3 不再需要补充输入或重跑。
-- 用户先提供 `conda env list`，并在每个已有 RoboCasa 候选环境运行 M4.0 registry/runtime 两级审计，返回两份 JSON；审计不安装或升级包。
-- M4.0 通过后，Codex 再修改旧 policy server/evaluator。当前 evaluator 仍使用旧任务表和旧 observation 构造，不能直接启动正式闭环。
+- M4.0 不再需要重跑；`robocasa-abot` 已选为当前 simulator smoke 环境。
+- 下一步由 Codex 进入 M4.1，替换旧 policy server/evaluator 的任务表、online observation 和动作打包，先提供不加载 X-WAM 的随机策略完整 rollout 门禁。
 - M4 继续保持 policy 与 simulator 两个 Conda 环境分离，并优先验证一个 manipulation atomic 任务；`NavigateKitchen` 的底盘动作完整性随后单独验收。
 
 ## 当前执行过程
@@ -246,3 +255,4 @@ M3.2 12-step 训练反馈与 audit 修正：
 23. 三任务 12-step 训练正常完成；旧 audit 因 Lightning/DeepSpeed 随机 sampler 打乱固定顺序而误报。Codex 已改为覆盖与短前缀计数容差审计，同一日志本地重审通过，等待服务器生成正式 audit JSON 并补 metadata。
 24. 用户补齐修正版 audit、metadata 和 result：训练 commit `5420c89` 工作区干净，16 项 audit 全真，result `pass/global_step=12`；M3 正式关闭并进入 M4 准备。
 25. Codex 审计官方 RoboCasa365 `1.0.1` Gym 接口，发现原环境文档仍锁定旧 `0.2.0`；已更正 simulator 契约，并实现 M4.0 候选环境只读审计器。真实 Conda 环境、assets 和 EGL smoke 为 `cluster-pending`。
+26. 用户在 `robocasa-abot` 补齐 PyZMQ 27.1.0 后重跑 runtime：Atomic-Seen 18、`CloseFridge(target)`、16D state、12D action、三路 RGB、单步和 EGL 全部通过，报告为 `reuse_ready`；M4.0 关闭，进入 M4.1。

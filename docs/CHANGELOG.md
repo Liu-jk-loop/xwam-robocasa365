@@ -4,7 +4,7 @@
 
 - 分支：`dev/atomic-robocasa365`
 - 基线 commit：`0a06beb`
-- 运行状态：本地无依赖测试完成；真实 RoboCasa assets、MuJoCo/EGL 和 Conda 候选环境为 `cluster-pending`
+- 运行状态：本地无依赖测试完成；`robocasa-abot` 真实 runtime 为 `reuse_ready`，M4.0 已关闭
 
 ### 问题与版本修正
 
@@ -21,8 +21,16 @@
 ### 验证、风险与回滚
 
 - dependency-free 测试覆盖 manifest 的 18-task/16D/12D/三相机合同、旧版本拒绝、probe JSON 解析、复用分类和失败日志持久化；Python compile、完整无 Torch 测试和文档门禁在发布前执行。
-- 本地没有 RoboCasa365/MuJoCo assets；真实 `CloseFridge` 创建、EGL、动作单步和源码 commit 识别均为 `cluster-pending`。
+- 本地没有 RoboCasa365/MuJoCo assets，无法复验真实 runtime；该条初始 `cluster-pending` 状态已由下方集群关闭证据解除。
 - 回退本次 commit 可删除 M4.0 审计器并恢复旧文档；不会修改任何服务器 Conda 环境、assets、数据、模型或 checkpoint。
+
+### M4.0 集群关闭证据
+
+- 首轮 registry/runtime 已证明 RoboCasa 1.0.1、robosuite 1.5.2、MuJoCo 3.3.1、NumPy 2.2.5、Atomic-Seen 18、assets 和 EGL 可用；唯一 blocker 是 simulator/policy broker 所需的 PyZMQ。
+- 用户在同一 `robocasa-abot` 环境补齐 PyZMQ 27.1.0 后重跑。最终报告为 `ok=true`、`reuse_recommendation=reuse_ready`、`blockers=[]`、`warnings=[]`，registry 和 runtime 子进程返回码均为 0。
+- `CloseFridge(target, seed=0)` 成功 reset 和执行单步；online state 合计 16D、Gym 字典动作合计 12D，三路 RGB 与 render 均为 `[256,256,3] uint8`，runtime `errors=[]`。
+- `robosuite_models` 和 GR1 mink 缺失只产生与 PandaOmron 无关的 warning；Gym passive checker 的 observation-space warning 未影响真实 state/image/action 合同，M4.1 仍将按具名 schema 自行校验。
+- RoboCasa editable 源码仅有 assets 产物未跟踪；robosuite editable 工作区报告大量 tracked 修改。其已验证运行能力可用于 M4 随机 smoke，但正式 benchmark 前必须审计差异并冻结源码 provenance，禁止未经确认执行 reset/checkout。
 
 ## 2026-08-07 — M3.2 三个 atomic 任务短训练
 
