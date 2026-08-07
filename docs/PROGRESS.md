@@ -5,7 +5,7 @@
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：M4——RoboCasa365 atomic 闭环评测器准备
+- 当前阶段：M4.0——已有 RoboCasa simulator 环境复用审计
 - 本地运行能力：没有可用 Torch，只执行静态验证
 - 超算运行状态：M1、M2、M3 全部门禁通过；M4 尚未开始集群验证
 - 任务范围：只包含 atomic，排除 composite
@@ -18,7 +18,7 @@
 | M1 原生 RoboCasa365 loader | 已完成 | commit `e4249b9` 真实 batch `ok=true` | 已关闭 |
 | M2 动作与 checkpoint 适配 | 已完成 | 两种初始化、完整动作契约及 DeepSpeedCPUAdam 单 batch 参数更新均通过 | 已关闭 |
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
-| M4 闭环评测器 | 准备开始 | 待验证 | 完成一个 atomic 闭环 rollout |
+| M4 闭环评测器 | M4.0 审计器已实现 | simulator 环境待验证 | 至少一个候选环境 `reuse_ready` |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
 | M6 Atomic 正式训练与评测 | 未开始 | 待验证 | 通过 H100 正式训练门禁 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
@@ -215,7 +215,8 @@ M3.2 12-step 训练反馈与 audit 修正：
 ## 待提供输入
 
 - M3 不再需要补充输入或重跑。
-- 下一步由 Codex 进入 M4，先审计现有 policy server/evaluator、RoboCasa 环境接口和任务注册边界，再实现 atomic-only 随机/脚本 rollout 门禁；在实现存在前不提供集群命令。
+- 用户先提供 `conda env list`，并在每个已有 RoboCasa 候选环境运行 M4.0 registry/runtime 两级审计，返回两份 JSON；审计不安装或升级包。
+- M4.0 通过后，Codex 再修改旧 policy server/evaluator。当前 evaluator 仍使用旧任务表和旧 observation 构造，不能直接启动正式闭环。
 - M4 继续保持 policy 与 simulator 两个 Conda 环境分离，并优先验证一个 manipulation atomic 任务；`NavigateKitchen` 的底盘动作完整性随后单独验收。
 
 ## 当前执行过程
@@ -244,3 +245,4 @@ M3.2 12-step 训练反馈与 audit 修正：
 22. 用户已在 commit `3d49c97` 完成三任务真实数据审计；322 episodes、75,727 frames、16D/12D/三相机合同全部通过，下一步为 12-step 训练。
 23. 三任务 12-step 训练正常完成；旧 audit 因 Lightning/DeepSpeed 随机 sampler 打乱固定顺序而误报。Codex 已改为覆盖与短前缀计数容差审计，同一日志本地重审通过，等待服务器生成正式 audit JSON 并补 metadata。
 24. 用户补齐修正版 audit、metadata 和 result：训练 commit `5420c89` 工作区干净，16 项 audit 全真，result `pass/global_step=12`；M3 正式关闭并进入 M4 准备。
+25. Codex 审计官方 RoboCasa365 `1.0.1` Gym 接口，发现原环境文档仍锁定旧 `0.2.0`；已更正 simulator 契约，并实现 M4.0 候选环境只读审计器。真实 Conda 环境、assets 和 EGL smoke 为 `cluster-pending`。

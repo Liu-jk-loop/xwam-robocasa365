@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "name": "robocasa365_simulator",
+  "role": "RoboCasa365 atomic 闭环评测 simulator 环境；不安装 X-WAM/Torch",
+  "scope": "atomic_only",
+  "python": {
+    "min": "3.10.0",
+    "max_exclusive": "3.12.0",
+    "tested": "3.11"
+  },
+  "packages": [
+    {"distribution": "robocasa", "module": "robocasa", "exact": "1.0.1"},
+    {"distribution": "robosuite", "module": "robosuite", "min": "1.5.2"},
+    {"distribution": "mujoco", "module": "mujoco", "exact": "3.3.1"},
+    {"distribution": "numpy", "module": "numpy", "exact": "2.2.5"},
+    {"distribution": "gymnasium", "module": "gymnasium"},
+    {"distribution": "imageio", "module": "imageio"},
+    {"distribution": "imageio-ffmpeg", "module": "imageio_ffmpeg"},
+    {"distribution": "pyzmq", "module": "zmq"}
+  ],
+  "source_contract": {
+    "robocasa_release": "v1.0.1",
+    "minimum_release_commit": "29f7ce8814c1547f5af762a0997fbd4b64848dd7",
+    "official_repository": "https://github.com/robocasa/robocasa",
+    "robosuite_repository": "https://github.com/ARISE-Initiative/robosuite"
+  },
+  "task_manifest": "configs/tasks/robocasa365_atomic_seen.json",
+  "runtime_smoke": {
+    "task": "CloseFridge",
+    "split": "target",
+    "seed": 0,
+    "mujoco_gl": "egl",
+    "camera_shape": [256, 256, 3],
+    "observation_components": {
+      "state.base_position": 3,
+      "state.base_rotation": 4,
+      "state.end_effector_position_relative": 3,
+      "state.end_effector_rotation_relative": 4,
+      "state.gripper_qpos": 2
+    },
+    "camera_keys": [
+      "video.robot0_agentview_left",
+      "video.robot0_agentview_right",
+      "video.robot0_eye_in_hand"
+    ],
+    "action_components": {
+      "action.end_effector_position": 3,
+      "action.end_effector_rotation": 3,
+      "action.gripper_close": 1,
+      "action.base_motion": 4,
+      "action.control_mode": 1
+    }
+  }
+}

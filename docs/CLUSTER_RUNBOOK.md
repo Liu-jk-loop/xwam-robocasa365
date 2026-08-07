@@ -383,6 +383,42 @@ python scripts/audit_starlight_environment.py \
 
 当前容器中 `pip check` 会把旧 Decord 0.6.0 wheel tag 报为平台不支持。只有当该提示是唯一输出且 Decord runtime import 成功时，安装器和环境 audit 才将其记录为 warning；其他冲突仍返回失败。真实视频解码验证使用 `CloseFridge` episode 0 左相机 MP4。
 
+## M4.0 复用已有 RoboCasa simulator 环境
+
+本轮只筛选现有环境，不安装、升级或删除任何包。先保存环境清单：
+
+```bash
+conda env list | tee logs/cluster/robocasa_conda_env_list.log
+```
+
+对每个疑似 RoboCasa 环境分别执行；将 `<候选环境名>` 替换为实际名称，输出文件名也保持一致，便于比较：
+
+```bash
+conda activate <候选环境名>
+
+cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+git rev-parse HEAD
+
+python scripts/audit_robocasa365_simulator_environment.py \
+  --output logs/cluster/robocasa365_simulator_<候选环境名>_registry.json
+
+python scripts/audit_robocasa365_simulator_environment.py \
+  --runtime-smoke \
+  --runtime-timeout 600 \
+  --output logs/cluster/robocasa365_simulator_<候选环境名>_runtime.json
+```
+
+第一条审计验证 RoboCasa365 `1.0.1` 依赖和 Atomic-Seen 18 注册。第二条在隔离子进程中以 `MUJOCO_GL=egl` 创建 `CloseFridge(target, seed=0)`，执行 reset 和一条完整 12D PandaOmron 动作，并验证 16D state、三路 RGB 与 render。脚本尊重环境中已有的 `MUJOCO_GL`；如已有值不是 `egl`，报告会记录实际值而不会覆盖。
+
+反馈以下证据：
+
+1. `logs/cluster/robocasa_conda_env_list.log`。
+2. 每个候选环境的 registry JSON 和 runtime JSON。
+3. 对应 commit SHA，以及失败时完整 `stderr`/traceback（JSON 中已保存）。
+
+最终只接受 `ok=true` 且 `reuse_recommendation=reuse_ready`。`RoboCasa 0.2.x` 会明确标记为 `legacy_robocasa_only`；它能运行旧任务不代表能用于 RoboCasa365 Atomic-Seen。
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：

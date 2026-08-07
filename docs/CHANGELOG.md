@@ -1,5 +1,29 @@
 # 变更记录
 
+## 2026-08-07 — M4.0 已有 RoboCasa simulator 环境复用审计
+
+- 分支：`dev/atomic-robocasa365`
+- 基线 commit：`0a06beb`
+- 运行状态：本地无依赖测试完成；真实 RoboCasa assets、MuJoCo/EGL 和 Conda 候选环境为 `cluster-pending`
+
+### 问题与版本修正
+
+- 用户已有若干 RoboCasa 环境，希望优先复用。仓库旧环境说明仍锁定 RoboCasa `0.2.0`，但该版本是原版 RoboCasa（25 atomic）；RoboCasa365 的 65 atomic、Atomic-Seen 18 和 `gym.make("robocasa/<Task>")` 接口属于 `1.0/1.0.1`。
+- 依据官方 `1.0.1` setup/import 契约，将 simulator 基线更正为 RoboCasa `1.0.1`、robosuite `>=1.5.2`、MuJoCo `3.3.1`、NumPy `2.2.5`。旧 `0.2.x` 环境不删除，只分类为 `legacy_robocasa_only`。
+
+### 新增和修改逻辑
+
+- 新增独立 simulator manifest，冻结 Atomic-Seen 18、`CloseFridge(target, seed=0)`、五个 16D state 分量、三路 `256x256 uint8` RGB 和五个 12D Gym 字典动作分量。
+- 新增只读环境审计 CLI：先在隔离子进程检查包 import/任务注册，再可选创建 simulator，完成 reset、单步和 EGL render；坏 ABI、MuJoCo 或 OpenGL 崩溃不会终止主审计器，报告始终先原子写入 `logs/cluster/`。
+- 报告分类为 `reuse_ready`、`runtime_smoke_required`、`legacy_robocasa_only`、`dependency_blocked`、`registry_blocked` 或 `runtime_blocked`，并记录 Conda/Python、包版本、module 路径和 editable Git provenance。
+- 记录 dataset/model 扁平动作与 Gym 字典动作的顺序不同；本轮只验证具名合同，不修改尚未适配的旧 evaluator。M4.1 必须按名称打包，不能把扁平数组直接传给 wrapper。
+
+### 验证、风险与回滚
+
+- dependency-free 测试覆盖 manifest 的 18-task/16D/12D/三相机合同、旧版本拒绝、probe JSON 解析、复用分类和失败日志持久化；Python compile、完整无 Torch 测试和文档门禁在发布前执行。
+- 本地没有 RoboCasa365/MuJoCo assets；真实 `CloseFridge` 创建、EGL、动作单步和源码 commit 识别均为 `cluster-pending`。
+- 回退本次 commit 可删除 M4.0 审计器并恢复旧文档；不会修改任何服务器 Conda 环境、assets、数据、模型或 checkpoint。
+
 ## 2026-08-07 — M3.2 三个 atomic 任务短训练
 
 - 分支：`dev/atomic-robocasa365`

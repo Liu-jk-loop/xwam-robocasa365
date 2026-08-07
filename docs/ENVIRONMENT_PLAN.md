@@ -33,12 +33,40 @@
 
 仓库锁定版本：
 
-- RoboCasa `0.2.0`，[commit `756598a`](https://github.com/robocasa/robocasa/commit/756598a5be52e052339bb2d957426e39015c2afb)。
-- robosuite `1.5.2`，[commit `232ce7d`](https://github.com/ARISE-Initiative/robosuite/commit/232ce7d4a6ed89c949a9aba024a05c8c32fdd08b)。
-- MuJoCo `3.2.6`。
+- RoboCasa `1.0.1`；RoboCasa365 的 65 atomic / 300 composite 和 Gym 注册接口从 `1.0` 系列引入，`0.2.x` 只能视为旧版环境。版本化任务 horizon 至少包含官方 `29f7ce8` 更新。
+- robosuite `>=1.5.2`。
+- MuJoCo `3.3.1`、NumPy `2.2.5`；RoboCasa `1.0.1` import 会检查这两个精确版本。
+- Gymnasium、ImageIO、ImageIO-FFmpeg 和 PyZMQ，用于 Gym wrapper、视频和 simulator/policy broker。
 - RoboTwin [commit `c3ddfa8`](https://github.com/RoboTwin-Platform/RoboTwin/commit/c3ddfa8b97d5519efa828b075999bd0006778e5e)；当前 atomic-only RoboCasa 工作不使用它。
 
 不要为了训练把 simulator 依赖强行安装进 policy 环境。两个环境将在 M4 通过 ZeroMQ broker 对接。
+
+### M4.0：复用已有 RoboCasa 环境
+
+先执行 `conda env list`，然后逐个激活已有 RoboCasa 候选环境。每个环境先运行不创建 MuJoCo 的注册审计，再运行 runtime smoke；两个命令都只读环境，不会安装、升级或修改包：
+
+```bash
+conda env list
+conda activate <候选环境名>
+
+cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+
+python scripts/audit_robocasa365_simulator_environment.py \
+  --output logs/cluster/robocasa365_simulator_<候选环境名>_registry.json
+
+python scripts/audit_robocasa365_simulator_environment.py \
+  --runtime-smoke \
+  --output logs/cluster/robocasa365_simulator_<候选环境名>_runtime.json
+```
+
+判定规则：
+
+- `reuse_ready`：Atomic-Seen 18 全部注册，`CloseFridge(target)` 可 reset/step，state 合计 16D、动作合计 12D，三路 `256x256 uint8` RGB 和 EGL render 均通过；可作为 M4 simulator 环境。
+- `runtime_smoke_required`：版本和任务注册满足，但还没有创建真实 simulator；必须继续跑第二条命令。
+- `legacy_robocasa_only`：检测到 RoboCasa `0.x`，可保留给旧项目，但不能运行 RoboCasa365 benchmark。
+- `registry_blocked` / `runtime_blocked` / `dependency_blocked`：把完整 JSON 返回给 Codex，在确认根因前不修改该环境。
+
+报告会记录当前 Conda 名称、Python executable、包版本、editable module 路径、源码 Git commit/status 和完整子进程输出。第一次筛选不运行 X-WAM、不需要 Torch/GPU，也不修改代理。
 
 ## 三、E0：审计 `abot_m05`
 

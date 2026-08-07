@@ -48,6 +48,13 @@ The X-WAM backbone should consume validated tensors and remain free of dataset-p
 - Model output keeps `control_mode` continuous during denoising, then discretizes it to `-1/+1` only when packing an environment action.
 - Legacy X-WAM action semantics are dual-arm 14D. The declared migration copies its left-arm 7D boundary weights into PandaOmron arm slice `[5:12]`, initializes new base/control slice `[0:5]`, and reinitializes proprio boundary layers because the two 16D vectors have different meanings.
 
+### M4 simulator boundary
+
+- RoboCasa365 `1.0.1` 的 Gym wrapper 使用具名字典动作：`end_effector_position(3) + end_effector_rotation(3) + gripper_close(1) + base_motion(4) + control_mode(1)`，总维度仍为 12。
+- 数据集/模型的扁平 12D 顺序是 `base_motion + control_mode + end_effector_position + end_effector_rotation + gripper_close`；它与 Gym 字典的展示顺序不同。M4 `BenchmarkAdapter` 必须按名称打包，禁止依赖字典迭代顺序或把扁平数组直接传入 wrapper。
+- 在线 observation 使用 Gym wrapper 的五个具名 state 分量和三路 `video.*` RGB key；M4 adapter 在进入 policy 前按版本化 16D schema和相机顺序打包。
+- M4.0 环境审计通过独立子进程 import 和创建 simulator，默认 `MUJOCO_GL=egl`，避免坏 ABI 或渲染器崩溃终止主审计进程。版本/注册通过但未执行 runtime smoke 的环境仍需完成最终门禁。
+
 ## Model initialization
 
 Two modes remain supported:

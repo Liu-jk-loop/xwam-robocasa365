@@ -39,9 +39,10 @@
   },
   "simulator_contract": {
     "separate_environment": true,
-    "robocasa": {"version": "0.2.0", "commit": "756598a5be52e052339bb2d957426e39015c2afb"},
-    "robosuite": {"version": "1.5.2", "commit": "232ce7d4a6ed89c949a9aba024a05c8c32fdd08b"},
-    "mujoco": {"version": "3.2.6"},
+    "manifest": "configs/environment/robocasa365_simulator.json",
+    "robocasa": {"version": "1.0.1", "minimum_release_commit": "29f7ce8814c1547f5af762a0997fbd4b64848dd7"},
+    "robosuite": {"min_version": "1.5.2"},
+    "mujoco": {"version": "3.3.1"},
     "robotwin_commit": "c3ddfa8b97d5519efa828b075999bd0006778e5e"
   },
   "fallback": {

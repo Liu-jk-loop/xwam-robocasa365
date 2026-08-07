@@ -181,15 +181,18 @@ RoboCasa365 原生数据
 
 阶段执行过程：
 
-1. Codex 将 policy server 与 RoboCasa simulator client 保持为两个独立环境，通过 broker 对接。
-2. Codex 实现 Atomic-Seen 注册、观测打包、完整动作解码、episode 记录和聚合工具。
-3. 用户先用随机或脚本策略验证环境创建、视频和结果写入。
-4. 用户加载 M3 checkpoint，运行一个 manipulation atomic rollout 并反馈完整日志。
-5. 用户运行 `NavigateKitchen`，确认底盘动作不是被截断为零。
-6. Codex 修正闭环问题并验证聚合可重算；单任务闭环和动作完整性通过后进入 M5/M6。
+1. M4.0 先在用户已有的 RoboCasa Conda 环境中运行无侵入审计；区分 RoboCasa365 `1.0.1`、只能运行旧任务的 `0.2.x` 和缺少 assets/EGL 的环境。
+2. 候选环境必须注册 Atomic-Seen 18，并完成 `CloseFridge(target)` reset、16D state、12D 字典动作、单步和三路 RGB/EGL 渲染；审计只读环境，不安装或升级依赖。
+3. Codex 将 policy server 与 RoboCasa simulator client 保持为两个独立环境，通过 broker 对接。
+4. Codex 实现 Atomic-Seen 注册、观测打包、完整动作解码、episode 记录和聚合工具。
+5. 用户先用随机或脚本策略验证环境创建、视频和结果写入。
+6. 用户加载 M3 checkpoint，运行一个 manipulation atomic rollout 并反馈完整日志。
+7. 用户运行 `NavigateKitchen`，确认底盘动作不是被截断为零。
+8. Codex 修正闭环问题并验证聚合可重算；单任务闭环和动作完整性通过后进入 M5/M6。
 
 验收条件：
 
+- 至少一个独立 simulator 环境得到 `reuse_recommendation=reuse_ready`。
 - 随机或脚本策略能创建环境并写出完整结果。
 - X-WAM checkpoint 能跑完一个闭环 rollout，不出现动作 shape 错误。
 - `NavigateKitchen` 可以产生并执行非零底盘动作。
