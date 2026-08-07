@@ -456,6 +456,119 @@ echo "rollout_exit_code=${PIPESTATUS[0]}"
 - 本次 run 的 `metadata.json`、`summary.json` 和逐 episode `episode.json`
 - `rollout.mp4` 的文件大小；如画面异常，再提供视频或抽帧
 
+## M4.2 X-WAM broker 单请求闭环门禁
+
+首轮必须在同一个 A800 Pod 中开三个终端。Broker 和 simulator 使用 `robocasa-abot`，policy server 使用 `xwam-robocasa365`；三个进程通过本机 `127.0.0.1` 通信。当前只执行一次 X-WAM inference，模型返回32个12D动作后，client执行前4个动作。它验证真实checkpoint/归一化/网络/环境链路，不是900-step完整评测。
+
+先在任意终端更新代码并检查M3 checkpoint：
+
+```bash
+cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+git rev-parse HEAD
+mkdir -p logs/cluster
+
+M3_EXP=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365/close_fridge_m3_overfit_120g_gate1
+test -s "$M3_EXP/config.yaml"
+test -s "$M3_EXP/checkpoints/last.ckpt/checkpoint/mp_rank_00_model_states.pt"
+readlink -f "$M3_EXP/checkpoints/last.ckpt"
+```
+
+`last.ckpt` 应指向已经通过resume门禁的global step 10 checkpoint，而不是旧step 8。如果链接不存在或指向错误目录，先停止并反馈 `find "$M3_EXP/checkpoints" -maxdepth 2 -type f -o -type l`，不要猜测或覆盖checkpoint。
+
+Policy环境需要PyZMQ。先只检查，不要重装完整requirements：
+
+```bash
+conda activate xwam-robocasa365
+python - <<'PY'
+import zmq
+print("pyzmq:", zmq.__version__)
+PY
+```
+
+只有这里报 `ModuleNotFoundError: zmq` 时，才执行下面的单包安装；保留当前代理，不要unset：
+
+```bash
+python -m pip install \
+  -c configs/environment/xwam_starlight_constraints.txt \
+  'pyzmq==27.1.0'
+```
+
+### 终端A：启动broker
+
+```bash
+conda activate robocasa-abot
+cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+
+python evaluation/run_robocasa365_policy_broker.py \
+  --host 127.0.0.1 \
+  --frontend-port 10086 \
+  --backend-port 10087 \
+  2>&1 | tee logs/cluster/robocasa365_m4_policy_broker.log
+```
+
+看到 `RoboCasa365 broker ready` 后保留该终端。完成client后按一次 `Ctrl-C` 正常停止broker。
+
+### 终端B：启动X-WAM policy server
+
+```bash
+conda activate xwam-robocasa365
+cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+
+M3_EXP=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365/close_fridge_m3_overfit_120g_gate1
+WAN_DIR=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/Wan-AI/Wan2.2-TI2V-5B
+DATASET=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/robocasa/robocasa/datasets/v1.0/pretrain/atomic/CloseFridge/20250819
+
+CUDA_VISIBLE_DEVICES=0 python evaluation/robocasa365_policy_server.py \
+  --experiment-dir "$M3_EXP" \
+  --wan-checkpoint-dir "$WAN_DIR" \
+  --dataset-path "$DATASET" \
+  --broker-address 127.0.0.1 \
+  --broker-port 10087 \
+  --denoise-steps 50 \
+  --action-denoise-steps 10 \
+  --max-requests 1 \
+  --startup-report logs/cluster/robocasa365_m4_policy_server.json \
+  2>&1 | tee logs/cluster/robocasa365_m4_policy_server.log
+
+echo "policy_server_exit_code=${PIPESTATUS[0]}"
+```
+
+首次不要加 `--compile-model`。模型加载可能需要数分钟；等日志出现 `Policy runtime ready`，并确认终端A出现 `policy server READY` 后，再启动client。server收到一个请求后会自动退出，退出码必须为0。
+
+### 终端C：运行simulator client
+
+```bash
+conda activate robocasa-abot
+cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+export MUJOCO_GL=egl
+
+python evaluation/run_robocasa365_policy_rollout.py \
+  --config configs/evaluation/robocasa365_close_fridge_m4_policy_smoke.json \
+  --broker-address 127.0.0.1 \
+  --broker-port 10086 \
+  --output-root /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365/evaluation/m4_policy_smoke \
+  2>&1 | tee logs/cluster/robocasa365_close_fridge_m4_policy_smoke.log
+
+echo "policy_client_exit_code=${PIPESTATUS[0]}"
+```
+
+验收标准：
+
+1. Server startup JSON最终为 `result=pass/ok=true`、`processed_requests=1`、`failed_requests=0`，checkpoint解析到M3 step 10；加载报告不得包含非冻结missing或unexpected key。
+2. Server报告 model action/proprio为12/16、`predicted_action_steps=32`、schema SHA、数据stats路径、GPU/CUDA峰值和实际inference耗时。
+3. Client summary为 `result=pass`、episode `1/1` 完成、failed/missing为0、`policy_requests=1`、`total_steps=4`。
+4. Episode记录中response为32x12，executed action steps为4；state/action dimension为16/12，所有值有限且通过Gym bounds，checkpoint路径与server一致。
+5. `rollout.mp4` 为三相机 `768x256` 视频。任务 `success=false` 不阻塞本轮；任何模型加载错误、request超时、server error、动作越界或证据缺失都判失败。
+
+反馈以下文件；模型、checkpoint、完整评测目录和视频仍不得提交Git：
+
+- `logs/cluster/robocasa365_m4_policy_broker.log`
+- `logs/cluster/robocasa365_m4_policy_server.log`
+- `logs/cluster/robocasa365_m4_policy_server.json`
+- `logs/cluster/robocasa365_close_fridge_m4_policy_smoke.log`
+- Client本次run的 `metadata.json`、`summary.json`、逐episode `episode.json` 和视频文件大小
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：

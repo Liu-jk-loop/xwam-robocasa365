@@ -12,7 +12,15 @@ python evaluation/run_robocasa365_random_rollout.py \
 
 默认任务为 `CloseFridge(target, seed=0, layout=1, style=1)`，只运行 20 step。官方 horizon 为 900，因此这条命令只验证工程链路；随机策略是否成功完成任务不作为门禁。完整星光命令和验收字段见 `docs/CLUSTER_RUNBOOK.md`。
 
-下面的 `robocasa_client.py`、24-task 索引、500-step 假设和旧 policy server 命令保留为上游 X-WAM 参考，目前不是 RoboCasa365 Atomic 的有效入口。M4.2 会在随机门禁通过后把新版 adapter 接入 broker 和 X-WAM checkpoint。
+下面的 `robocasa_client.py`、24-task 索引、500-step 假设和旧 policy server 命令保留为上游 X-WAM 参考，目前不是 RoboCasa365 Atomic 的有效入口。新版 M4.2 入口如下。
+
+M4.2 已提供三条 RoboCasa365 专用入口：
+
+- `run_robocasa365_policy_broker.py`：只转发请求，不加载模型或模拟器。
+- `robocasa365_policy_server.py`：在 policy Conda环境加载Wan2.2、M3 DeepSpeed checkpoint和真实PandaOmron stats，拒绝与单任务 checkpoint 不一致的任务请求并返回完整12D动作。
+- `run_robocasa365_policy_rollout.py`：在 simulator Conda环境发送三路RGB、16D state和prompt，执行具名Gym动作并保存证据。
+
+首轮配置 `configs/evaluation/robocasa365_close_fridge_m4_policy_smoke.json` 只执行一次模型请求和4个动作。三终端精确命令、启动顺序、checkpoint路径和验收字段见 `docs/CLUSTER_RUNBOOK.md`。不要再把下面 legacy policy server/client 命令用于RoboCasa365。
 
 ## Installation
 

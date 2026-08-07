@@ -18,6 +18,7 @@
     {"distribution": "accelerate", "module": "accelerate", "min": "1.1.1", "runtime_import": true},
     {"distribution": "lightning", "module": "lightning", "min": "2.5.0", "max_exclusive": "2.7.0", "runtime_import": true},
     {"distribution": "deepspeed", "module": "deepspeed", "min": "0.18.0", "max_exclusive": "0.20.0", "runtime_import": true},
+    {"distribution": "pyzmq", "module": "zmq", "min": "27.0.0", "max_exclusive": "28.0.0", "tested": "27.1.0", "runtime_import": true},
     {"distribution": "flash-attn", "module": "flash_attn", "tested": "2.8.3", "runtime_import": true},
     {"distribution": "opencv-python", "module": "cv2", "min": "4.9.0.80"},
     {"distribution": "scipy", "module": "scipy", "min": "1.13.1"},

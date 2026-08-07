@@ -1,5 +1,39 @@
 # 变更记录
 
+## 2026-08-07 — M4.2 X-WAM broker 单请求闭环门禁
+
+- 修改前基线：`a916547`（M4.1 随机闭环实现）
+- 运行状态：M4.1 集群 `pass`；M4.2 本地协议、broker 路由和静态测试通过，A800真实 checkpoint 推理为 `cluster-pending`
+
+### M4.1 集群关闭证据
+
+- run id `20260807T152317Z` 在干净 commit `a9165477f0407a1fb1f064ac597a043dce79e5b9` 上完成；固定 CloseFridge scene 执行20步，episode `1/1` 完成、failed/missing 为0，summary 为 `pass`。
+- 16D state、完整12D action、20个非零底盘 step、control/gripper 的 `-1/+1` 和 runtime horizon 900 全部匹配配置。
+- 三相机 H.264 视频为 `768x256`、5 FPS、6帧、102479 bytes，视觉抽帧正常；随机 success=0 不是工程失败。用户提供的本地 `log/` 目录新增根级忽略规则，本次及后续提交不包含日志或视频。
+
+### 加入的协议和闭环逻辑
+
+- 新增 `xwam.robocasa365.atomic.v1`：request 固定 atomic task/request provenance、三路 `[3,256,256,3] uint8` RGB、16D raw state、prompt 和 cfg；response 必须精确对应请求并返回非空 `[Ta,12]` 动作。
+- wire format 使用 `np.savez` 数组和 JSON metadata，解码始终 `allow_pickle=false`，限制单消息大小并拒绝 composite、错误 shape/dtype、NaN/Inf、请求响应 ID 漂移与服务端错误。
+- 新增只依赖 PyZMQ 的透明 broker，分离 frontend simulator 和 backend policy 端口，按空闲 server 逐请求派发，并抑制重复 READY。
+- 新增 RoboCasa365 policy server：从 M3 实验 `config.yaml` 重建 12D/16D runner，解析 DeepSpeed `last.ckpt`，对排除冻结参数的低内存 checkpoint 复用已验证定向严格加载；首轮关闭 compile/gradient checkpointing。服务端同时冻结 `dataset.task_name`，请求 task 与单任务 checkpoint 不一致时返回显式错误。
+- Policy server 从真实单任务 `stats.json` 构造 `PandaOmronTensorCodec`。在线 state 按训练合同归一化；模型输出裁剪训练域后解码完整12D，并只离散 `control_mode`。删除 legacy server 的单臂 padding stats 与 gripper 反转语义。
+- RGB preprocessing 与 M3 `augment=false` 对齐：uint8 映射到 `[-1,1]` 后只 resize 到训练 `video_size`，不执行旧 server 硬编码的0.95 center crop。
+- 新增 simulator client，继续固定 CloseFridge target/seed/layout/style，设置900秒请求超时；首轮配置最多且至少完成一次请求、预期返回32x12动作、执行前4步，保存 server checkpoint、inference/round-trip latency、动作范围、逐 episode JSON、视频和可重算 summary。即使环境在 reset 时意外报告成功，没有真实模型请求也不能通过 M4.2。
+- Gym动作验证新增有限值与 action-space bounds 检查，策略输出越界时不进入 simulator。
+
+### 环境、测试与限制
+
+- Policy 环境清单、constraints 和 requirements 新增 PyZMQ 27.x；安装前先 import，缺少时只补 `pyzmq==27.1.0`，不改 Torch/CUDA/FlashAttention。
+- `.gitignore` 新增 `/log/`，与既有 `logs/cluster/` 一起隔离用户回传的JSON、完整日志和视频；本轮只把汇总证据写入中文文档。
+- 新增协议/config/checkpoint resolver/单任务隔离/CLI 测试；本地真实回环 broker request/response 路由通过。所有 CLI `--help` 均不需要导入 Torch 或 RoboCasa；server 报告在退出时补写 CUDA allocated/reserved 峰值。
+- M4.2 首轮 checkpoint 是单 clip 10-step M3 工程 checkpoint，只用于验证推理 wiring，不代表有效策略训练。4-step结果也不是900-step benchmark成功率。
+- 本地没有 Torch/RoboCasa，真实5B构造、低内存 checkpoint 加载、A800显存、模型输出与环境4步执行全部为 `cluster-pending`。
+
+### 回滚
+
+- 回退本次 commit 会移除新版协议、broker/server/client、M4.2配置、PyZMQ policy依赖和测试，并恢复M4.1状态；不会删除或修改服务器 checkpoint、Wan2.2、数据、Conda环境、日志、视频或评测结果。
+
 ## 2026-08-07 — M4.1 Atomic 随机闭环评测门禁
 
 - 修改前基线：`f45d57a`（M4.0 simulator 环境门禁关闭）

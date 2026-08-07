@@ -186,10 +186,11 @@ RoboCasa365 原生数据
 3. M4.1 冻结 Atomic-Seen 18 的官方 horizon 及源码 provenance；runtime 注册值与版本化 manifest 不一致时阻止评测。
 4. Codex 实现 dependency-light benchmark adapter：按 schema 打包在线 16D observation，把完整 12D flat action 按名称转换为 Gym 字典，并实现逐 episode 证据与可重算聚合。
 5. 用户先在 `robocasa-abot` 运行固定 `CloseFridge(target, seed=0, layout=1, style=1)` 的 20-step 随机门禁，验证环境创建、非零底盘动作、三相机视频和完整结果写入。该短 horizon 只验证工程链路。
-6. Codex 审计集群证据；M4.1 通过后才把 policy server 与 RoboCasa simulator client 保持为两个独立环境，通过 broker 对接。
-7. 用户加载 M3 checkpoint，按官方完整 horizon 运行一个 manipulation atomic rollout并反馈完整日志。
-8. 用户运行 `NavigateKitchen`，确认底盘动作不是被截断为零。
-9. Codex 修正闭环问题并验证聚合可重算；单任务闭环和动作完整性通过后进入 M5/M6。
+6. Codex 审计 M4.1 集群证据；通过后实现版本化 broker 协议，并继续让 policy server 与 RoboCasa simulator client 使用两个独立环境。
+7. M4.2 先加载与请求任务严格匹配的 M3 单任务 checkpoint，执行一次三路 RGB + 16D state 请求，返回 32x12 action，并只执行首个 4-action chunk；用户反馈三进程日志、server 加载报告、逐 episode 证据和视频。
+8. 单请求通过后扩大为 `CloseFridge` 官方 900-step 上限的 manipulation atomic rollout，按 4-action chunk 重规划并记录完整请求延迟。
+9. 用户运行 `NavigateKitchen`，确认底盘动作不是被截断为零。
+10. Codex 修正闭环问题并验证聚合可重算；单任务闭环和动作完整性通过后进入 M5/M6。
 
 验收条件：
 

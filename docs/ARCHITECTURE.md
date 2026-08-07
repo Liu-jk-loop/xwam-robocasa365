@@ -64,6 +64,16 @@ The X-WAM backbone should consume validated tensors and remain free of dataset-p
 - 每次运行保存 requested/resolved config、运行环境与 Git provenance、逐 episode JSON、三相机视频和聚合 summary。聚合器从逐 episode 记录重算 success rate，并将缺失 rollout、异常退出或不完整记录判为 `fail`。
 - 工程门禁的 `result=pass` 表示请求的 episode 完整执行且证据齐全，与随机策略是否完成任务分开；随机策略 `success=false` 是正常结果。正式成功率只能由后续完整 horizon、冻结 seed 集与 X-WAM checkpoint 的评测产生。
 
+#### M4.2 X-WAM broker 闭环门禁
+
+- M4.2 使用独立的 `xwam.robocasa365.atomic.v1` 协议，不复用 legacy RoboCasa client 的旧任务名、手工 16D padding、7D/14D 动作或 gripper 反转。旧入口保留作 upstream 参考，但不能用于 RoboCasa365 指标。
+- Simulator request 固定包含 atomic scope、task/episode/step/request ID、语言指令、三路 `[3,256,256,3] uint8` RGB 和一个有限 16D raw state；policy response 必须对应同一个 request，并返回非空 `[Ta,12]` raw environment action。协议通过 NPZ 数组加 JSON metadata 传输，解码时 `allow_pickle=false`。
+- Policy server 独占 Torch/CUDA/Wan2.2/X-WAM。它从 M3 `config.yaml` 恢复模型结构和单任务名称，从 DeepSpeed `model_states.pt` 严格加载 trainable 权重；只有配置声明 `exclude_frozen_parameters=true` 时，才复用 M3 已验证的定向规则，允许缺少由 Wan2.2 重建的冻结 T5/VAE 参数。请求 task 必须与 checkpoint 的 `dataset.task_name` 完全一致，不能拿单任务权重静默评测其他 Atomic 任务。
+- 在线 raw 16D state 必须使用训练任务的真实 `stats.json` 与版本化 schema 编码；模型 12D 输出先裁剪到训练域 `[-1,1]`，再由同一个 `PandaOmronTensorCodec` 解码，且只对 `control_mode` 做符号离散。禁止沿用 legacy 单臂统计量或反转 gripper。
+- RGB 输入执行与 M3 `augment=false` 数据相同的 `uint8 → [-1,1] → video_size` 变换，不增加旧 server 的硬编码 0.95 center crop。首轮关闭 `torch.compile` 与 gradient checkpointing，优先验证可解释加载和单次推理。
+- Broker 只透明转发 opaque wire bytes，不加载模型、模拟器或 schema；每个空闲 server 一次接收一个请求。Client 设置显式请求超时，server 将单请求异常编码为 error response，避免两侧无限等待。
+- 首个 M4.2 配置仍固定 `CloseFridge(target, seed=0, layout=1, style=1)`，只执行一个 4-action receding-horizon chunk，并要求至少完成一次 policy request。它验证一次真实 X-WAM inference 和四次环境 step，不代表 900-step 完整 rollout 或任务成功率。
+
 ## Model initialization
 
 Two modes remain supported:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -53,14 +54,63 @@ def load_atomic_task_manifest(path: str | Path) -> dict[str, Any]:
 
 
 def load_random_smoke_config(path: str | Path, repo_root: str | Path) -> dict[str, Any]:
+    payload, resolved = _load_smoke_config_common(path, repo_root)
+    if payload.get("policy") != "random_uniform_named_12d":
+        raise BenchmarkContractError("M4.1 只允许 random_uniform_named_12d smoke policy")
+    if payload["rollout"].get("base_motion_mode") not in {"sample", "zero"}:
+        raise BenchmarkContractError("base_motion_mode 只允许 sample 或 zero")
+    return resolved
+
+
+def load_policy_smoke_config(path: str | Path, repo_root: str | Path) -> dict[str, Any]:
+    payload, resolved = _load_smoke_config_common(path, repo_root)
+    if payload.get("policy") != "xwam_broker_named_12d":
+        raise BenchmarkContractError("M4.2 只允许 xwam_broker_named_12d policy")
+    if payload.get("protocol") != "xwam.robocasa365.atomic.v1":
+        raise BenchmarkContractError("M4.2 protocol 必须为 xwam.robocasa365.atomic.v1")
+    try:
+        action_chunk_length = int(payload["rollout"]["action_chunk_length"])
+        minimum_policy_requests = int(payload["rollout"]["minimum_policy_requests"])
+        broker_port = int(payload["network"]["broker_frontend_port"])
+        timeout_seconds = float(payload["network"]["request_timeout_seconds"])
+        cfg = float(payload["inference"]["cfg"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BenchmarkContractError("M4.2 配置缺少合法 chunk/network/inference 参数") from exc
+    broker_address = payload["network"].get("broker_address")
+    if action_chunk_length <= 0 or action_chunk_length > resolved["rollout"]["max_steps"]:
+        raise BenchmarkContractError("action_chunk_length 必须为正且不能超过 smoke max_steps")
+    if minimum_policy_requests <= 0:
+        raise BenchmarkContractError("minimum_policy_requests 必须为正")
+    if not isinstance(broker_address, str) or not broker_address:
+        raise BenchmarkContractError("broker_address 必须为非空字符串")
+    if not 1 <= broker_port <= 65535 or timeout_seconds <= 0:
+        raise BenchmarkContractError("broker port/timeout 非法")
+    if not math.isfinite(cfg) or cfg < 0:
+        raise BenchmarkContractError("inference cfg 必须为有限非负数")
+    resolved["protocol"] = payload["protocol"]
+    resolved["rollout"] = dict(
+        resolved["rollout"],
+        action_chunk_length=action_chunk_length,
+        minimum_policy_requests=minimum_policy_requests,
+    )
+    resolved["network"] = dict(
+        payload["network"],
+        broker_frontend_port=broker_port,
+        request_timeout_seconds=timeout_seconds,
+    )
+    resolved["inference"] = dict(payload["inference"], cfg=cfg)
+    return resolved
+
+
+def _load_smoke_config_common(
+    path: str | Path, repo_root: str | Path
+) -> tuple[dict[str, Any], dict[str, Any]]:
     root = Path(repo_root).resolve()
     payload = _read_json(path)
     if payload.get("schema_version") != 1:
         raise BenchmarkContractError(f"不支持的评测配置 schema：{payload.get('schema_version')!r}")
     if payload.get("scope") != "atomic_only":
         raise BenchmarkContractError("M4 评测配置必须为 scope=atomic_only")
-    if payload.get("policy") != "random_uniform_named_12d":
-        raise BenchmarkContractError("M4.1 只允许 random_uniform_named_12d smoke policy")
 
     task_manifest_path = root / str(payload.get("task_manifest", ""))
     schema_path = root / str(payload.get("panda_omron_schema", ""))
@@ -95,10 +145,8 @@ def load_random_smoke_config(path: str | Path, repo_root: str | Path) -> dict[st
         raise BenchmarkContractError("video stride/fps 必须为正整数")
     if payload["rollout"].get("depth_mode") != "disabled":
         raise BenchmarkContractError("M4.1 随机 RGB smoke 必须为 depth_mode=disabled")
-    if payload["rollout"].get("base_motion_mode") not in {"sample", "zero"}:
-        raise BenchmarkContractError("base_motion_mode 只允许 sample 或 zero")
     if payload["rollout"].get("stop_on_success") is not True:
-        raise BenchmarkContractError("M4.1 必须设置 stop_on_success=true")
+        raise BenchmarkContractError("M4 smoke 必须设置 stop_on_success=true")
     if payload["scene"].get("obj_instance_split") != "target":
         raise BenchmarkContractError("M4.1 必须固定 obj_instance_split=target")
     if payload["scene"].get("split") is not None:
@@ -126,7 +174,7 @@ def load_random_smoke_config(path: str | Path, repo_root: str | Path) -> dict[st
     resolved["official_horizon"] = official_horizon
     resolved["resolved_task_manifest"] = str(task_manifest_path.resolve())
     resolved["resolved_panda_omron_schema"] = str(schema_path.resolve())
-    return resolved
+    return payload, resolved
 
 
 def load_configured_schema(config: dict[str, Any]) -> PandaOmronSchema:
@@ -227,6 +275,14 @@ def validate_gym_action_space(action: dict[str, np.ndarray], action_space: Any) 
         if value.shape != expected_shape:
             raise BenchmarkContractError(
                 f"Gym action shape 错误：{key} expected={expected_shape}, actual={value.shape}"
+            )
+        if not np.isfinite(value).all():
+            raise BenchmarkContractError(f"Gym action 包含 NaN/Inf：{key}")
+        low = np.asarray(spaces[key].low, dtype=np.float32)
+        high = np.asarray(spaces[key].high, dtype=np.float32)
+        if np.any(value < low - 1e-6) or np.any(value > high + 1e-6):
+            raise BenchmarkContractError(
+                f"Gym action 越界：{key} range=[{float(value.min())},{float(value.max())}]"
             )
 
 

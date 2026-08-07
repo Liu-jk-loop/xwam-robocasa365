@@ -22,6 +22,7 @@ imageio-ffmpeg==0.6.0
 einops==0.8.2
 ninja==1.13.0
 pyarrow==16.1.0
+pyzmq==27.1.0
 
 # 限制到当前稳定主版本；集群烟测通过后再根据 freeze 生成完整锁文件。
 lightning>=2.5,<2.7

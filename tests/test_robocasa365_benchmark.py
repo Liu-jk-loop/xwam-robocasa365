@@ -20,6 +20,7 @@ from evaluation.robocasa365_benchmark import (
     pack_online_state,
     sample_random_flat_action,
     tile_camera_views,
+    validate_gym_action_space,
 )
 
 
@@ -82,6 +83,29 @@ class RoboCasa365BenchmarkTest(unittest.TestCase):
         self.assertGreater(np.linalg.norm(action[0:4]), 0.0)
         self.assertIn(float(action[4]), (-1.0, 1.0))
         self.assertIn(float(action[11]), (-1.0, 1.0))
+
+    def test_gym_action_validation_rejects_out_of_range_component(self) -> None:
+        class Box:
+            shape = (1,)
+            low = np.asarray([-1.0], dtype=np.float32)
+            high = np.asarray([1.0], dtype=np.float32)
+
+        class DictSpace:
+            spaces = {f"action.{component.name}": Box() for component in self.schema.action.components}
+
+        space = DictSpace()
+        action = {
+            f"action.{component.name}": np.zeros(component.size, dtype=np.float32)
+            for component in self.schema.action.components
+        }
+        for component in self.schema.action.components:
+            space.spaces[f"action.{component.name}"].shape = (component.size,)
+            space.spaces[f"action.{component.name}"].low = np.full(component.size, -1.0, dtype=np.float32)
+            space.spaces[f"action.{component.name}"].high = np.full(component.size, 1.0, dtype=np.float32)
+        validate_gym_action_space(action, space)
+        action["action.base_motion"][0] = 1.5
+        with self.assertRaises(BenchmarkContractError):
+            validate_gym_action_space(action, space)
 
     def test_contract_rejects_missing_camera_and_composite_scope(self) -> None:
         with self.assertRaises(BenchmarkContractError):
