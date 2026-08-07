@@ -1,5 +1,29 @@
 # 变更记录
 
+## 2026-08-07 — M4.1 Atomic 随机闭环评测门禁
+
+- 修改前基线：`f45d57a`（M4.0 simulator 环境门禁关闭）
+- 运行状态：本地 dependency-light 测试与语法检查通过；真实 RoboCasa365 20-step rollout 为 `cluster-pending`
+
+### 加入的逻辑
+
+- 在 Atomic-Seen manifest 中冻结 18 个任务的官方 horizon 和 RoboCasa365 源码 commit。评测启动时把 runtime 注册 horizon 与 manifest 对照，版本漂移会立即失败；`CloseFridge` 官方 horizon 为 900。
+- 新增 M4.1 版本化配置，固定 `CloseFridge(target, seed=0, layout=1, style=1)`、三路相机及 20-step 工程烟测上限。20 step 不替代官方 900-step 完整评测。
+- 新增 dependency-light benchmark adapter：按 PandaOmron schema 把五个具名 observation 分量打包为 16D state；把 schema 顺序的完整 12D flat action 按名称写入五个 Gym action key，不依赖字典顺序、不丢弃底盘或 control 维度。
+- 新增不加载 Torch/X-WAM 的随机 rollout CLI。它默认实际采样 `base_motion`，离散化 `control_mode/gripper_close`，验证每一步 state/action/camera 合同，并把三路 `256x256` RGB 横向拼成 `256x768` 视频。
+- 每次运行保存 requested/resolved config、Git/环境/runtime metadata、逐 episode JSON、异常 traceback、视频和聚合 summary。summary 从逐 episode 记录重算 success rate，并对 missing/failed rollout 返回 `fail`；随机策略没有完成任务不影响工程链路的 `pass`。
+- 新增无 RoboCasa/Torch 单元测试，覆盖 18-task horizon 完整性、固定 smoke 配置、16D/12D 具名映射、三相机顺序、非零底盘随机动作、composite 拒绝及可重算/缺失 episode 聚合。
+
+### 替换的旧逻辑与限制
+
+- 原 `evaluation/robocasa_client.py` 仍基于旧任务表、500-step 上限、手工 padding observation 和旧动作假设，不作为 RoboCasa365 M4 入口；本轮没有删除它，以保留上游复现路径。
+- 本轮只关闭随机 simulator 链路，不加载 X-WAM、不经过 broker、不产生 benchmark 指标。正式评测还需要 M4.2 policy adapter、完整 horizon、冻结 seed 集和 checkpoint provenance。
+- RoboCasa/robosuite editable 源码仍需在正式 benchmark 前冻结差异；当前 smoke 使用已通过 M4.0 的 `robocasa-abot`，不对第三方源码执行 reset/checkout。
+
+### 回退
+
+- 回退本次 commit 会删除新配置、adapter、随机 CLI 与测试，并恢复 M4.0 文档状态；不会修改服务器 Conda 环境、RoboCasa assets、数据、模型、checkpoint 或既有评测结果。
+
 ## 2026-08-07 — M4.0 已有 RoboCasa simulator 环境复用审计
 
 - 分支：`dev/atomic-robocasa365`

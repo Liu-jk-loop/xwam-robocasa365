@@ -18,7 +18,7 @@
 | M1 原生 RoboCasa365 loader | 已完成 | commit `e4249b9` 真实 batch `ok=true` | 已关闭 |
 | M2 动作与 checkpoint 适配 | 已完成 | 两种初始化、完整动作契约及 DeepSpeedCPUAdam 单 batch 参数更新均通过 | 已关闭 |
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
-| M4 闭环评测器 | M4.0 已关闭，M4.1 准备实现 | `robocasa-abot` 为 `reuse_ready` | 随机策略写出一个完整 atomic rollout |
+| M4 闭环评测器 | M4.0 已关闭，M4.1 本地实现完成 | `robocasa-abot` 为 `reuse_ready`，随机 rollout 为 `cluster-pending` | `CloseFridge` 20-step 随机门禁与视频通过 |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
 | M6 Atomic 正式训练与评测 | 未开始 | 待验证 | 通过 H100 正式训练门禁 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
@@ -225,8 +225,9 @@ M3.2 12-step 训练反馈与 audit 修正：
 
 - M3 不再需要补充输入或重跑。
 - M4.0 不再需要重跑；`robocasa-abot` 已选为当前 simulator smoke 环境。
-- 下一步由 Codex 进入 M4.1，替换旧 policy server/evaluator 的任务表、online observation 和动作打包，先提供不加载 X-WAM 的随机策略完整 rollout 门禁。
-- M4 继续保持 policy 与 simulator 两个 Conda 环境分离，并优先验证一个 manipulation atomic 任务；`NavigateKitchen` 的底盘动作完整性随后单独验收。
+- M4.1 随机闭环实现已完成本地静态门禁。用户拉取开发分支后，在 `robocasa-abot` 按 `docs/CLUSTER_RUNBOOK.md` 运行 `CloseFridge` 20-step 命令。
+- 需反馈完整终端日志、`metadata.json`、`summary.json`、`CloseFridge/episode_000000/episode.json`，并确认同目录 MP4 非空。随机任务 `success=false` 不阻塞；请求 episode 完整、无 missing/failed、16D/12D 合同与视频证据才是本轮门禁。
+- M4.1 通过后再接 broker 与 X-WAM policy；M4 始终保持 policy 与 simulator 两个 Conda 环境分离。`NavigateKitchen` 的完整底盘动作随后单独验收。
 
 ## 当前执行过程
 
@@ -256,3 +257,4 @@ M3.2 12-step 训练反馈与 audit 修正：
 24. 用户补齐修正版 audit、metadata 和 result：训练 commit `5420c89` 工作区干净，16 项 audit 全真，result `pass/global_step=12`；M3 正式关闭并进入 M4 准备。
 25. Codex 审计官方 RoboCasa365 `1.0.1` Gym 接口，发现原环境文档仍锁定旧 `0.2.0`；已更正 simulator 契约，并实现 M4.0 候选环境只读审计器。真实 Conda 环境、assets 和 EGL smoke 为 `cluster-pending`。
 26. 用户在 `robocasa-abot` 补齐 PyZMQ 27.1.0 后重跑 runtime：Atomic-Seen 18、`CloseFridge(target)`、16D state、12D action、三路 RGB、单步和 EGL 全部通过，报告为 `reuse_ready`；M4.0 关闭，进入 M4.1。
+27. Codex 已实现 M4.1 dependency-light 随机闭环门禁：冻结 Atomic-Seen 18 官方 horizon，固定 `CloseFridge` scene/seed，按名称完成在线 16D observation 与完整 12D Gym action 映射，保存逐 episode JSON、三相机视频和可重算 summary。本地不具备 RoboCasa runtime，真实 20-step rollout 标记为 `cluster-pending`。

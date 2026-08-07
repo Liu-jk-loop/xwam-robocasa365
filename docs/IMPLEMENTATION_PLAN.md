@@ -183,17 +183,18 @@ RoboCasa365 原生数据
 
 1. M4.0 先在用户已有的 RoboCasa Conda 环境中运行无侵入审计；区分 RoboCasa365 `1.0.1`、只能运行旧任务的 `0.2.x` 和缺少 assets/EGL 的环境。
 2. 候选环境必须注册 Atomic-Seen 18，并完成 `CloseFridge(target)` reset、16D state、12D 字典动作、单步和三路 RGB/EGL 渲染；审计只读环境，不安装或升级依赖。
-3. Codex 将 policy server 与 RoboCasa simulator client 保持为两个独立环境，通过 broker 对接。
-4. Codex 实现 Atomic-Seen 注册、观测打包、完整动作解码、episode 记录和聚合工具。
-5. 用户先用随机或脚本策略验证环境创建、视频和结果写入。
-6. 用户加载 M3 checkpoint，运行一个 manipulation atomic rollout 并反馈完整日志。
-7. 用户运行 `NavigateKitchen`，确认底盘动作不是被截断为零。
-8. Codex 修正闭环问题并验证聚合可重算；单任务闭环和动作完整性通过后进入 M5/M6。
+3. M4.1 冻结 Atomic-Seen 18 的官方 horizon 及源码 provenance；runtime 注册值与版本化 manifest 不一致时阻止评测。
+4. Codex 实现 dependency-light benchmark adapter：按 schema 打包在线 16D observation，把完整 12D flat action 按名称转换为 Gym 字典，并实现逐 episode 证据与可重算聚合。
+5. 用户先在 `robocasa-abot` 运行固定 `CloseFridge(target, seed=0, layout=1, style=1)` 的 20-step 随机门禁，验证环境创建、非零底盘动作、三相机视频和完整结果写入。该短 horizon 只验证工程链路。
+6. Codex 审计集群证据；M4.1 通过后才把 policy server 与 RoboCasa simulator client 保持为两个独立环境，通过 broker 对接。
+7. 用户加载 M3 checkpoint，按官方完整 horizon 运行一个 manipulation atomic rollout并反馈完整日志。
+8. 用户运行 `NavigateKitchen`，确认底盘动作不是被截断为零。
+9. Codex 修正闭环问题并验证聚合可重算；单任务闭环和动作完整性通过后进入 M5/M6。
 
 验收条件：
 
 - 至少一个独立 simulator 环境得到 `reuse_recommendation=reuse_ready`。
-- 随机或脚本策略能创建环境并写出完整结果。
+- 随机或脚本策略能创建环境，执行所有请求 step，并写出 metadata、逐 episode JSON、三相机视频和可重算 summary；任务随机失败不等于工程门禁失败。
 - X-WAM checkpoint 能跑完一个闭环 rollout，不出现动作 shape 错误。
 - `NavigateKitchen` 可以产生并执行非零底盘动作。
 - 聚合成功率可由 per-episode 记录重新计算。

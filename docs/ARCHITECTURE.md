@@ -55,6 +55,15 @@ The X-WAM backbone should consume validated tensors and remain free of dataset-p
 - 在线 observation 使用 Gym wrapper 的五个具名 state 分量和三路 `video.*` RGB key；M4 adapter 在进入 policy 前按版本化 16D schema和相机顺序打包。
 - M4.0 环境审计通过独立子进程 import 和创建 simulator，默认 `MUJOCO_GL=egl`，避免坏 ABI 或渲染器崩溃终止主审计进程。版本/注册通过但未执行 runtime smoke 的环境仍需完成最终门禁。
 
+#### M4.1 随机闭环门禁
+
+- `configs/tasks/robocasa365_atomic_seen.json` 固定 Atomic-Seen 18 的官方 horizon，并记录其 RoboCasa365 源码 commit。评测启动时必须再次读取当前 runtime 注册表；runtime horizon 与 manifest 不一致时立即失败，禁止静默采用本地版本。
+- 首个门禁固定为 `CloseFridge(target, seed=0, layout=1, style=1)`。官方 horizon 为 900；配置中的 `max_steps=20` 只是快速检查 reset/step/视频/落盘的工程烟测上限，不是完整 benchmark episode，也不能生成可报告的成功率。
+- 随机策略先在 schema 顺序中生成完整 12D 动作，再按名称写入五个 Gym action key。`base_motion` 默认实际采样，`control_mode` 和 `gripper_close` 离散为 `-1/+1`；所有 12 维都必须被消费，避免 manipulation task 掩盖底盘维度被截断的问题。
+- 每一步都按版本化 schema 检查并打包 16D state；三路 RGB 按固定顺序横向拼接为 `256x768` 视频。该门禁不 import Torch、不加载 Wan2.2/X-WAM，也不经过 broker。
+- 每次运行保存 requested/resolved config、运行环境与 Git provenance、逐 episode JSON、三相机视频和聚合 summary。聚合器从逐 episode 记录重算 success rate，并将缺失 rollout、异常退出或不完整记录判为 `fail`。
+- 工程门禁的 `result=pass` 表示请求的 episode 完整执行且证据齐全，与随机策略是否完成任务分开；随机策略 `success=false` 是正常结果。正式成功率只能由后续完整 horizon、冻结 seed 集与 X-WAM checkpoint 的评测产生。
+
 ## Model initialization
 
 Two modes remain supported:

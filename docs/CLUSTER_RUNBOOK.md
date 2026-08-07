@@ -419,6 +419,43 @@ python scripts/audit_robocasa365_simulator_environment.py \
 
 最终只接受 `ok=true` 且 `reuse_recommendation=reuse_ready`。`RoboCasa 0.2.x` 会明确标记为 `legacy_robocasa_only`；它能运行旧任务不代表能用于 RoboCasa365 Atomic-Seen。
 
+## M4.1 CloseFridge 随机闭环门禁
+
+这一步只使用 `robocasa-abot`，不加载 Torch、Wan2.2 或 X-WAM。它固定 `CloseFridge(target, seed=0, layout=1, style=1)`，执行最多 20 step，验证具名 16D observation、完整 12D Gym 动作、三路视频和结果落盘。`CloseFridge` 官方 horizon 是 900；20 step 仅是工程烟测，不能当作正式 benchmark。
+
+```bash
+conda activate robocasa-abot
+
+cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+git rev-parse HEAD
+mkdir -p logs/cluster
+
+export MUJOCO_GL=egl
+python evaluation/run_robocasa365_random_rollout.py \
+  --config configs/evaluation/robocasa365_close_fridge_m4_random_smoke.json \
+  --output-root /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365/evaluation/m4_random_smoke \
+  2>&1 | tee logs/cluster/robocasa365_close_fridge_m4_random_smoke.log
+
+echo "rollout_exit_code=${PIPESTATUS[0]}"
+```
+
+这里不需要 `/usr/bin/time -v`，也不要求设置 `set -o pipefail`。上面的 `PIPESTATUS[0]` 在 Bash 中直接给出 Python 进程的退出码；必须是 `0`。
+
+运行目录是输出根目录下新生成的 UTC run id，例如 `20260807T120000Z/`。验收以下内容：
+
+1. `summary.json` 为 `result=pass`，且 `episodes_expected/observed/completed=1/1/1`、`episodes_failed=0`、`episodes_missing=0`。
+2. `metadata.json` 记录当前 Git commit、dirty 状态、RoboCasa/robosuite/MuJoCo 版本、`MUJOCO_GL=egl` 和 runtime horizon 900。
+3. `CloseFridge/episode_000_seed_000000/episode.json` 的 state/action dimension 为 `16/12`，`steps<=20`，`base_nonzero_steps>0`，scene 为 layout/style `1/1`。
+4. 同目录 `rollout.mp4` 非空，画面为左 agentview、右 agentview、eye-in-hand 三路 `256x256` RGB 横向拼接，因此视频帧尺寸应为 `768x256`。
+5. 随机策略的 `success=false` 很正常，不影响本次工程门禁；只有 rollout 异常、缺失 episode、合同错误或证据未写完整才算失败。
+
+反馈以下文件，不需要重新上传模型或数据：
+
+- `logs/cluster/robocasa365_close_fridge_m4_random_smoke.log`
+- 本次 run 的 `metadata.json`、`summary.json` 和逐 episode `episode.json`
+- `rollout.mp4` 的文件大小；如画面异常，再提供视频或抽帧
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "name": "robocasa365_close_fridge_m4_random_smoke",
+  "scope": "atomic_only",
+  "policy": "random_uniform_named_12d",
+  "task_manifest": "configs/tasks/robocasa365_atomic_seen.json",
+  "panda_omron_schema": "configs/schemas/robocasa365_panda_omron_v1.json",
+  "task": "CloseFridge",
+  "episodes": 1,
+  "seed_start": 0,
+  "scene": {
+    "split": null,
+    "obj_instance_split": "target",
+    "layout_id": 1,
+    "style_id": 1,
+    "randomize_cameras": false,
+    "generative_textures": null
+  },
+  "rollout": {
+    "max_steps": 20,
+    "stop_on_success": true,
+    "base_motion_mode": "sample",
+    "depth_mode": "disabled"
+  },
+  "video": {
+    "enabled": true,
+    "stride": 4,
+    "fps": 5,
+    "camera_keys": [
+      "video.robot0_agentview_left",
+      "video.robot0_agentview_right",
+      "video.robot0_eye_in_hand"
+    ],
+    "camera_shape": [256, 256, 3]
+  },
+  "output_root": "eval_results/robocasa365_m4_random_smoke"
+}

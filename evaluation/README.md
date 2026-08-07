@@ -1,5 +1,19 @@
 # X-WAM Evaluation Guidelines
 
+## RoboCasa365 Atomic 适配状态
+
+当前项目的 RoboCasa365 新评测入口是 `run_robocasa365_random_rollout.py`。M4.1 先在独立 simulator 环境中运行一个不加载 X-WAM 的固定随机闭环，用于验证 Atomic-Seen 注册、在线 16D state、完整 12D PandaOmron action、三路 RGB 视频和结果聚合：
+
+```bash
+python evaluation/run_robocasa365_random_rollout.py \
+  --config configs/evaluation/robocasa365_close_fridge_m4_random_smoke.json \
+  --output-root /path/to/evaluation/m4_random_smoke
+```
+
+默认任务为 `CloseFridge(target, seed=0, layout=1, style=1)`，只运行 20 step。官方 horizon 为 900，因此这条命令只验证工程链路；随机策略是否成功完成任务不作为门禁。完整星光命令和验收字段见 `docs/CLUSTER_RUNBOOK.md`。
+
+下面的 `robocasa_client.py`、24-task 索引、500-step 假设和旧 policy server 命令保留为上游 X-WAM 参考，目前不是 RoboCasa365 Atomic 的有效入口。M4.2 会在随机门禁通过后把新版 adapter 接入 broker 和 X-WAM checkpoint。
+
 ## Installation
 
 Please clone the whole repository with submodules:
