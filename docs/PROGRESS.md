@@ -5,9 +5,9 @@
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：M3.2——三个 atomic 任务的 RGB-only 短训练门禁
+- 当前阶段：M4——RoboCasa365 atomic 闭环评测器准备
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1、M2 全部门禁通过；M3.1 checkpoint/resume 通过；M3.2 三任务数据和 12-step 训练均已运行，旧 audit 顺序误判已修正，更新后的集群 audit JSON 待生成
+- 超算运行状态：M1、M2、M3 全部门禁通过；M4 尚未开始集群验证
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -17,8 +17,8 @@
 | M0 工程与协作基线 | 已完成 | 主仓库已 clone | 模拟器阶段开始时确认第三方子模块 |
 | M1 原生 RoboCasa365 loader | 已完成 | commit `e4249b9` 真实 batch `ok=true` | 已关闭 |
 | M2 动作与 checkpoint 适配 | 已完成 | 两种初始化、完整动作契约及 DeepSpeedCPUAdam 单 batch 参数更新均通过 | 已关闭 |
-| M3 RGB-only 训练烟测 | M3.2 训练完成、audit 修复待复跑 | 12 step/result 通过；任务计数 3/5/4，旧固定顺序检查误判 | 用新 audit 重审原日志并补 run metadata |
-| M4 闭环评测器 | 未开始 | 待验证 | 完成一个 atomic 闭环 rollout |
+| M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
+| M4 闭环评测器 | 准备开始 | 待验证 | 完成一个 atomic 闭环 rollout |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
 | M6 Atomic 正式训练与评测 | 未开始 | 待验证 | 通过 H100 正式训练门禁 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
@@ -206,13 +206,17 @@ M3.2 12-step 训练反馈与 audit 修正：
 - `clean_action_ratio=0.5` 保持不变；监督 step 为 0、1、5、7、8，其他 step 的 action/proprio loss 按设计为 0，监督比例和 loss 对应关系通过。
 - 实际 task index 为 `0,2,1,1,1,1,1,0,2,2,0,2`，三个任务计数为 `3/5/4`。旧 audit 错把 Dataset 的平衡索引布局当成 Trainer 的固定读取顺序，因此只有 `balanced_round_robin` 一项误报失败。
 - 修正后保留真实 Lightning/DeepSpeed shuffle，只检查合法索引、三个任务覆盖和计数最大差不超过 2；同一原始日志在本地 dependency-free 重审为 `ok=true/result=pass`。集群需拉取新 commit 后只重跑 audit，无需重新训练。
-- 当前反馈未附 run metadata JSON，训练 Git commit 仍需从 metadata 的 `git.commit` 补齐后关闭 M3.2。
+- 正式证据已补齐：run id `20260807T105307Z`，训练 commit `5420c8986836f1ca26fbccc67f5c93db3c263119`，分支 `dev/atomic-robocasa365`，工作区干净；修正版 audit commit 为 `50b11a4`。
+- metadata 确认单卡 A800 80GB、Python 3.10.20、Torch 2.9.0+cu128、CUDA 12.8、Lightning 2.6.5、DeepSpeed 0.19.4；使用 ZeRO-2、FP32 DeepSpeedCPUAdam state、CPU offload、`xwam_pretrained`、RGB-only 和完整三任务 manifest。
+- result 确认 `pass/global_step=12/error=null`，耗时 518.53 秒，CUDA peak allocated/reserved 为 `30.677/40.076 GiB`，且按配置没有生成 checkpoint。
+- 进程 VmHWM 约 108.74 GiB；结束时 cgroup current/max 为 `119.9987/120 GiB`，`memory.events.max=4`、`oom=0`、`oom_kill=0`。本次 smoke 通过，但该 FP32 CPU-offload profile 几乎没有主机内存余量，禁止直接扩展为长训练或正式 H100 profile。
+- M3 的真实 batch、参数更新、短程 loss、低内存 checkpoint/resume、三任务 RGB-only 训练和机器审计均已通过，阶段关闭。
 
 ## 待提供输入
 
-- 拉取 audit 修复 commit，不重新训练；直接用新 `scripts/audit_m3_multitask_short.py` 重审已有日志。
-- 反馈更新后的 audit JSON，以及日志中所列 `20260807T105307Z_metadata.json` 和对应 result JSON，用 metadata 的 `git.commit` 完成运行 provenance。
-- 不在本轮运行闭环 simulator；新版在线 16D observation 提取将在 M4 实现和验收。
+- M3 不再需要补充输入或重跑。
+- 下一步由 Codex 进入 M4，先审计现有 policy server/evaluator、RoboCasa 环境接口和任务注册边界，再实现 atomic-only 随机/脚本 rollout 门禁；在实现存在前不提供集群命令。
+- M4 继续保持 policy 与 simulator 两个 Conda 环境分离，并优先验证一个 manipulation atomic 任务；`NavigateKitchen` 的底盘动作完整性随后单独验收。
 
 ## 当前执行过程
 
@@ -239,3 +243,4 @@ M3.2 12-step 训练反馈与 audit 修正：
 21. Codex 已准备 M3.2 三个 atomic 任务的 manifest、平衡轮询 adapter、12-step FP32/no-checkpoint 配置与机器审计，等待 A800 运行。
 22. 用户已在 commit `3d49c97` 完成三任务真实数据审计；322 episodes、75,727 frames、16D/12D/三相机合同全部通过，下一步为 12-step 训练。
 23. 三任务 12-step 训练正常完成；旧 audit 因 Lightning/DeepSpeed 随机 sampler 打乱固定顺序而误报。Codex 已改为覆盖与短前缀计数容差审计，同一日志本地重审通过，等待服务器生成正式 audit JSON 并补 metadata。
+24. 用户补齐修正版 audit、metadata 和 result：训练 commit `5420c89` 工作区干净，16 项 audit 全真，result `pass/global_step=12`；M3 正式关闭并进入 M4 准备。

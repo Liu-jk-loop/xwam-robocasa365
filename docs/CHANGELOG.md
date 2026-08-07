@@ -4,7 +4,7 @@
 
 - 分支：`dev/atomic-robocasa365`
 - 基线 commit：`3bbd621`
-- 运行状态：三任务数据和 12-step 训练已运行；audit 固定顺序误判已修复，更新后的集群 audit JSON 待生成
+- 运行状态：三任务数据、12-step 训练、修正版 audit 和 provenance 全部通过；M3 已关闭
 
 ### 方案修正
 
@@ -15,10 +15,10 @@
 ### 新增和修改逻辑
 
 - 新增 atomic-only 三任务 manifest 生成器，默认任务为 `PickPlaceCounterToCabinet`、`OpenCabinet` 和 `TurnOnMicrowave`。工具校验 Atomic-Seen 范围、完整数据/视频合同与唯一日期目录；多个日期目录时拒绝猜测，要求 `--task-path`。
-- Dataset 工厂新增 manifest 路径：为每个任务独立构造既有 `RoboCasa365Dataset`，从而保留 task-local PandaOmron normalization；外层 `BalancedRoundRobinDataset` 按 `0→1→2` 确定性轮询，并检查 action/proprio tensor 合同一致。
+- Dataset 工厂新增 manifest 路径：为每个任务独立构造既有 `RoboCasa365Dataset`，从而保留 task-local PandaOmron normalization；外层 `BalancedRoundRobinDataset` 用 `0→1→2` 虚拟索引布局平衡完整 Dataset，并检查 action/proprio tensor 合同一致，Trainer sampler 可随机重排读取顺序。
 - 训练入口将 manifest、任务名、原始/平衡样本数写入 provenance；runner 记录 `train/task_index`。单任务配置和 legacy Dataset 不受影响。
-- 新增 12-step FP32/no-checkpoint 配置，保持 `clean_action_ratio=0.5`、RGB-only 和每任务四步。checkpoint/resume 已由 M3.1 单独通过，本轮隔离多任务数据与训练链路。
-- 新增 dependency-free 日志审计，检查 12 个连续 step、平衡 task index、监督比例与 action/proprio loss 对应、两类采样分支、有限 loss、depth=0 和正常退出；不设置 loss 降幅阈值。
+- 新增 12-step FP32/no-checkpoint 配置，保持 `clean_action_ratio=0.5` 和 RGB-only。checkpoint/resume 已由 M3.1 单独通过，本轮隔离多任务数据与训练链路。
+- 新增 dependency-free 日志审计，检查 12 个连续 step、三任务覆盖与计数容差、监督比例与 action/proprio loss 对应、两类采样分支、有限 loss、depth=0 和正常退出；不设置固定读取顺序或 loss 降幅阈值。
 
 ### 文件、验证、风险和回滚
 
@@ -40,7 +40,16 @@
 - 实际三个任务计数为 `3/5/4`。旧 audit 要求 task index 严格按 `0,1,2` 循环，但 Lightning/DeepSpeed 会为训练 DataLoader 自动使用随机分布式 sampler；`train_shuffle=false` 只描述构造时 DataLoader，不能保证 Trainer 消费顺序。
 - 不修改 Trainer、Dataset 或真实训练 shuffle。audit 改为分别检查 task index 为整数且位于合法范围、三个任务均至少出现一次、12-step 任务计数最大差不超过默认容差 2，并输出具名 `task_counts`。
 - CLI 新增 `--max-task-count-spread`，默认 2；非法 task index、任务缺失或超出计数容差仍失败。使用原始日志回归得到计数 `PickPlaceCounterToCabinet=3`、`OpenCabinet=5`、`TurnOnMicrowave=4`，所有检查通过。
-- 本次仅修复 dependency-free 审计和记录，不需要重新运行 5B 训练。更新后的集群 audit JSON 与原 run metadata/result 仍待反馈；训练 commit 在 metadata 到达前不推断。
+- 本次仅修复 dependency-free 审计和记录，不需要重新运行 5B 训练；当时等待的 audit/metadata/result 已由下一节最终证据补齐。
+
+### M3.2 最终验收证据
+
+- run id 为 `20260807T105307Z`；metadata 确认训练 commit `5420c8986836f1ca26fbccc67f5c93db3c263119`、分支正确、工作区干净。修正版 audit 来自 commit `50b11a4`，16 项检查全部为 true，`errors=[]`、`ok=true/result=pass`。
+- 环境为单卡 NVIDIA A800 80GB PCIe、Python 3.10.20、Torch 2.9.0+cu128、CUDA 12.8、Lightning 2.6.5、DeepSpeed 0.19.4；拓扑为 world size 1。
+- 配置确认 `xwam_pretrained`、ZeRO-2、DeepSpeedCPUAdam FP32 state、CPU offload、RGB-only、`clean_action_ratio=0.5`、12 step 和 checkpoint disabled；三任务 adapter provenance 为 65,423 个原始 clips、102,204 个平衡虚拟 samples。
+- result 为 `pass/global_step=12/error=null`，耗时 518.53 秒，CUDA peak allocated/reserved 为 `30.677/40.076 GiB`，没有生成 checkpoint，符合本轮隔离训练链路的设计。
+- 进程 VmHWM 为约 108.74 GiB，结束时 cgroup 使用 `119.9987/120 GiB`，只剩约 1.3 MiB；`memory.events.max=4` 但 `oom=0/oom_kill=0`。因此 M3 smoke 通过，但该配置没有主机内存扩展余量，长训练和 H100 正式 profile 必须重新设计资源策略。
+- M3 的单 batch、checkpoint/resume、三任务短训练与审计全部关闭；下一阶段为 M4 atomic 闭环评测器，不把本轮 smoke 解释为正式训练或 benchmark 指标。
 
 ## 2026-08-07 — M3.2 FP32 单 clip 过拟合曲线门禁
 
