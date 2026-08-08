@@ -22,6 +22,8 @@ M4.2 已提供三条 RoboCasa365 专用入口：
 
 首轮配置 `configs/evaluation/robocasa365_close_fridge_m4_policy_smoke.json` 只执行一次模型请求和4个动作。三终端精确命令、启动顺序、checkpoint路径和验收字段见 `docs/CLUSTER_RUNBOOK.md`。不要再把下面 legacy policy server/client 命令用于RoboCasa365。
 
+M4.3 完整 horizon 使用 `configs/evaluation/robocasa365_close_fridge_m4_full.json` 和 `run_robocasa365_policy_rollout_resumable.py`。它每个 step 原子保存恢复进度；使用 `--resume-run-dir /path/to/existing/run` 时会从相同 seed 重建环境、回放已执行动作并校验16D state，然后继续未完成的 action chunk。`scripts/audit_robocasa365_policy_rollout.py` 负责把 client 证据与 server request JSONL 交叉审计。精确命令仍以 `docs/CLUSTER_RUNBOOK.md` 为准。
+
 ## Installation
 
 Please clone the whole repository with submodules:

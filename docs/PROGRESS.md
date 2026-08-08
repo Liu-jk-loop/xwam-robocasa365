@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：M4.3——CloseFridge 900-step 长 horizon 闭环准备
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1、M2、M3、M4.0、M4.1、M4.2 门禁通过；M4.3 尚未实现
+- 超算运行状态：M1、M2、M3、M4.0、M4.1、M4.2 门禁通过；M4.3 本地实现完成、为 `cluster-pending`
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -18,7 +18,7 @@
 | M1 原生 RoboCasa365 loader | 已完成 | commit `e4249b9` 真实 batch `ok=true` | 已关闭 |
 | M2 动作与 checkpoint 适配 | 已完成 | 两种初始化、完整动作契约及 DeepSpeedCPUAdam 单 batch 参数更新均通过 | 已关闭 |
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
-| M4 闭环评测器 | M4.0/M4.1/M4.2 已关闭 | commit `b5b6f53`：真实 X-WAM 单请求、32x12输出和4步执行 `pass` | 完善长 horizon 恢复/证据后运行 CloseFridge 900步 |
+| M4 闭环评测器 | M4.0/M4.1/M4.2 已关闭，M4.3本地实现完成 | commit `b5b6f53`：真实 X-WAM 单请求、32x12输出和4步执行 `pass` | 故意中断/恢复后完成 CloseFridge 900步 |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
 | M6 Atomic 正式训练与评测 | 未开始 | 待验证 | 通过 H100 正式训练门禁 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
@@ -244,7 +244,8 @@ M3.2 12-step 训练反馈与 audit 修正：
 - M4.0 不再需要重跑；`robocasa-abot` 已选为当前 simulator smoke 环境。
 - M4.1 不再需要重跑；本地 `log/` 证据只读保留并由根级 ignore 排除，机器日志、视频、模型和评测产物继续位于 Git 之外。
 - M4.2 不再需要补充输入或重跑；原始日志与视频保持在 Git ignore 目录，不上传仓库。
-- M4.3 开始前由 Codex 先评估并实现900-step所需的多请求 server 生命周期、中断恢复、逐请求证据和视频体积控制；当前不要直接把4-step命令扩大到900步。
+- M4.3 需在同一 A800 Pod 启动 broker、连续 policy server 和可恢复 client；client达到8步后故意中断一次，再使用同一个 run目录恢复并完成官方900-step或提前成功。
+- 反馈 server report/request JSONL、client两段日志、metadata/progress/summary/episode、审计JSON和视频信息。真实回放确定性、225次左右连续推理及完整视频仍为 `cluster-pending`。
 
 ## 当前执行过程
 
@@ -278,3 +279,4 @@ M3.2 12-step 训练反馈与 audit 修正：
 28. 用户在 commit `a916547` 完成 M4.1：20步、完整12D动作、三相机视频和可重算 summary 全部通过；M4.1 关闭。
 29. Codex 已实现 M4.2 版本化 NPZ/JSON policy 协议、透明 broker、严格 M3 checkpoint policy server 和 X-WAM simulator client；补充单任务 checkpoint/request 一致性、至少一次真实请求和 CUDA 峰值证据门禁。本地协议/路由/静态测试通过，A800真实模型加载与一次4-action闭环为 `cluster-pending`。
 30. 用户在 commit `b5b6f53` 完成 M4.2：M3 step-10 checkpoint 严格恢复、一次32x12推理、broker往返、四步完整12D环境动作和三相机视频全部通过；M4.2关闭，进入M4.3长horizon准备。
+31. Codex 已实现 M4.3 900-step配置、逐请求/逐动作原子progress、相同seed动作回放与16D state漂移阻塞、可恢复PNG帧缓存、server fsync请求JSONL和长运行机器审计；本地静态验证完成，星光故意中断/恢复及完整horizon为`cluster-pending`。

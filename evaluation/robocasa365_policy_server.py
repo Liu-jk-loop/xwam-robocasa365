@@ -33,10 +33,17 @@ from evaluation.robocasa365_protocol import (  # noqa: E402
     make_error_response,
     make_success_response,
 )
-from project_tools.training_run import collect_git_state, write_json_atomic  # noqa: E402
+from project_tools.training_run import (  # noqa: E402
+    append_jsonl_fsync,
+    collect_git_state,
+    write_json_atomic,
+)
 
 
 DEFAULT_REPORT = REPO_ROOT / "logs" / "cluster" / "robocasa365_m4_policy_server.json"
+DEFAULT_REQUEST_JOURNAL = (
+    REPO_ROOT / "logs" / "cluster" / "robocasa365_m4_policy_server_requests.jsonl"
+)
 
 
 def validate_checkpoint_task(request_task: str, checkpoint_task: str) -> None:
@@ -91,8 +98,15 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--denoise-steps", type=int, default=50)
     parser.add_argument("--action-denoise-steps", type=int, default=10)
     parser.add_argument("--max-requests", type=int, default=0, help="0 表示持续服务；smoke 建议 1。")
+    parser.add_argument("--minimum-requests", type=int, default=0)
+    parser.add_argument(
+        "--graceful-stop-is-pass",
+        action="store_true",
+        help="长服务在满足 minimum requests 后由 Ctrl-C 正常停止时记为 pass。",
+    )
     parser.add_argument("--compile-model", action="store_true", help="启用 torch.compile；首轮 smoke 默认关闭。")
     parser.add_argument("--startup-report", default=str(DEFAULT_REPORT))
+    parser.add_argument("--request-journal", default=str(DEFAULT_REQUEST_JOURNAL))
     args = parser.parse_args()
     if not 1 <= args.broker_port <= 65535:
         parser.error("broker port 必须位于 1..65535")
@@ -100,8 +114,10 @@ def _parse_args() -> argparse.Namespace:
         parser.error("denoise steps 必须为正")
     if args.action_denoise_steps > args.denoise_steps:
         parser.error("action denoise steps 不能超过 video denoise steps")
-    if args.max_requests < 0:
-        parser.error("max requests 不能为负")
+    if args.max_requests < 0 or args.minimum_requests < 0:
+        parser.error("max/minimum requests 不能为负")
+    if args.max_requests and args.minimum_requests > args.max_requests:
+        parser.error("minimum requests 不能超过 max requests")
     return args
 
 
@@ -318,6 +334,25 @@ def _serve(args: argparse.Namespace, report: dict[str, Any]) -> int:
                         "action_shape": list(environment_actions.shape),
                     }
                 )
+                append_jsonl_fsync(
+                    args.request_journal,
+                    {
+                        "schema_version": 1,
+                        "event": "policy_request_complete",
+                        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                        "server_started_at_utc": report["created_at_utc"],
+                        "git_commit": report.get("git", {}).get("commit"),
+                        "request_id": request["request_id"],
+                        "task": request["task"],
+                        "episode_id": request["episode_id"],
+                        "step_id": request["step_id"],
+                        "result": "pass",
+                        "inference_seed": inference_seed,
+                        "inference_seconds": inference_seconds,
+                        "action_shape": list(environment_actions.shape),
+                        "checkpoint": str(checkpoint_path),
+                    },
+                )
             except Exception as exc:
                 logging.exception("policy request failed")
                 failed_requests += 1
@@ -331,6 +366,27 @@ def _serve(args: argparse.Namespace, report: dict[str, Any]) -> int:
                         "result": "fail",
                         "error": f"{type(exc).__name__}: {exc}",
                     }
+                )
+                append_jsonl_fsync(
+                    args.request_journal,
+                    {
+                        "schema_version": 1,
+                        "event": "policy_request_complete",
+                        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                        "server_started_at_utc": report["created_at_utc"],
+                        "git_commit": report.get("git", {}).get("commit"),
+                        "request_id": request.get("request_id", "unknown")
+                        if request
+                        else "unknown",
+                        "task": request.get("task", "unknown") if request else "unknown",
+                        "episode_id": request.get("episode_id", "unknown")
+                        if request
+                        else "unknown",
+                        "step_id": request.get("step_id", -1) if request else -1,
+                        "result": "fail",
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "checkpoint": str(checkpoint_path),
+                    },
                 )
                 response = make_error_response(
                     request,
@@ -351,9 +407,15 @@ def _serve(args: argparse.Namespace, report: dict[str, Any]) -> int:
         cuda_peak_allocated_bytes=torch.cuda.max_memory_allocated(),
         cuda_peak_reserved_bytes=torch.cuda.max_memory_reserved(),
     )
+    minimum_met = processed >= args.minimum_requests
+    graceful_interrupt = interrupted and args.graceful_stop_is_pass and minimum_met
+    ok = failed_requests == 0 and minimum_met and (not interrupted or graceful_interrupt)
     report.update(
-        result="stopped" if interrupted else ("pass" if failed_requests == 0 else "fail"),
-        ok=not interrupted and failed_requests == 0,
+        result="pass" if ok else ("stopped" if interrupted else "fail"),
+        ok=ok,
+        interrupted=interrupted,
+        graceful_interrupt=graceful_interrupt,
+        minimum_requests=args.minimum_requests,
         processed_requests=processed,
         failed_requests=failed_requests,
         request_records=request_records,
@@ -365,7 +427,7 @@ def _serve(args: argparse.Namespace, report: dict[str, Any]) -> int:
         processed,
         failed_requests,
     )
-    return 0 if failed_requests == 0 else 1
+    return 0 if ok else 1
 
 
 def main() -> int:
@@ -378,6 +440,7 @@ def main() -> int:
         "git": collect_git_state(REPO_ROOT),
         "command": sys.argv,
         "broker": f"tcp://{args.broker_address}:{args.broker_port}",
+        "request_journal": str(Path(args.request_journal).expanduser().resolve()),
     }
     write_json_atomic(args.startup_report, report)
     try:

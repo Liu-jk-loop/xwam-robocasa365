@@ -188,7 +188,7 @@ RoboCasa365 原生数据
 5. 用户先在 `robocasa-abot` 运行固定 `CloseFridge(target, seed=0, layout=1, style=1)` 的 20-step 随机门禁，验证环境创建、非零底盘动作、三相机视频和完整结果写入。该短 horizon 只验证工程链路。
 6. Codex 审计 M4.1 集群证据；通过后实现版本化 broker 协议，并继续让 policy server 与 RoboCasa simulator client 使用两个独立环境。
 7. M4.2 先加载与请求任务严格匹配的 M3 单任务 checkpoint，执行一次三路 RGB + 16D state 请求，返回 32x12 action，并只执行首个 4-action chunk；用户反馈三进程日志、server 加载报告、逐 episode 证据和视频。
-8. 单请求通过后扩大为 `CloseFridge` 官方 900-step 上限的 manipulation atomic rollout，按 4-action chunk 重规划并记录完整请求延迟。
+8. 单请求通过后增加 M4.3 可恢复长运行：policy response 和每个环境 step 原子落盘；中断后按已记录12D动作重建并逐步校验16D state；视频使用可恢复帧缓存，server 用 fsync JSONL 留存逐请求证据。先故意中断并恢复同一个 run，再完成 `CloseFridge` 官方900-step上限。
 9. 用户运行 `NavigateKitchen`，确认底盘动作不是被截断为零。
 10. Codex 修正闭环问题并验证聚合可重算；单任务闭环和动作完整性通过后进入 M5/M6。
 

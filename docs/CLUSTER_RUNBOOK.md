@@ -569,6 +569,144 @@ echo "policy_client_exit_code=${PIPESTATUS[0]}"
 - `logs/cluster/robocasa365_close_fridge_m4_policy_smoke.log`
 - Client本次run的 `metadata.json`、`summary.json`、逐episode `episode.json` 和视频文件大小
 
+## M4.3 CloseFridge 900-step可恢复闭环
+
+本轮继续使用A800，不进入H100训练。完整900步在任务未提前成功时需要225次模型请求；按M4.2实测30.6秒/请求估算，纯推理约1.9小时，另加约6分钟模型加载和模拟器开销。三个进程仍须位于同一个Pod，且不要让Pod在client恢复前被回收。
+
+先更新代码并创建一个全新的控制目录。下面固定使用`m4_full_gate1`；如果目录已经存在，不要覆盖或删除，手工把三个终端中的名字统一改成`m4_full_gate2`：
+
+```bash
+cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+git rev-parse HEAD
+git status --short
+
+M4_CONTROL=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365/evaluation/m4_full_gate1
+test ! -e "$M4_CONTROL"
+mkdir -p "$M4_CONTROL/runs"
+```
+
+`git status --short`必须为空，`test ! -e`必须成功。M4.3恢复会拒绝dirty工作区和commit漂移。
+
+### 终端A：启动连续broker
+
+```bash
+conda activate robocasa-abot
+cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+M4_CONTROL=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365/evaluation/m4_full_gate1
+
+python evaluation/run_robocasa365_policy_broker.py \
+  --host 127.0.0.1 \
+  --frontend-port 10086 \
+  --backend-port 10087 \
+  2>&1 | tee "$M4_CONTROL/broker.log"
+```
+
+### 终端B：启动连续policy server
+
+```bash
+conda activate xwam-robocasa365
+cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+
+M4_CONTROL=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365/evaluation/m4_full_gate1
+M3_EXP=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365/close_fridge_m3_overfit_120g_gate1
+WAN_DIR=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/Wan-AI/Wan2.2-TI2V-5B
+DATASET=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/robocasa/robocasa/datasets/v1.0/pretrain/atomic/CloseFridge/20250819
+
+test ! -e "$M4_CONTROL/server_requests.jsonl"
+
+CUDA_VISIBLE_DEVICES=0 python evaluation/robocasa365_policy_server.py \
+  --experiment-dir "$M3_EXP" \
+  --wan-checkpoint-dir "$WAN_DIR" \
+  --dataset-path "$DATASET" \
+  --broker-address 127.0.0.1 \
+  --broker-port 10087 \
+  --denoise-steps 50 \
+  --action-denoise-steps 10 \
+  --max-requests 0 \
+  --minimum-requests 1 \
+  --graceful-stop-is-pass \
+  --startup-report "$M4_CONTROL/server_report.json" \
+  --request-journal "$M4_CONTROL/server_requests.jsonl" \
+  2>&1 | tee "$M4_CONTROL/server.log"
+
+echo "policy_server_exit_code=${PIPESTATUS[0]}"
+```
+
+等`Policy runtime ready`和broker的`policy server READY`。Server会持续服务；不要在client第一次故意中断时停止它。
+
+### 终端C：新建run并故意中断
+
+```bash
+conda activate robocasa-abot
+cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+export MUJOCO_GL=egl
+M4_CONTROL=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365/evaluation/m4_full_gate1
+
+python evaluation/run_robocasa365_policy_rollout_resumable.py \
+  --config configs/evaluation/robocasa365_close_fridge_m4_full.json \
+  --output-root "$M4_CONTROL/runs" \
+  2>&1 | tee "$M4_CONTROL/client_initial.log"
+```
+
+日志每完成一个4-action chunk会打印`M4.3 progress saved`。第一次看到`steps=8/900 requests=2`后，在终端C按一次`Ctrl-C`。Client应写出`result=interrupted`、`resumable=true`、`completed_steps=8`并以130退出；这是本轮设计内的故意中断，不是失败。
+
+Client打印8步后可能已经发出step 8的新请求；此时server会完成这个孤立请求，恢复后相同request ID会确定性重试，因此server JSONL可能多一条重复的成功记录，`processed_requests`也可能比client多1。审计器按run级request ID去重并要求所有关联记录均成功；这不等于重复执行环境动作。
+
+列出唯一run目录，并把实际run id手工填入`RUN_DIR`：
+
+```bash
+find "$M4_CONTROL/runs" -mindepth 1 -maxdepth 1 -type d -print
+RUN_DIR="$M4_CONTROL/runs/把这里替换为实际run_id"
+
+jq '{run_id, result, resumable, completed_steps, completed_policy_requests}' \
+  "$RUN_DIR/interruption.json"
+jq '{result, steps, request_count:(.request_records|length), step_count:(.step_records|length)}' \
+  "$RUN_DIR/CloseFridge/episode_000_seed_000000/progress.json"
+```
+
+必须看到progress的request/step结构完整后才恢复：
+
+```bash
+python evaluation/run_robocasa365_policy_rollout_resumable.py \
+  --resume-run-dir "$RUN_DIR" \
+  2>&1 | tee "$M4_CONTROL/client_resume.log"
+
+echo "policy_client_resume_exit_code=${PIPESTATUS[0]}"
+```
+
+恢复日志必须先出现`M4.3 deterministic replay passed: steps=8`，且`max_state_error <= 1e-5`，然后从未完成位置继续。若回放漂移，立即停止并反馈首个step和误差；禁止增大容差或删除progress重跑来掩盖问题。
+
+Client最终正常退出后，在终端B按一次`Ctrl-C`。由于设置了`--graceful-stop-is-pass`且至少处理过一个请求，server report应为`result=pass/ok=true`且退出码为0。随后可在终端A按`Ctrl-C`。
+
+### 机器审计
+
+在终端C运行：
+
+```bash
+python scripts/audit_robocasa365_policy_rollout.py \
+  --run-dir "$RUN_DIR" \
+  --server-request-journal "$M4_CONTROL/server_requests.jsonl" \
+  --output "$M4_CONTROL/audit.json" \
+  2>&1 | tee "$M4_CONTROL/audit.log"
+
+ffprobe -v error \
+  -show_entries stream=codec_name,width,height,avg_frame_rate,nb_frames \
+  -show_entries format=duration,size \
+  -of json \
+  "$RUN_DIR/CloseFridge/episode_000_seed_000000/rollout.mp4"
+```
+
+验收标准：
+
+1. Audit为`ok=true/result=pass`，所有checks为true；若任务未提前成功，steps为900、policy requests为225。RoboCasa在官方horizon返回`truncated=true`也视为完整900步。
+2. 恢复回放8步逐步通过16D state容差；原progress中的前两个请求不重复调用模型，最终request ID不重复。
+3. 每个client请求都能在server JSONL找到同checkpoint、`[32,12]`且`result=pass`的记录；不存在关联失败记录。
+4. Episode/summary为pass，完整12D动作通过Gym bounds；success可为false，本轮不把step-10工程checkpoint解释为策略指标。
+5. 视频为三相机`768x256`；未提前结束时帧缓存与MP4均为46帧（reset加每20步），文件非空。
+
+反馈`git rev-parse HEAD`、`audit.json`、`server_report.json`、`server_requests.jsonl`、两段client日志、summary/episode/progress、视频ffprobe和三个进程退出码。原始产物继续保留在Git之外。
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：

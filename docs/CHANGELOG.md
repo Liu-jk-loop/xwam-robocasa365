@@ -1,5 +1,27 @@
 # 变更记录
 
+## 2026-08-08 — M4.3 900-step可恢复评测实现
+
+- 修改前基线：`8790a06`（M4.2集群验收记录）
+- 运行状态：本地dependency-light合同、恢复进度、900-step合成审计和CLI检查完成；真实RoboCasa回放确定性、连续A800推理和完整horizon为`cluster-pending`
+
+### 加入的逻辑
+
+- 新增M4.3完整配置，固定`CloseFridge(target, seed=0, layout=1, style=1)`官方900-step horizon、4-action重规划、RGB-only、900秒单请求超时和每20步视频帧。
+- 新增版本化恢复合同。每次policy response先原子保存待执行动作和checkpoint/seed/latency，再在每个环境step后原子保存12D action、16D state及terminal标志；只有最后一个请求允许存在未执行动作。
+- 新增可恢复client。中断后必须使用原run目录和原Git commit；它以相同seed重建环境，逐条回放已经执行的动作并比较16D state，默认最大绝对误差容差为`1e-5`。漂移、任务/config/checkpoint变化或工作区dirty都会阻止续跑。
+- action chunk在请求完成后持久化，因此中断发生在chunk内部时可以执行剩余动作而不重新调用5B模型。M4.3 request ID包含run id，避免server journal与早先smoke记录冲突。
+- 视频改用原子PNG帧缓存：reset、每20步和terminal分别保存，episode完成后统一编码MP4。中断不会留下唯一且不可恢复的损坏流式视频。
+- Policy server新增逐请求fsync JSONL、最小请求数和“满足门禁后Ctrl-C正常退出”语义；保留M4.2 `max_requests=1`默认行为。
+- 新增长运行审计器，交叉验证client metadata/summary/episode/progress、server JSONL、请求数、每次`[32,12]`、单一checkpoint、完整horizon或提前成功、逐帧缓存和非空视频。
+
+### 验证、限制与回滚
+
+- 新增纯NumPy进度状态机、state漂移阻塞、完整900-step/225请求合成证据和dependency-light CLI测试；本地不导入Torch或RoboCasa。
+- 同seed动作回放是否在当前RoboCasa/robosuite/MuJoCo版本逐步满足`1e-5`必须在星光故意中断后验证；失败时先报告首个漂移step和误差，不提高容差或跳过校验。
+- 当前M3 checkpoint只用于工程闭环，900-step结果不解释为有效策略质量；完成M4.3后才进入H100训练测试。
+- 回退本次commit会移除可恢复client/config/audit和server长服务证据逻辑，恢复M4.2单请求入口；不会修改或删除外部checkpoint、数据、实验目录、日志、progress或视频。
+
 ## 2026-08-08 — M4.2 X-WAM 单请求闭环集群验收
 
 - 验收实现：commit `b5b6f53da075919cfb7cab4588623dd7d1e5ba76`，分支 `dev/atomic-robocasa365`，server 与 client metadata 均为干净工作区。

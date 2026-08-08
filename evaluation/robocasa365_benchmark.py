@@ -102,6 +102,35 @@ def load_policy_smoke_config(path: str | Path, repo_root: str | Path) -> dict[st
     return resolved
 
 
+def load_policy_full_config(path: str | Path, repo_root: str | Path) -> dict[str, Any]:
+    resolved = load_policy_smoke_config(path, repo_root)
+    if resolved["episodes"] != 1:
+        raise BenchmarkContractError("M4.3 首轮可恢复长评测只允许 episodes=1")
+    if resolved["rollout"]["max_steps"] != resolved["official_horizon"]:
+        raise BenchmarkContractError(
+            "M4.3 必须使用官方完整 horizon："
+            f"max_steps={resolved['rollout']['max_steps']}, "
+            f"official={resolved['official_horizon']}"
+        )
+    recovery = resolved.get("recovery")
+    if not isinstance(recovery, dict):
+        raise BenchmarkContractError("M4.3 配置缺少 recovery 对象")
+    if recovery.get("enabled") is not True:
+        raise BenchmarkContractError("M4.3 必须启用 recovery")
+    if recovery.get("mode") != "deterministic_action_replay":
+        raise BenchmarkContractError("M4.3 recovery mode 必须为 deterministic_action_replay")
+    try:
+        state_replay_atol = float(recovery["state_replay_atol"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BenchmarkContractError("M4.3 state_replay_atol 必须为合法数值") from exc
+    if not math.isfinite(state_replay_atol) or state_replay_atol <= 0:
+        raise BenchmarkContractError("M4.3 state_replay_atol 必须为有限正数")
+    if resolved["video"].get("durable_frames") is not True:
+        raise BenchmarkContractError("M4.3 必须启用 durable_frames")
+    resolved["recovery"] = dict(recovery, state_replay_atol=state_replay_atol)
+    return resolved
+
+
 def _load_smoke_config_common(
     path: str | Path, repo_root: str | Path
 ) -> tuple[dict[str, Any], dict[str, Any]]:

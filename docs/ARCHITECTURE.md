@@ -74,6 +74,15 @@ The X-WAM backbone should consume validated tensors and remain free of dataset-p
 - Broker 只透明转发 opaque wire bytes，不加载模型、模拟器或 schema；每个空闲 server 一次接收一个请求。Client 设置显式请求超时，server 将单请求异常编码为 error response，避免两侧无限等待。
 - 首个 M4.2 配置仍固定 `CloseFridge(target, seed=0, layout=1, style=1)`，只执行一个 4-action receding-horizon chunk，并要求至少完成一次 policy request。它验证一次真实 X-WAM inference 和四次环境 step，不代表 900-step 完整 rollout 或任务成功率。
 
+#### M4.3 900-step 可恢复闭环
+
+- M4.3 不修改 M3 训练 runner。长运行 client 在每次 policy response 后先原子写入待执行的最多4个12D动作，再在每个 simulator step 后原子更新 `progress.json`；进程在任意两次写入之间退出时，恢复点都对应一个完整环境状态。
+- 恢复不依赖不可移植的 MuJoCo 内存快照。Client 使用相同 task/seed/layout/style 重建环境，按顺序回放已经持久化的完整12D动作，并逐步比较16D state；任一步最大绝对误差超过配置容差或 success/terminated/truncated 标志漂移都会阻止续跑。
+- 未执行完的最后一个 action chunk 保存在 progress 中，恢复后直接继续执行，不重复请求模型。新的 request ID 包含 run id；恢复进程要求原 Git commit、配置、checkpoint 与已有请求完全一致。
+- 视频不再依赖易损坏的长时间流式 writer。初始帧、每个配置 stride 和 terminal 帧分别原子保存为 PNG，episode 完成后再编码 MP4；中断恢复时只补缺失帧。
+- Policy server 对每个成功或失败请求 fsync 追加 JSONL。连续服务可在 client 完成后由 `Ctrl-C` 正常退出，并在满足最小请求数且无失败时写出 `pass`；client 进度与 server journal 由独立审计器交叉核对。
+- Client中断时可能已有一个请求在server执行；该response未进入progress，恢复后会以相同request ID和确定性seed重试。审计按request ID去重并允许多条一致的成功server记录，但任何关联失败、shape/checkpoint/seed漂移仍阻塞验收；环境动作只按progress执行一次。
+
 ## Model initialization
 
 Two modes remain supported:

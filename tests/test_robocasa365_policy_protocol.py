@@ -147,6 +147,7 @@ class RoboCasa365PolicyProtocolTest(unittest.TestCase):
             "run_robocasa365_policy_broker.py",
             "robocasa365_policy_server.py",
             "run_robocasa365_policy_rollout.py",
+            "run_robocasa365_policy_rollout_resumable.py",
         )
         for script in scripts:
             result = subprocess.run(
@@ -158,6 +159,20 @@ class RoboCasa365PolicyProtocolTest(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
             self.assertEqual(result.returncode, 0, f"{script}: {result.stderr}")
+
+        audit = subprocess.run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "scripts" / "audit_robocasa365_policy_rollout.py"),
+                "--help",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertEqual(audit.returncode, 0, audit.stderr)
 
 
 if __name__ == "__main__":
