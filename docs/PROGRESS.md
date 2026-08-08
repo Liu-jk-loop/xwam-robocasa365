@@ -5,9 +5,9 @@
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：M6.0——H100 RGB-only 正式训练门禁规划
+- 当前阶段：M6.1——H100 RGB-only 正式训练门禁实现
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1、M2、M3、M4.0、M4.1、M4.2、M4.3 门禁均通过；下一步切换 H100 验证正式训练配置
+- 超算运行状态：M1～M4.3门禁均通过；M6代码与配置已完成本地静态检查，等待生成18任务manifest/global stats并在4×H100执行2→4步门禁
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
-| M6 Atomic 正式训练与评测 | 准备开始 RGB-only H100 门禁 | 待验证 | 冻结 H100 配置并完成最小正式训练 smoke |
+| M6 Atomic 正式训练与评测 | 18任务RGB训练实现完成 | cluster-pending | 生成全局统计，完成4×H100 step 2→4保存恢复门禁 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
 ## 已确认资源
@@ -254,7 +254,7 @@ M3.2 12-step 训练反馈与 audit 修正：
 - M4.1 不再需要重跑；本地 `log/` 证据只读保留并由根级 ignore 排除，机器日志、视频、模型和评测产物继续位于 Git 之外。
 - M4.2 不再需要补充输入或重跑；原始日志与视频保持在 Git ignore 目录，不上传仓库。
 - M4.3 不再需要重跑；900-step、225 次请求、故意中断恢复和视频证据已通过机器审计。
-- 下一步由 Codex 冻结 H100 RGB-only 训练目标、数据任务范围、硬件 profile、保存频率和首轮 smoke 验收项；depth 试点暂不混入首轮 H100 RGB 基线。
+- 下一步由用户在新commit上生成M6 18任务manifest/global stats和preflight JSON，再运行4×H100 step 2→4门禁；depth试点暂不混入首轮H100 RGB基线。
 
 ## 当前执行过程
 
@@ -290,3 +290,4 @@ M3.2 12-step 训练反馈与 audit 修正：
 30. 用户在 commit `b5b6f53` 完成 M4.2：M3 step-10 checkpoint 严格恢复、一次32x12推理、broker往返、四步完整12D环境动作和三相机视频全部通过；M4.2关闭，进入M4.3长horizon准备。
 31. Codex 已实现 M4.3 900-step配置、逐请求/逐动作原子progress、相同seed动作回放与16D state漂移阻塞、可恢复PNG帧缓存、server fsync请求JSONL和长运行机器审计；本地静态验证完成，星光故意中断/恢复及完整horizon为`cluster-pending`。
 32. 用户在 commit `f9e1b6b` 完成 M4.3：故意中断后确定性恢复，最终完成 CloseFridge 900步和225次模型请求；机器审计19项全真、`ok=true/result=pass`。M4工程链路全部关闭，下一步转入H100 RGB-only正式训练门禁规划。
+33. Codex 已实现M6 18任务自然采样manifest、跨任务统计、按GBS 128对齐的5-epoch调度、4×H100首选/回退profile、FP32 optimizer实态审计、多卡保存恢复和正式final checkpoint；本地静态门禁通过，真实集群验证为`cluster-pending`。

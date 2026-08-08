@@ -38,12 +38,14 @@ def build_dataset(config: Any, *, use_depth: bool, augment: bool | None = None):
         from data.robocasa365_dataset import RoboCasa365Dataset
         from data.robocasa365_multitask import (
             BalancedRoundRobinDataset,
+            NaturalConcatDataset,
             load_multitask_dataset_manifest,
         )
 
         payload["use_depth"] = bool(use_depth)
         multitask_manifest_path = payload.pop("multitask_manifest", None)
         expected_task_count = payload.pop("expected_task_count", None)
+        expected_sampling = payload.pop("expected_sampling", None)
         if multitask_manifest_path is not None:
             if "dataset_path" in payload or "task_name" in payload:
                 raise ValueError(
@@ -57,17 +59,40 @@ def build_dataset(config: Any, *, use_depth: bool, augment: bool | None = None):
                 atomic_task_manifest=atomic_task_manifest,
                 expected_task_count=expected_task_count,
             )
+            if expected_sampling is not None and manifest.sampling != str(
+                expected_sampling
+            ):
+                raise ValueError(
+                    "多任务 manifest sampling 与配置不一致："
+                    f"expected={expected_sampling}, actual={manifest.sampling}"
+                )
             datasets = []
             for entry in manifest.tasks:
                 child_payload = dict(payload)
                 child_payload["dataset_path"] = entry.dataset_path
                 child_payload["task_name"] = entry.task_name
                 datasets.append(RoboCasa365Dataset(**child_payload))
-            return BalancedRoundRobinDataset(
-                datasets,
-                task_names=[entry.task_name for entry in manifest.tasks],
-                manifest_path=manifest.source_path,
+            wrapper = (
+                BalancedRoundRobinDataset
+                if manifest.sampling == "balanced_round_robin"
+                else NaturalConcatDataset
             )
+            wrapper_kwargs = {
+                "task_names": [entry.task_name for entry in manifest.tasks],
+                "manifest_path": manifest.source_path,
+            }
+            if wrapper is NaturalConcatDataset:
+                wrapper_kwargs["manifest_digest"] = manifest.manifest_digest
+            dataset = wrapper(datasets, **wrapper_kwargs)
+            if (
+                manifest.total_valid_clips is not None
+                and len(dataset) != manifest.total_valid_clips
+            ):
+                raise ValueError(
+                    "多任务 manifest total_valid_clips 与 Dataset 长度不一致："
+                    f"manifest={manifest.total_valid_clips}, dataset={len(dataset)}"
+                )
+            return dataset
         return RoboCasa365Dataset(**payload)
 
     raise ValueError(f"不支持的数据格式：{dataset_format!r}")

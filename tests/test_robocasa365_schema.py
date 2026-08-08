@@ -133,6 +133,33 @@ class RoboCasa365SchemaTest(unittest.TestCase):
         self.assertLessEqual(float(np.abs(codec.encode_state(state)).max()), 1.0)
         self.assertLessEqual(float(np.abs(codec.encode_action(action)).max()), 1.0)
 
+    def test_codec_can_use_manifest_bound_global_statistics(self) -> None:
+        global_stats = Path(self.temp_dir.name) / "global_stats.json"
+        write_json(
+            global_stats,
+            {
+                "observation.state": {
+                    "q01": [-2.0] * 16,
+                    "q99": [2.0] * 16,
+                    "min": [-3.0] * 16,
+                    "max": [3.0] * 16,
+                },
+                "action": {
+                    "q01": [-4.0] * 12,
+                    "q99": [4.0] * 12,
+                    "min": [-5.0] * 12,
+                    "max": [5.0] * 12,
+                },
+            },
+        )
+        codec = PandaOmronTensorCodec.from_dataset(
+            self.root.parent,
+            SCHEMA_PATH,
+            statistics_path=global_stats,
+        )
+        np.testing.assert_array_equal(codec.state_stats.q01, np.full(16, -2.0))
+        np.testing.assert_array_equal(codec.action_stats.q99, np.full(12, 4.0))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,4 @@
 import os
-import gc
 import sys
 import logging
 import importlib.metadata
@@ -18,6 +17,7 @@ from torch.utils.data import DataLoader, Subset
 from omegaconf import OmegaConf
 import lightning as L
 from lightning.pytorch.callbacks import (
+    Callback,
     ModelCheckpoint,
     ModelSummary,
     LearningRateMonitor,
@@ -26,6 +26,7 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.strategies import DeepSpeedStrategy
 
 from data.dataset_factory import build_dataset
+from data.epoch_aligned_sampler import EpochAlignedDistributedSampler
 from project_tools.training_topology import (
     resolve_cpu_adam_options,
     resolve_deepspeed_options,
@@ -42,6 +43,11 @@ from project_tools.training_run import (
     resolve_training_schedule,
     write_json_atomic,
 )
+from project_tools.h100_training import (
+    load_epoch_schedule_from_manifest,
+    validate_global_stats_contract,
+    validate_h100_training_contract,
+)
 from runners.xwam_runner import XWAMRunner
 from utils.console_logger import ConsoleLogger
 from utils.xwam_checkpoint_loader import initialize_xwam_runner
@@ -55,6 +61,8 @@ class ResourceAwareModelCheckpoint(ModelCheckpoint):
         super().__init__(*args, **kwargs)
 
     def _record_checkpoint_event(self, event, trainer, filepath, error=None):
+        if not trainer.is_global_zero:
+            return
         payload = {
             "event": event,
             "filepath": str(filepath),
@@ -84,6 +92,101 @@ class ResourceAwareModelCheckpoint(ModelCheckpoint):
             )
             raise
         self._record_checkpoint_event("checkpoint_save_complete", trainer, filepath)
+
+
+class OptimizerStateDtypeAudit(Callback):
+    """Write the actual optimizer-state tensor dtypes after the first update."""
+
+    def __init__(self, output_dir: Path, *, require_fp32: bool):
+        self.output_dir = Path(output_dir)
+        self.require_fp32 = bool(require_fp32)
+        self.written = False
+
+    @staticmethod
+    def _optimizer_candidates(optimizer):
+        queue = [("trainer_optimizer", optimizer)]
+        seen = set()
+        while queue:
+            name, candidate = queue.pop(0)
+            if id(candidate) in seen:
+                continue
+            seen.add(id(candidate))
+            yield name, candidate
+            for attribute in ("optimizer", "basic_optimizer"):
+                nested = getattr(candidate, attribute, None)
+                if nested is not None:
+                    queue.append((f"{name}.{attribute}", nested))
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        if self.written or int(trainer.global_step) < 1 or not trainer.optimizers:
+            return
+        dtype_counts = {}
+        candidate_reports = []
+        for name, candidate in self._optimizer_candidates(trainer.optimizers[0]):
+            state = getattr(candidate, "state", None)
+            tensor_count = 0
+            if isinstance(state, dict):
+                for item in state.values():
+                    if not isinstance(item, dict):
+                        continue
+                    for value in item.values():
+                        if torch.is_tensor(value) and value.is_floating_point():
+                            dtype_name = str(value.dtype)
+                            dtype_counts[dtype_name] = (
+                                dtype_counts.get(dtype_name, 0) + 1
+                            )
+                            tensor_count += 1
+            candidate_reports.append(
+                {
+                    "name": name,
+                    "class": type(candidate).__name__,
+                    "floating_state_tensors": tensor_count,
+                }
+            )
+        floating_count = sum(dtype_counts.values())
+        fp32_only = floating_count > 0 and set(dtype_counts) == {"torch.float32"}
+        payload = {
+            "schema_version": 1,
+            "global_rank": int(trainer.global_rank),
+            "world_size": int(trainer.world_size),
+            "global_step": int(trainer.global_step),
+            "require_fp32": self.require_fp32,
+            "dtype_counts": dtype_counts,
+            "floating_state_tensors": floating_count,
+            "fp32_only": fp32_only,
+            "candidates": candidate_reports,
+            "result": "pass" if (not self.require_fp32 or fp32_only) else "fail",
+        }
+        path = self.output_dir / f"optimizer_state_rank_{trainer.global_rank:03d}.json"
+        write_json_atomic(path, payload)
+        print(f"Optimizer state dtype audit: {path} ({payload['result']})", flush=True)
+        self.written = True
+
+
+def _validate_h100_runtime(config, topology):
+    if not bool(config.get("h100_formal_guard", False)):
+        return None
+    names = [
+        torch.cuda.get_device_name(index) for index in range(torch.cuda.device_count())
+    ]
+    memory_gib = [
+        torch.cuda.get_device_properties(index).total_memory / (1024**3)
+        for index in range(torch.cuda.device_count())
+    ]
+    checks = {
+        "visible_gpu_count": len(names) == 4,
+        "world_size": int(topology["world_size"]) == 4,
+        "single_node": int(topology["num_nodes"]) == 1,
+        "h100_names": len(names) == 4 and all("H100" in name.upper() for name in names),
+        "minimum_75_gib": len(memory_gib) == 4
+        and all(value >= 75.0 for value in memory_gib),
+    }
+    failed = [name for name, passed in checks.items() if not passed]
+    if failed:
+        raise RuntimeError(
+            f"H100 runtime门禁失败：{failed}; gpu_names={names}, memory_gib={memory_gib}"
+        )
+    return {"checks": checks, "gpu_names": names, "memory_gib": memory_gib}
 
 
 def _load_config():
@@ -143,47 +246,97 @@ def _resolve_trainer_topology(config):
     )
 
 
+def _global_rank_from_environment() -> int:
+    for name in ("RANK", "GLOBAL_RANK", "LOCAL_RANK"):
+        value = os.environ.get(name)
+        if value is not None:
+            return int(value)
+    return 0
+
+
 def main():
     config = _load_config()
-    schedule = resolve_training_schedule(
-        num_training_steps=config.num_training_steps,
-        trainer_max_steps=config.get("trainer_max_steps"),
-    )
-    config.trainer_max_steps = schedule["trainer_max_steps"]
+    topology = _resolve_trainer_topology(config)
+    h100_contract = None
+    stats_contract = None
+    if bool(config.get("h100_formal_guard", False)):
+        h100_contract = validate_h100_training_contract(
+            config, world_size=int(topology["world_size"])
+        )
+        schedule = load_epoch_schedule_from_manifest(
+            config.dataset.multitask_manifest,
+            global_batch_size=int(config.global_batch_size),
+            num_train_epochs=int(config.num_train_epochs),
+            trainer_max_steps=config.get("trainer_max_steps"),
+        )
+        stats_contract = validate_global_stats_contract(
+            config.dataset.statistics_path,
+            manifest_digest=str(schedule["manifest_digest"]),
+        )
+        config.num_training_steps = int(schedule["num_training_steps"])
+        config.steps_per_epoch = int(schedule["steps_per_epoch"])
+    else:
+        schedule = resolve_training_schedule(
+            num_training_steps=config.num_training_steps,
+            trainer_max_steps=config.get("trainer_max_steps"),
+        )
+    config.trainer_max_steps = int(schedule["trainer_max_steps"])
     resume_checkpoint = resolve_resume_checkpoint(config.get("resume_checkpoint"))
     config.resume_checkpoint = resume_checkpoint
-    topology = _resolve_trainer_topology(config)
-    if bool(config.get("persist_generator_state", False)) and topology["world_size"] != 1:
-        raise ValueError("persist_generator_state 当前只允许 M3 单 GPU 确定性恢复门禁")
+    if (
+        bool(config.get("persist_generator_state", False))
+        and topology["world_size"] != 1
+        and not bool(config.get("allow_distributed_generator_state", False))
+    ):
+        raise ValueError(
+            "多卡 persist_generator_state 必须显式启用 allow_distributed_generator_state"
+        )
     deepspeed_options = resolve_deepspeed_options(config)
     allow_missing_frozen_resume_parameters = bool(
-        resume_checkpoint is not None
-        and deepspeed_options["exclude_frozen_parameters"]
+        resume_checkpoint is not None and deepspeed_options["exclude_frozen_parameters"]
     )
 
-    pprint(OmegaConf.to_container(config))
+    runtime_rank = _global_rank_from_environment()
+    if runtime_rank == 0:
+        pprint(OmegaConf.to_container(config))
 
     exp_dir = Path(config.exp_root) / config.exp_name
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_id = os.environ.get("XWAM_RUN_ID")
+    if run_id is None:
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        os.environ["XWAM_RUN_ID"] = run_id
     run_dir = exp_dir / "runs"
     exp_dir.mkdir(parents=True, exist_ok=True)
     run_dir.mkdir(parents=True, exist_ok=True)
-    OmegaConf.save(
-        config,
-        exp_dir / "config.yaml",
-        resolve=True,
-    )
     resolved_config_path = run_dir / f"{run_id}_config.yaml"
-    OmegaConf.save(
-        config,
-        resolved_config_path,
-        resolve=True,
-    )
+    if runtime_rank == 0:
+        OmegaConf.save(
+            config,
+            exp_dir / "config.yaml",
+            resolve=True,
+        )
+        OmegaConf.save(
+            config,
+            resolved_config_path,
+            resolve=True,
+        )
     L.seed_everything(config.seed, workers=True)
+    h100_runtime = _validate_h100_runtime(config, topology)
 
-    callbacks = [ModelSummary(max_depth=2), LearningRateMonitor(logging_interval="step")]
+    callbacks = [
+        ModelSummary(max_depth=2),
+        LearningRateMonitor(logging_interval="step"),
+    ]
     checkpoint_callback = None
     checkpoint_events_path = run_dir / f"{run_id}_checkpoint_events.jsonl"
+    optimizer_audit_dir = run_dir / f"{run_id}_optimizer_state"
+    if bool(config.get("audit_optimizer_state_dtype", False)):
+        callbacks.append(
+            OptimizerStateDtypeAudit(
+                optimizer_audit_dir,
+                require_fp32=bool(config.get("deepspeed_fp32_optimizer_states", True)),
+            )
+        )
     if bool(config.get("enable_checkpointing", True)):
         checkpoint_callback = ResourceAwareModelCheckpoint(
             diagnostics_path=checkpoint_events_path,
@@ -206,7 +359,9 @@ def main():
         loggers.insert(
             0,
             TensorBoardLogger(
-                save_dir=tb_path if tb_path else os.path.join(config.exp_root, config.exp_name, "tb_logs"),
+                save_dir=tb_path
+                if tb_path
+                else os.path.join(config.exp_root, config.exp_name, "tb_logs"),
                 name=config.exp_name,
             ),
         )
@@ -221,6 +376,13 @@ def main():
     if dataset_provenance is not None:
         print(f"Training dataset provenance: {dataset_provenance}")
     config.action_num = base_train_dataset.action_num
+    if bool(config.get("h100_formal_guard", False)):
+        expected_samples = int(schedule["total_samples"])
+        if len(base_train_dataset) != expected_samples:
+            raise ValueError(
+                "M6 manifest样本数与实际Dataset不一致："
+                f"manifest={expected_samples}, dataset={len(base_train_dataset)}"
+            )
     if int(config.action_dim) != int(base_train_dataset.action_dim):
         raise ValueError(
             f"模型 action_dim={config.action_dim} 与数据 action_dim={base_train_dataset.action_dim} 不一致"
@@ -241,19 +403,38 @@ def main():
         else Subset(base_train_dataset, subset_indices)
     )
     train_shuffle = bool(config.get("train_shuffle", True))
+    train_sampler = None
+    sampler_provenance = None
+    if bool(config.get("h100_formal_guard", False)):
+        samples_per_rank = (
+            int(schedule["steps_per_epoch"])
+            * int(config.batch_size_per_gpu)
+            * int(config.accumulate_grad_batches)
+        )
+        train_sampler = EpochAlignedDistributedSampler(
+            train_dataset,
+            num_replicas=int(topology["world_size"]),
+            rank=_global_rank_from_environment(),
+            samples_per_rank=samples_per_rank,
+            seed=int(config.seed),
+        )
+        sampler_provenance = train_sampler.provenance()
+        train_shuffle = False
     print(
         "Training data selection: "
         f"base_samples={len(base_train_dataset)}, selected_samples={len(train_dataset)}, "
         f"subset_indices={subset_indices}, shuffle={train_shuffle}"
     )
-    OmegaConf.save(config, exp_dir / "config.yaml", resolve=True)
-    OmegaConf.save(config, resolved_config_path, resolve=True)
+    if runtime_rank == 0:
+        OmegaConf.save(config, exp_dir / "config.yaml", resolve=True)
+        OmegaConf.save(config, resolved_config_path, resolve=True)
 
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=config.batch_size_per_gpu,
         num_workers=config.num_workers_per_gpu,
         shuffle=train_shuffle,
+        sampler=train_sampler,
         pin_memory=True,
         drop_last=True,
         **_loader_worker_options(config.num_workers_per_gpu, config.prefetch_factor),
@@ -261,81 +442,95 @@ def main():
 
     val_dataloader = None
     if float(config.limit_val_batches) > 0:
-        val_dataset = build_dataset(config.dataset, use_depth=config.use_depth, augment=False)
+        val_dataset = build_dataset(
+            config.dataset, use_depth=config.use_depth, augment=False
+        )
         val_dataloader = DataLoader(
             val_dataset,
             batch_size=1,
             num_workers=config.num_workers_per_gpu,
             shuffle=True,
             pin_memory=True,
-            **_loader_worker_options(config.num_workers_per_gpu, config.prefetch_factor),
+            **_loader_worker_options(
+                config.num_workers_per_gpu, config.prefetch_factor
+            ),
         )
 
     run_metadata_path = run_dir / f"{run_id}_metadata.json"
     run_result_path = run_dir / f"{run_id}_result.json"
-    write_json_atomic(
-        run_metadata_path,
-        {
-            "schema_version": 1,
-            "run_id": run_id,
-            "created_at_utc": datetime.now(timezone.utc).isoformat(),
-            "git": collect_git_state(Path(__file__).resolve().parents[1]),
-            "command": sys.argv,
-            "config_sources": OmegaConf.to_container(config.config_sources, resolve=True),
-            "resolved_config": str(resolved_config_path.resolve()),
-            "dataset": {
-                "path": config.dataset.get("dataset_path"),
-                "task_name": config.dataset.get("task_name"),
-                "base_samples": len(base_train_dataset),
-                "selected_samples": len(train_dataset),
-                "subset_indices": list(subset_indices) if subset_indices is not None else None,
-                "shuffle": train_shuffle,
-                "task_manifest": config.dataset.get("task_manifest"),
-                "schema_path": config.dataset.get("schema_path"),
-                "use_depth": bool(config.use_depth),
-                "adapter_provenance": dataset_provenance,
-            },
-            "checkpoint": {
-                "initialization_mode": config.get("initialization_mode"),
-                "pretrained_checkpoint": config.get("pretrained_checkpoint"),
-                "resume_checkpoint": resume_checkpoint,
-                "events": str(checkpoint_events_path.resolve()),
-                "allow_missing_frozen_resume_parameters": (
-                    allow_missing_frozen_resume_parameters
+    if runtime_rank == 0:
+        write_json_atomic(
+            run_metadata_path,
+            {
+                "schema_version": 1,
+                "run_id": run_id,
+                "created_at_utc": datetime.now(timezone.utc).isoformat(),
+                "git": collect_git_state(Path(__file__).resolve().parents[1]),
+                "command": sys.argv,
+                "config_sources": OmegaConf.to_container(
+                    config.config_sources, resolve=True
                 ),
+                "resolved_config": str(resolved_config_path.resolve()),
+                "dataset": {
+                    "path": config.dataset.get("dataset_path"),
+                    "task_name": config.dataset.get("task_name"),
+                    "base_samples": len(base_train_dataset),
+                    "selected_samples": len(train_dataset),
+                    "subset_indices": list(subset_indices)
+                    if subset_indices is not None
+                    else None,
+                    "shuffle": train_shuffle,
+                    "task_manifest": config.dataset.get("task_manifest"),
+                    "schema_path": config.dataset.get("schema_path"),
+                    "use_depth": bool(config.use_depth),
+                    "adapter_provenance": dataset_provenance,
+                    "sampler_provenance": sampler_provenance,
+                },
+                "checkpoint": {
+                    "initialization_mode": config.get("initialization_mode"),
+                    "pretrained_checkpoint": config.get("pretrained_checkpoint"),
+                    "resume_checkpoint": resume_checkpoint,
+                    "events": str(checkpoint_events_path.resolve()),
+                    "allow_missing_frozen_resume_parameters": (
+                        allow_missing_frozen_resume_parameters
+                    ),
+                },
+                "environment": {
+                    "python": platform.python_version(),
+                    "torch": torch.__version__,
+                    "cuda_runtime": torch.version.cuda,
+                    "lightning": getattr(L, "__version__", None),
+                    "deepspeed": _package_version("deepspeed"),
+                    "gpu_names": [
+                        torch.cuda.get_device_name(index)
+                        for index in range(torch.cuda.device_count())
+                    ],
+                },
+                "training": schedule,
+                "resume_checkpoint": resume_checkpoint,
+                "deepspeed": deepspeed_options,
+                "optimizer": {
+                    "backend": resolve_optimizer_backend(config),
+                    **resolve_cpu_adam_options(config),
+                },
+                "topology": topology,
+                "h100_contract": h100_contract,
+                "h100_runtime": h100_runtime,
+                "global_stats_contract": stats_contract,
+                "optimizer_state_audit_dir": str(optimizer_audit_dir.resolve()),
+                "memory_at_metadata": collect_memory_snapshot(),
+                "result": "pending",
             },
-            "environment": {
-                "python": platform.python_version(),
-                "torch": torch.__version__,
-                "cuda_runtime": torch.version.cuda,
-                "lightning": getattr(L, "__version__", None),
-                "deepspeed": _package_version("deepspeed"),
-                "gpu_names": [
-                    torch.cuda.get_device_name(index)
-                    for index in range(torch.cuda.device_count())
-                ],
-            },
-            "training": schedule,
-            "resume_checkpoint": resume_checkpoint,
-            "deepspeed": deepspeed_options,
-            "optimizer": {
-                "backend": resolve_optimizer_backend(config),
-                **resolve_cpu_adam_options(config),
-            },
-            "topology": topology,
-            "memory_at_metadata": collect_memory_snapshot(),
-            "result": "pending",
-        },
-    )
-    print(f"Run metadata: {run_metadata_path}")
+        )
+        print(f"Run metadata: {run_metadata_path}")
 
     model = XWAMRunner(config, run_depth=bool(config.use_depth))
     if allow_missing_frozen_resume_parameters:
         model.enable_excluded_frozen_resume_loading()
     initialization_report = config.get("checkpoint_initialization_report")
     if initialization_report is None:
-        initialization_report = os.path.join(
-            config.exp_root, config.exp_name, "checkpoint_initialization.json"
+        initialization_report = str(
+            run_dir / f"{run_id}_checkpoint_initialization_rank_{runtime_rank:03d}.json"
         )
     if resume_checkpoint is None:
         report = initialize_xwam_runner(
@@ -383,9 +578,11 @@ def main():
         limit_val_batches=config.limit_val_batches,
         log_every_n_steps=config.log_interval,
         default_root_dir=os.path.join(config.exp_root, config.exp_name),
+        use_distributed_sampler=train_sampler is None,
     )
     torch.cuda.reset_peak_memory_stats()
     fit_error = None
+    final_checkpoint_path = None
     fit_started = time.monotonic()
     try:
         trainer.fit(
@@ -394,6 +591,35 @@ def main():
             val_dataloaders=val_dataloader,
             ckpt_path=resume_checkpoint,
         )
+        if bool(config.get("save_final_checkpoint", False)):
+            final_checkpoint_path = str(
+                (
+                    exp_dir / "checkpoints" / f"final-step={trainer.global_step}.ckpt"
+                ).resolve()
+            )
+            if trainer.is_global_zero:
+                append_jsonl_fsync(
+                    checkpoint_events_path,
+                    {
+                        "event": "final_checkpoint_save_start",
+                        "filepath": final_checkpoint_path,
+                        "global_step": int(trainer.global_step),
+                        "memory": collect_memory_snapshot(),
+                    },
+                )
+            trainer.strategy.barrier("before_final_checkpoint")
+            trainer.save_checkpoint(final_checkpoint_path, weights_only=False)
+            trainer.strategy.barrier("after_final_checkpoint")
+            if trainer.is_global_zero:
+                append_jsonl_fsync(
+                    checkpoint_events_path,
+                    {
+                        "event": "final_checkpoint_save_complete",
+                        "filepath": final_checkpoint_path,
+                        "global_step": int(trainer.global_step),
+                        "memory": collect_memory_snapshot(),
+                    },
+                )
     except BaseException as exc:
         fit_error = f"{type(exc).__name__}: {exc}"
         raise
@@ -425,16 +651,25 @@ def main():
                 model, "_excluded_frozen_resume_report", None
             ),
             "last_checkpoint": (
-                checkpoint_callback.last_model_path if checkpoint_callback is not None else None
+                final_checkpoint_path
+                or (
+                    checkpoint_callback.last_model_path
+                    if checkpoint_callback is not None
+                    else None
+                )
             ),
             "best_checkpoint": (
-                checkpoint_callback.best_model_path if checkpoint_callback is not None else None
+                checkpoint_callback.best_model_path
+                if checkpoint_callback is not None
+                else None
             ),
             "checkpoint_events": str(checkpoint_events_path.resolve()),
             "memory_at_result": collect_memory_snapshot(),
+            "optimizer_state_audit_dir": str(optimizer_audit_dir.resolve()),
         }
-        write_json_atomic(run_result_path, result_payload)
-        print(f"Run result: {run_result_path} ({result_payload['result']})")
+        if trainer.is_global_zero:
+            write_json_atomic(run_result_path, result_payload)
+            print(f"Run result: {run_result_path} ({result_payload['result']})")
 
 
 if __name__ == "__main__":

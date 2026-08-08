@@ -23,7 +23,9 @@ class XWAMRunner(L.LightningModule):
     def __init__(self, config, run_depth=None):
         super().__init__()
         self.config = config
-        self.run_depth = bool(config.use_depth) if run_depth is None else bool(run_depth)
+        self.run_depth = (
+            bool(config.use_depth) if run_depth is None else bool(run_depth)
+        )
         self._restored_generator_state = None
         self._allow_missing_frozen_resume_parameters = False
         self._excluded_frozen_resume_report = None
@@ -38,11 +40,15 @@ class XWAMRunner(L.LightningModule):
             text_len=config.text_len,
             dtype=eval(config.t5_dtype),
             device=torch.device("cpu"),
-            checkpoint_path=os.path.join(config.wan_checkpoint_dir, config.t5_checkpoint),
+            checkpoint_path=os.path.join(
+                config.wan_checkpoint_dir, config.t5_checkpoint
+            ),
             tokenizer_path=os.path.join(config.wan_checkpoint_dir, config.t5_tokenizer),
         )
         self.text_encoder.eval()
-        self.vae = Wan2_2_VAE(vae_pth=os.path.join(config.wan_checkpoint_dir, config.vae_checkpoint))
+        self.vae = Wan2_2_VAE(
+            vae_pth=os.path.join(config.wan_checkpoint_dir, config.vae_checkpoint)
+        )
         self.vae.eval()
         self.vae.requires_grad_(False)
 
@@ -78,7 +84,9 @@ class XWAMRunner(L.LightningModule):
         target_keys = set(super().state_dict().keys())
         source_keys = set(state_dict.keys())
         frozen_parameter_names = {
-            name for name, parameter in self.named_parameters() if not parameter.requires_grad
+            name
+            for name, parameter in self.named_parameters()
+            if not parameter.requires_grad
         }
         report = validate_excluded_frozen_resume_keys(
             missing_keys=target_keys - source_keys,
@@ -159,27 +167,67 @@ class XWAMRunner(L.LightningModule):
         if bool(getattr(self.config, "persist_generator_state", False)) and hasattr(
             self, "generator_per_rank"
         ):
-            checkpoint["xwam_generator_state"] = self.generator_per_rank.get_state()
+            local_state = self.generator_per_rank.get_state().cpu()
+            world_size = int(self.trainer.world_size)
+            if world_size > 1:
+                if (
+                    not torch.distributed.is_available()
+                    or not torch.distributed.is_initialized()
+                ):
+                    raise RuntimeError("多卡generator保存要求torch.distributed已初始化")
+                gathered = [None] * world_size
+                torch.distributed.all_gather_object(
+                    gathered,
+                    {"rank": int(self.global_rank), "state": local_state},
+                )
+                checkpoint["xwam_generator_states_by_rank"] = {
+                    str(item["rank"]): item["state"] for item in gathered
+                }
+            else:
+                checkpoint["xwam_generator_state"] = local_state
+            checkpoint["xwam_generator_world_size"] = world_size
 
     def on_load_checkpoint(self, checkpoint):
         if bool(getattr(self.config, "persist_generator_state", False)):
-            if "xwam_generator_state" not in checkpoint:
-                raise RuntimeError("resume checkpoint 缺少 xwam_generator_state")
-            self._restored_generator_state = checkpoint["xwam_generator_state"]
+            saved_world_size = int(checkpoint.get("xwam_generator_world_size", 1))
+            if saved_world_size != int(self.trainer.world_size):
+                raise RuntimeError(
+                    "resume不允许改变world size："
+                    f"checkpoint={saved_world_size}, runtime={self.trainer.world_size}"
+                )
+            if saved_world_size > 1:
+                states = checkpoint.get("xwam_generator_states_by_rank")
+                rank_key = str(int(self.global_rank))
+                if not isinstance(states, dict) or rank_key not in states:
+                    raise RuntimeError(
+                        f"resume checkpoint缺少rank {rank_key}的generator state"
+                    )
+                self._restored_generator_state = states[rank_key]
+            else:
+                if "xwam_generator_state" not in checkpoint:
+                    raise RuntimeError("resume checkpoint 缺少 xwam_generator_state")
+                self._restored_generator_state = checkpoint["xwam_generator_state"]
             self._apply_restored_generator_state()
 
     def training_step(self, batch, batch_idx):
         # 1. prepare condition
-        context_embeddings, gt_latents, gt_depth_latents = self._prepare_condition(batch)
+        context_embeddings, gt_latents, gt_depth_latents = self._prepare_condition(
+            batch
+        )
         B, C, T, MV, H, W = gt_latents.shape
 
         # Apply text dropout for CFG training
         text_dropout_prob = getattr(self.config, "text_dropout_prob", 0.1)
         if text_dropout_prob > 0:
-            drop_mask = torch.rand(B, generator=self.generator_per_rank).to(self.device) < text_dropout_prob
+            drop_mask = (
+                torch.rand(B, generator=self.generator_per_rank).to(self.device)
+                < text_dropout_prob
+            )
             if drop_mask.any():
                 null_context = self.text_encoder([""] * B)
-                context_embeddings = torch.where(drop_mask.view(B, 1, 1), null_context, context_embeddings)
+                context_embeddings = torch.where(
+                    drop_mask.view(B, 1, 1), null_context, context_embeddings
+                )
 
         gt_actions = batch["actions"].float()
         gt_proprios = batch["proprios"].float()
@@ -192,28 +240,44 @@ class XWAMRunner(L.LightningModule):
             if self.config.use_joint_distribution:
                 # Case discussion:
                 # 1. Action already decoded, uniformly sample video timesteps
-                uniform_video_timesteps = torch.rand((B,), generator=self.generator_per_rank)
+                uniform_video_timesteps = torch.rand(
+                    (B,), generator=self.generator_per_rank
+                )
                 clean_action_timesteps = torch.zeros((B,))
                 # 2. Action not yet decoded: uniform action + high-noise video, avoiding low-noise video with high-noise action
-                uniform_action_timesteps = torch.rand((B,), generator=self.generator_per_rank)
-                high_noise_video_timesteps = sample_beta((B,), generator=self.generator_per_rank, alpha=1.5, beta=1.0)
-                high_noise_video_timesteps = uniform_action_timesteps + high_noise_video_timesteps * (
-                    1 - uniform_action_timesteps
+                uniform_action_timesteps = torch.rand(
+                    (B,), generator=self.generator_per_rank
+                )
+                high_noise_video_timesteps = sample_beta(
+                    (B,), generator=self.generator_per_rank, alpha=1.5, beta=1.0
+                )
+                high_noise_video_timesteps = (
+                    uniform_action_timesteps
+                    + high_noise_video_timesteps * (1 - uniform_action_timesteps)
                 )
                 # Randomly assign the ratio between the two cases
                 clean_action_mask = (
-                    torch.rand((B,), generator=self.generator_per_rank) < self.config.clean_action_ratio
+                    torch.rand((B,), generator=self.generator_per_rank)
+                    < self.config.clean_action_ratio
                 ).float()
                 timesteps = (
-                    clean_action_mask * uniform_video_timesteps + (1 - clean_action_mask) * high_noise_video_timesteps
+                    clean_action_mask * uniform_video_timesteps
+                    + (1 - clean_action_mask) * high_noise_video_timesteps
                 )
-                timesteps = self.config.time_shifting * timesteps / (1 + (self.config.time_shifting - 1) * timesteps)
+                timesteps = (
+                    self.config.time_shifting
+                    * timesteps
+                    / (1 + (self.config.time_shifting - 1) * timesteps)
+                )
                 timesteps = timesteps.to(self.device)
                 timesteps_a = (
-                    clean_action_mask * clean_action_timesteps + (1 - clean_action_mask) * uniform_action_timesteps
+                    clean_action_mask * clean_action_timesteps
+                    + (1 - clean_action_mask) * uniform_action_timesteps
                 )
                 timesteps_a = (
-                    self.config.time_shifting * timesteps_a / (1 + (self.config.time_shifting - 1) * timesteps_a)
+                    self.config.time_shifting
+                    * timesteps_a
+                    / (1 + (self.config.time_shifting - 1) * timesteps_a)
                 )
                 timesteps_a = timesteps_a.to(self.device)
                 action_proprio_loss_sample_mask = 1 - clean_action_mask
@@ -222,13 +286,19 @@ class XWAMRunner(L.LightningModule):
                 # video use beta distribution with more weight on high noise
                 # timesteps = sample_beta((B,), generator=self.generator_per_rank, alpha=3.0, beta=1.0)
                 timesteps = torch.rand((B,), generator=self.generator_per_rank)
-                timesteps = self.config.time_shifting * timesteps / (1 + (self.config.time_shifting - 1) * timesteps)
+                timesteps = (
+                    self.config.time_shifting
+                    * timesteps
+                    / (1 + (self.config.time_shifting - 1) * timesteps)
+                )
                 timesteps = timesteps.to(self.device)
 
                 # action use uniform distribution
                 timesteps_a = torch.rand((B,), generator=self.generator_per_rank)
                 timesteps_a = (
-                    self.config.time_shifting * timesteps_a / (1 + (self.config.time_shifting - 1) * timesteps_a)
+                    self.config.time_shifting
+                    * timesteps_a
+                    / (1 + (self.config.time_shifting - 1) * timesteps_a)
                 )
                 timesteps_a = timesteps_a.to(self.device)
         else:
@@ -236,50 +306,74 @@ class XWAMRunner(L.LightningModule):
             if self.config.rf_distribution == "uniform":
                 timesteps = torch.rand((B,), generator=self.generator_per_rank)
             elif self.config.rf_distribution == "beta":
-                timesteps = sample_beta((B,), generator=self.generator_per_rank, alpha=1.5, beta=1.0)
+                timesteps = sample_beta(
+                    (B,), generator=self.generator_per_rank, alpha=1.5, beta=1.0
+                )
             else:
-                raise ValueError(f"Unsupported RF distribution: {self.config.rf_distribution}")
-            timesteps = self.config.time_shifting * timesteps / (1 + (self.config.time_shifting - 1) * timesteps)
+                raise ValueError(
+                    f"Unsupported RF distribution: {self.config.rf_distribution}"
+                )
+            timesteps = (
+                self.config.time_shifting
+                * timesteps
+                / (1 + (self.config.time_shifting - 1) * timesteps)
+            )
             timesteps = timesteps.to(self.device)
             timesteps_a = timesteps
 
         # create random noise, get xt and vt
-        noise_latents = torch.randn(gt_latents.shape, generator=self.generator_per_rank, dtype=gt_latents.dtype).to(
-            self.device
+        noise_latents = torch.randn(
+            gt_latents.shape, generator=self.generator_per_rank, dtype=gt_latents.dtype
+        ).to(self.device)
+        t = timesteps.view(
+            noise_latents.shape[0], *([1] * (len(noise_latents.shape) - 1))
         )
-        t = timesteps.view(noise_latents.shape[0], *([1] * (len(noise_latents.shape) - 1)))
         xt_latents = (1 - t) * gt_latents + t * noise_latents
         vt_latents = noise_latents - gt_latents
 
-        noise_actions = torch.randn(gt_actions.shape, generator=self.generator_per_rank, dtype=gt_actions.dtype).to(
-            self.device
+        noise_actions = torch.randn(
+            gt_actions.shape, generator=self.generator_per_rank, dtype=gt_actions.dtype
+        ).to(self.device)
+        t_actions = timesteps_a.view(
+            noise_actions.shape[0], *([1] * (len(noise_actions.shape) - 1))
         )
-        t_actions = timesteps_a.view(noise_actions.shape[0], *([1] * (len(noise_actions.shape) - 1)))
         xt_actions = (1 - t_actions) * gt_actions + t_actions * noise_actions
         vt_actions = noise_actions - gt_actions
 
-        noise_proprios = torch.randn(gt_proprios.shape, generator=self.generator_per_rank, dtype=gt_proprios.dtype).to(
-            self.device
+        noise_proprios = torch.randn(
+            gt_proprios.shape,
+            generator=self.generator_per_rank,
+            dtype=gt_proprios.dtype,
+        ).to(self.device)
+        t_proprios = timesteps_a.view(
+            noise_proprios.shape[0], *([1] * (len(noise_proprios.shape) - 1))
         )
-        t_proprios = timesteps_a.view(noise_proprios.shape[0], *([1] * (len(noise_proprios.shape) - 1)))
         xt_proprios = (1 - t_proprios) * gt_proprios + t_proprios * noise_proprios
         vt_proprios = noise_proprios - gt_proprios
 
         # apply conditional mask
-        latent_mask = torch.zeros((B, 1, T, 1, 1, 1), dtype=torch.long, device=self.device)
+        latent_mask = torch.zeros(
+            (B, 1, T, 1, 1, 1), dtype=torch.long, device=self.device
+        )
         latent_mask[:, :, 0] = 1
         xt_latents = gt_latents * latent_mask + xt_latents * (1 - latent_mask)
 
-        action_mask = torch.zeros((B, gt_actions.shape[1], 1), dtype=torch.long, device=self.device)
+        action_mask = torch.zeros(
+            (B, gt_actions.shape[1], 1), dtype=torch.long, device=self.device
+        )
         xt_actions = gt_actions * action_mask + xt_actions * (1 - action_mask)
 
-        proprio_mask = torch.zeros((B, gt_proprios.shape[1], 1), dtype=torch.long, device=self.device)
+        proprio_mask = torch.zeros(
+            (B, gt_proprios.shape[1], 1), dtype=torch.long, device=self.device
+        )
         proprio_mask[:, 0] = 1
         xt_proprios = gt_proprios * proprio_mask + xt_proprios * (1 - proprio_mask)
 
         # 3. denoise video latents
         latent_timesteps = (
-            timesteps.view(B, 1) * (1 - latent_mask).view(B, T) * self.config.flow_matching_num_train_timesteps
+            timesteps.view(B, 1)
+            * (1 - latent_mask).view(B, T)
+            * self.config.flow_matching_num_train_timesteps
         )
         action_timesteps = (
             timesteps_a.view(B, 1)
@@ -291,32 +385,48 @@ class XWAMRunner(L.LightningModule):
             * (1 - proprio_mask).view(B, gt_proprios.shape[1])
             * self.config.flow_matching_num_train_timesteps
         )
-        vt_latents_pred, vt_actions_pred, vt_proprios_pred, depth_latents_pred = self.model(
-            xt_latents,
-            latent_timesteps,
-            context_embeddings,
-            actions=xt_actions,
-            t_actions=action_timesteps,
-            proprios=xt_proprios,
-            t_proprios=proprio_timesteps,
-            run_depth=self.run_depth,
+        vt_latents_pred, vt_actions_pred, vt_proprios_pred, depth_latents_pred = (
+            self.model(
+                xt_latents,
+                latent_timesteps,
+                context_embeddings,
+                actions=xt_actions,
+                t_actions=action_timesteps,
+                proprios=xt_proprios,
+                t_proprios=proprio_timesteps,
+                run_depth=self.run_depth,
+            )
         )
 
         # 4. compute loss
         video_mask = (1 - latent_mask).float().expand_as(vt_latents)
         # When actions are treated as clean conditions, do not train action denoising on those samples.
-        action_proprio_loss_sample_mask = action_proprio_loss_sample_mask.to(self.device).view(B, 1, 1)
-        action_proprio_supervision_ratio = action_proprio_loss_sample_mask.float().mean()
+        action_proprio_loss_sample_mask = action_proprio_loss_sample_mask.to(
+            self.device
+        ).view(B, 1, 1)
+        action_proprio_supervision_ratio = (
+            action_proprio_loss_sample_mask.float().mean()
+        )
         action_mask_f = (
-            (action_proprio_loss_sample_mask * (1 - action_mask) * action_valid_mask).float().expand_as(vt_actions)
+            (action_proprio_loss_sample_mask * (1 - action_mask) * action_valid_mask)
+            .float()
+            .expand_as(vt_actions)
         )
         proprio_mask_f = (
-            (action_proprio_loss_sample_mask * (1 - proprio_mask) * proprio_valid_mask).float().expand_as(vt_proprios)
+            (action_proprio_loss_sample_mask * (1 - proprio_mask) * proprio_valid_mask)
+            .float()
+            .expand_as(vt_proprios)
         )
 
-        video_loss = ((vt_latents_pred - vt_latents) * video_mask).pow(2).sum() / (video_mask.sum() + 1e-8)
-        action_loss = ((vt_actions_pred - vt_actions) * action_mask_f).pow(2).sum() / (action_mask_f.sum() + 1e-8)
-        proprio_loss = ((vt_proprios_pred - vt_proprios) * proprio_mask_f).pow(2).sum() / (proprio_mask_f.sum() + 1e-8)
+        video_loss = ((vt_latents_pred - vt_latents) * video_mask).pow(2).sum() / (
+            video_mask.sum() + 1e-8
+        )
+        action_loss = ((vt_actions_pred - vt_actions) * action_mask_f).pow(2).sum() / (
+            action_mask_f.sum() + 1e-8
+        )
+        proprio_loss = ((vt_proprios_pred - vt_proprios) * proprio_mask_f).pow(
+            2
+        ).sum() / (proprio_mask_f.sum() + 1e-8)
         if self.config.use_depth and self.run_depth:
             depth_loss = (depth_latents_pred[0] - gt_depth_latents).pow(2).mean()
         else:
@@ -330,7 +440,14 @@ class XWAMRunner(L.LightningModule):
             if batch_mask.any():
                 pred_valid = vt_actions_pred[batch_mask]
                 target_valid = vt_actions[batch_mask]
-                dct_loss = (torch.fft.rfft(pred_valid, dim=1) - torch.fft.rfft(target_valid, dim=1)).abs().mean()
+                dct_loss = (
+                    (
+                        torch.fft.rfft(pred_valid, dim=1)
+                        - torch.fft.rfft(target_valid, dim=1)
+                    )
+                    .abs()
+                    .mean()
+                )
             else:
                 dct_loss = torch.zeros(1, device=self.device).squeeze()
         else:
@@ -408,12 +525,16 @@ class XWAMRunner(L.LightningModule):
         pred_videos_per_cfg = []
         psnr_logged = False
         for cfg_val in cfg_list:
-            xt_latents, xt_actions, xt_proprios, xt_depth_latents = self.forward(batch, early_stop=False, cfg=cfg_val)
+            xt_latents, xt_actions, xt_proprios, xt_depth_latents = self.forward(
+                batch, early_stop=False, cfg=cfg_val
+            )
             if self.config.use_depth and self.run_depth:
                 xt_latents_mv = torch.cat([xt_latents, xt_depth_latents], dim=3)
             else:
                 xt_latents_mv = xt_latents
-            xt_latents_mv = rearrange(xt_latents_mv, "b c t (m v) h w -> (b m v) c t h w", v=self.num_views)
+            xt_latents_mv = rearrange(
+                xt_latents_mv, "b c t (m v) h w -> (b m v) c t h w", v=self.num_views
+            )
             pred_videos = self.vae.decode(xt_latents_mv)
 
             # Log PSNR / SSIM only once (for cfg=0 or first entry)
@@ -434,25 +555,31 @@ class XWAMRunner(L.LightningModule):
                 self.log("val/rgb_ssim", rgb_ssim, prog_bar=True, sync_dist=True)
                 if self.config.use_depth and self.run_depth:
                     pred_depth = torch.clamp((pred_all[1] + 1) / 2, 0, 1)
-                    gt_depth = rearrange(batch["depths"], "b v t c h w -> (b v t) c h w")
+                    gt_depth = rearrange(
+                        batch["depths"], "b v t c h w -> (b v t) c h w"
+                    )
                     gt_depth = torch.clamp((gt_depth + 1) / 2, 0, 1)
                     depth_psnr = self._psnr(pred_depth, gt_depth)
                     depth_ssim = self._ssim(pred_depth, gt_depth)
-                    self.log("val/depth_psnr", depth_psnr, prog_bar=True, sync_dist=True)
-                    self.log("val/depth_ssim", depth_ssim, prog_bar=True, sync_dist=True)
+                    self.log(
+                        "val/depth_psnr", depth_psnr, prog_bar=True, sync_dist=True
+                    )
+                    self.log(
+                        "val/depth_ssim", depth_ssim, prog_bar=True, sync_dist=True
+                    )
 
                 gt_actions = batch["actions"].float()
                 action_valid_mask = batch["action_mask"].float()
-                action_mse = ((xt_actions - gt_actions) * action_valid_mask).pow(2).sum() / (
-                    action_valid_mask.sum() + 1e-8
-                )
+                action_mse = ((xt_actions - gt_actions) * action_valid_mask).pow(
+                    2
+                ).sum() / (action_valid_mask.sum() + 1e-8)
                 self.log("val/action_mse", action_mse, prog_bar=True, sync_dist=True)
 
                 gt_proprios = batch["proprios"].float()
                 proprio_valid_mask = batch["proprio_mask"].float()
-                proprio_mse = ((xt_proprios - gt_proprios) * proprio_valid_mask).pow(2).sum() / (
-                    proprio_valid_mask.sum() + 1e-8
-                )
+                proprio_mse = ((xt_proprios - gt_proprios) * proprio_valid_mask).pow(
+                    2
+                ).sum() / (proprio_valid_mask.sum() + 1e-8)
                 self.log("val/proprio_mse", proprio_mse, prog_bar=True, sync_dist=True)
 
                 psnr_logged = True
@@ -460,7 +587,10 @@ class XWAMRunner(L.LightningModule):
             # Rearrange to [t, (m h), (b v w), c] for video writing
             pred_videos_per_cfg.append(
                 rearrange(
-                    pred_videos, "(b m v) c t h w -> t (m h) (b v w) c", b=batch["video"].shape[0], v=self.num_views
+                    pred_videos,
+                    "(b m v) c t h w -> t (m h) (b v w) c",
+                    b=batch["video"].shape[0],
+                    v=self.num_views,
                 )
             )
 
@@ -470,17 +600,28 @@ class XWAMRunner(L.LightningModule):
                 gt_videos = torch.cat([batch["video"], batch["depths"]], dim=0)
             else:
                 gt_videos = batch["video"]
-            gt_videos = rearrange(gt_videos, "(m b) v t c h w -> t (m h) (b v w) c", b=batch["video"].shape[0])
+            gt_videos = rearrange(
+                gt_videos,
+                "(m b) v t c h w -> t (m h) (b v w) c",
+                b=batch["video"].shape[0],
+            )
 
             # Stack all CFG results + GT vertically along height axis
             all_videos = torch.cat(pred_videos_per_cfg + [gt_videos], dim=1)
-            all_videos = torch.clamp((all_videos + 1) * 127.5, 0, 255).byte().cpu().numpy()
+            all_videos = (
+                torch.clamp((all_videos + 1) * 127.5, 0, 255).byte().cpu().numpy()
+            )
 
-            video_path = os.path.join(self.trainer.default_root_dir, f"videos/{self.trainer.global_step}")
+            video_path = os.path.join(
+                self.trainer.default_root_dir, f"videos/{self.trainer.global_step}"
+            )
             os.makedirs(video_path, exist_ok=True)
 
             writer = imageio.get_writer(
-                os.path.join(video_path, f"{batch_idx}.mp4"), fps=self.config.sample_fps, codec="libx264", quality=8
+                os.path.join(video_path, f"{batch_idx}.mp4"),
+                fps=self.config.sample_fps,
+                codec="libx264",
+                quality=8,
             )
             for frame in all_videos:
                 writer.append_data(frame)
@@ -498,7 +639,9 @@ class XWAMRunner(L.LightningModule):
         # Prepare uncond embeddings for CFG (encode empty strings once)
         if cfg > 0.0:
             uncond_embeddings = self.text_encoder([""] * B)
-            context_for_model = torch.cat([context_embeddings, uncond_embeddings], dim=0)
+            context_for_model = torch.cat(
+                [context_embeddings, uncond_embeddings], dim=0
+            )
         else:
             context_for_model = context_embeddings
 
@@ -509,39 +652,64 @@ class XWAMRunner(L.LightningModule):
             for i, seed in enumerate(seeds):
                 gen = torch.Generator(device=self.device).manual_seed(int(seed))
                 noise_latents_list.append(
-                    torch.randn(gt_latents[i : i + 1].shape, generator=gen, device=self.device, dtype=gt_latents.dtype)
+                    torch.randn(
+                        gt_latents[i : i + 1].shape,
+                        generator=gen,
+                        device=self.device,
+                        dtype=gt_latents.dtype,
+                    )
                 )
                 noise_actions_list.append(
-                    torch.randn(gt_actions[i : i + 1].shape, generator=gen, device=self.device, dtype=gt_actions.dtype)
+                    torch.randn(
+                        gt_actions[i : i + 1].shape,
+                        generator=gen,
+                        device=self.device,
+                        dtype=gt_actions.dtype,
+                    )
                 )
                 noise_proprios_list.append(
                     torch.randn(
-                        gt_proprios[i : i + 1].shape, generator=gen, device=self.device, dtype=gt_proprios.dtype
+                        gt_proprios[i : i + 1].shape,
+                        generator=gen,
+                        device=self.device,
+                        dtype=gt_proprios.dtype,
                     )
                 )
             noise_latents = torch.cat(noise_latents_list, dim=0)
             noise_actions = torch.cat(noise_actions_list, dim=0)
             noise_proprios = torch.cat(noise_proprios_list, dim=0)
         else:
-            noise_latents = torch.randn(gt_latents.shape, generator=self.generator_per_rank, dtype=gt_latents.dtype).to(
-                self.device
-            )
-            noise_actions = torch.randn(gt_actions.shape, generator=self.generator_per_rank, dtype=gt_actions.dtype).to(
-                self.device
-            )
+            noise_latents = torch.randn(
+                gt_latents.shape,
+                generator=self.generator_per_rank,
+                dtype=gt_latents.dtype,
+            ).to(self.device)
+            noise_actions = torch.randn(
+                gt_actions.shape,
+                generator=self.generator_per_rank,
+                dtype=gt_actions.dtype,
+            ).to(self.device)
             noise_proprios = torch.randn(
-                gt_proprios.shape, generator=self.generator_per_rank, dtype=gt_proprios.dtype
+                gt_proprios.shape,
+                generator=self.generator_per_rank,
+                dtype=gt_proprios.dtype,
             ).to(self.device)
 
         # apply conditional mask
-        latent_mask = torch.zeros((B, 1, T, 1, 1, 1), dtype=torch.long, device=self.device)
+        latent_mask = torch.zeros(
+            (B, 1, T, 1, 1, 1), dtype=torch.long, device=self.device
+        )
         latent_mask[:, :, 0] = 1
         xt_latents = gt_latents * latent_mask + noise_latents * (1 - latent_mask)
 
-        action_mask = torch.zeros((B, gt_actions.shape[1], 1), dtype=torch.long, device=self.device)
+        action_mask = torch.zeros(
+            (B, gt_actions.shape[1], 1), dtype=torch.long, device=self.device
+        )
         xt_actions = gt_actions * action_mask + noise_actions * (1 - action_mask)
 
-        proprio_mask = torch.zeros((B, gt_proprios.shape[1], 1), dtype=torch.long, device=self.device)
+        proprio_mask = torch.zeros(
+            (B, gt_proprios.shape[1], 1), dtype=torch.long, device=self.device
+        )
         proprio_mask[:, 0] = 1
         xt_proprios = gt_proprios * proprio_mask + noise_proprios * (1 - proprio_mask)
 
@@ -602,34 +770,46 @@ class XWAMRunner(L.LightningModule):
             latent_ts = video_t * (1 - latent_mask).view(B, T)
             action_ts = action_t * (1 - action_mask).view(B, gt_actions.shape[1])
             proprio_ts = proprio_t * (1 - proprio_mask).view(B, gt_proprios.shape[1])
-            vt_latents_pred, vt_actions_pred, vt_proprios_pred, depth_latents_pred = self.model(
-                x=xt_latents,
-                t=latent_ts,
-                context=context_for_model,
-                actions=xt_actions,
-                t_actions=action_ts,
-                proprios=xt_proprios,
-                t_proprios=proprio_ts,
-                cfg=cfg,
-                run_depth=self.run_depth,
+            vt_latents_pred, vt_actions_pred, vt_proprios_pred, depth_latents_pred = (
+                self.model(
+                    x=xt_latents,
+                    t=latent_ts,
+                    context=context_for_model,
+                    actions=xt_actions,
+                    t_actions=action_ts,
+                    proprios=xt_proprios,
+                    t_proprios=proprio_ts,
+                    cfg=cfg,
+                    run_depth=self.run_depth,
+                )
             )
 
-            xt_latents = sample_scheduler.step(vt_latents_pred, video_t, xt_latents, return_dict=False)[0]
+            xt_latents = sample_scheduler.step(
+                vt_latents_pred, video_t, xt_latents, return_dict=False
+            )[0]
             xt_latents = gt_latents * latent_mask + xt_latents * (1 - latent_mask)
 
             if not self.config.use_decoupled_inference or ti < action_denoise_steps:
-                xt_actions = sample_scheduler_actions.step(vt_actions_pred, action_t, xt_actions, return_dict=False)[0]
+                xt_actions = sample_scheduler_actions.step(
+                    vt_actions_pred, action_t, xt_actions, return_dict=False
+                )[0]
                 xt_actions = gt_actions * action_mask + xt_actions * (1 - action_mask)
 
                 xt_proprios = sample_scheduler_proprios.step(
                     vt_proprios_pred, proprio_t, xt_proprios, return_dict=False
                 )[0]
-                xt_proprios = gt_proprios * proprio_mask + xt_proprios * (1 - proprio_mask)
+                xt_proprios = gt_proprios * proprio_mask + xt_proprios * (
+                    1 - proprio_mask
+                )
 
-        xt_depth_latents = depth_latents_pred[0] if self.config.use_depth and self.run_depth else None
+        xt_depth_latents = (
+            depth_latents_pred[0] if self.config.use_depth and self.run_depth else None
+        )
         return xt_latents, xt_actions, xt_proprios, xt_depth_latents
 
-    def generate(self, rgb, proprio, prompt, seeds=None, early_stop=True, cfg=0.0, run_depth=True):
+    def generate(
+        self, rgb, proprio, prompt, seeds=None, early_stop=True, cfg=0.0, run_depth=True
+    ):
         """
         Args:
             rgb: [B, V, C, H, W]
@@ -647,7 +827,9 @@ class XWAMRunner(L.LightningModule):
         batch = {
             "video": rgb.unsqueeze(2).repeat(1, 1, T, 1, 1, 1),
             "proprios": proprio.unsqueeze(1).repeat(1, Tp, 1),
-            "actions": torch.zeros((B, Ta, self.config.action_dim)).to(proprio.device, dtype=proprio.dtype),
+            "actions": torch.zeros((B, Ta, self.config.action_dim)).to(
+                proprio.device, dtype=proprio.dtype
+            ),
             "prompt": prompt,
         }
 
@@ -661,13 +843,20 @@ class XWAMRunner(L.LightningModule):
 
         if self.config.use_depth and self.run_depth:
             xt_latents = torch.cat([xt_latents, xt_depth_latents], dim=3)
-        xt_latents = rearrange(xt_latents, "b c t (m v) h w -> (b m v) c t h w", v=self.num_views)
+        xt_latents = rearrange(
+            xt_latents, "b c t (m v) h w -> (b m v) c t h w", v=self.num_views
+        )
         pred_videos = self.vae.decode(xt_latents)
         pred_videos = rearrange(
-            pred_videos, "(b m v) c t h w -> t (m h) (b v w) c", b=batch["video"].shape[0], v=self.num_views
+            pred_videos,
+            "(b m v) c t h w -> t (m h) (b v w) c",
+            b=batch["video"].shape[0],
+            v=self.num_views,
         )
 
-        pred_videos = torch.clamp((pred_videos + 1) * 127.5, 0, 255).byte().cpu().numpy()
+        pred_videos = (
+            torch.clamp((pred_videos + 1) * 127.5, 0, 255).byte().cpu().numpy()
+        )
 
         return pred_videos, xt_actions, xt_proprios, xt_depth_latents
 
@@ -682,7 +871,10 @@ class XWAMRunner(L.LightningModule):
         """pred, gt: (N, C, H, W) in [0, 1]. Returns mean SSIM over the batch."""
         C = pred.shape[1]
         sigma = 1.5
-        coords = torch.arange(window_size, dtype=pred.dtype, device=pred.device) - window_size // 2
+        coords = (
+            torch.arange(window_size, dtype=pred.dtype, device=pred.device)
+            - window_size // 2
+        )
         gauss = torch.exp(-(coords**2) / (2 * sigma**2))
         gauss = gauss / gauss.sum()
         kernel = (gauss.unsqueeze(1) * gauss.unsqueeze(0)).unsqueeze(0).unsqueeze(0)
@@ -714,9 +906,13 @@ class XWAMRunner(L.LightningModule):
             gt_depth = rearrange(batch["depths"], "b v t c h w -> (b v) c t h w")
             gt_video = torch.cat([gt_rgb, gt_depth], dim=0)
             gt_latents = self.vae.encode(gt_video)
-            gt_latents = rearrange(gt_latents, "(m b v) c t h w -> m b c t v h w", b=B, v=self.num_views)
+            gt_latents = rearrange(
+                gt_latents, "(m b v) c t h w -> m b c t v h w", b=B, v=self.num_views
+            )
             return context_embeddings, gt_latents[0], gt_latents[1]
 
         gt_latents = self.vae.encode(gt_rgb)
-        gt_latents = rearrange(gt_latents, "(b v) c t h w -> b c t v h w", b=B, v=self.num_views)
+        gt_latents = rearrange(
+            gt_latents, "(b v) c t h w -> b c t v h w", b=B, v=self.num_views
+        )
         return context_embeddings, gt_latents, None

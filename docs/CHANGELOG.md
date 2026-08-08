@@ -1,5 +1,29 @@
 # 变更记录
 
+## 2026-08-08 — M6 4×H100 RGB-only训练门禁与正式配置
+
+- 修改前基线：`e9c3bf3`（M4.3集群验收记录）
+- 目标范围：只训练 Atomic-Seen 对应18个任务的 `pretrain/atomic` 数据；4张H100 80GB、GBS 128、5 epoch、RGB-only
+- 运行状态：本地静态、dependency-light单元测试通过；真实18任务数据统计、4×H100训练、checkpoint/resume和optimizer state审计均为 `cluster-pending`
+
+### 加入的逻辑
+
+- 新增M6 manifest构建器：依据版本化18任务清单解析 `pretrain/atomic/<Task>/<date>`，检查真实Parquet/三路RGB视频，按9帧、frame skip 4计算每个episode的有效clip，并用SHA-256冻结任务路径、数量与Git来源。多日期歧义必须显式选择，任何任务缺失都会失败。
+- 新增 `natural_proportional` 多任务Dataset，不再使用M3三任务平衡过采样；每个任务仍保留独立modality检查，但18任务训练统一读取与manifest摘要绑定的跨任务16D state/12D action统计。
+- 新增精确全局统计脚本。它逐episode读取Parquet并用临时memmap计算所有frame的q01/q99/min/max，不解码视频、不生成depth；临时文件在成功或异常退出后清理。
+- 新增5-epoch自动调度：`steps_per_epoch=floor(total_valid_clips/128)`，正式总步数为5倍。H100专用采样器每轮全局shuffle后只丢弃不足128的尾部，再等长分发给四个rank，避免Lightning默认补样导致epoch/step漂移。
+- 新增首选 `4×microbatch4×accum8` 与显存回退 `4×2×16` 两个H100 profile，二者GBS均为128。运行时强制4张至少75 GiB的H100、ZeRO-2、无optimizer offload、FP32 optimizer state、通信overlap、完整checkpoint和RGB-only。
+- 模型compute继续使用 `bf16-mixed`；只撤销A800 120 GiB调试时的BF16 optimizer state、CPU offload、冻结参数排除和通信让步。四个rank在首个update后分别记录实际optimizer state dtype，不能只依赖配置声明。
+- 多卡checkpoint保存四个rank的自定义generator state并禁止跨world-size恢复。rank 0独占公共config/metadata/result/checkpoint事件，四rank共享run ID，避免并发覆盖；正式结束显式生成final checkpoint。
+- 新增H100门禁和正式实验配置、preflight/2→4步恢复/正式结束三类机器审计。门禁沿用完整5-epoch scheduler但只运行到step 2，再恢复到step 4；门禁通过后正式实验必须从公开X-WAM pretrained权重新启动。
+
+### 验证、限制与回滚
+
+- 本地通过聚焦Ruff、compileall、全量97项dependency-light单元测试及五个新CLI `--help`；本地没有Torch/H100，不宣称多卡hook、DeepSpeed保存或真实吞吐已经通过。
+- 正式数据统计需要额外临时空间，约为 `total_frames×28 bytes` 加NumPy quantile工作空间；建议把 `--work-dir` 放在HDD_POOL。日志、manifest、stats和实验产物均在Git ignore目录，不上传Git。
+- H100门禁若首选profile OOM，只允许从头改用safe profile；不能继承A800低内存profile，也不能把门禁step-4 checkpoint接入正式训练。
+- 回退本次commit会恢复M3已有单/三任务工程路径；不会删除服务器数据、global stats、checkpoint或实验目录。
+
 ## 2026-08-08 — M4.3 900-step可恢复评测实现
 
 - 修改前基线：`8790a06`（M4.2集群验收记录）

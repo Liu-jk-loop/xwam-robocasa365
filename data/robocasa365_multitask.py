@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import bisect
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,15 +15,17 @@ from data.robocasa365_contract import (
     load_task_manifest,
     resolve_lerobot_root,
 )
+from data.robocasa365_index import load_episode_records
 
 
-SUPPORTED_SAMPLING = {"balanced_round_robin"}
+SUPPORTED_SAMPLING = {"balanced_round_robin", "natural_proportional"}
 
 
 @dataclass(frozen=True)
 class TaskDatasetEntry:
     task_name: str
     dataset_path: str
+    valid_clips: int | None = None
 
 
 @dataclass(frozen=True)
@@ -31,6 +35,20 @@ class MultiTaskDatasetManifest:
     sampling: str
     tasks: tuple[TaskDatasetEntry, ...]
     source_path: str
+    manifest_digest: str | None = None
+    total_valid_clips: int | None = None
+
+
+def training_manifest_digest(payload: dict[str, Any]) -> str:
+    canonical = dict(payload)
+    canonical.pop("manifest_digest", None)
+    encoded = json.dumps(
+        canonical,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _read_json(path: str | Path) -> tuple[Path, dict[str, Any]]:
@@ -38,7 +56,9 @@ def _read_json(path: str | Path) -> tuple[Path, dict[str, Any]]:
     try:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise DatasetContractError(f"无法读取多任务数据清单：{manifest_path}: {exc}") from exc
+        raise DatasetContractError(
+            f"无法读取多任务数据清单：{manifest_path}: {exc}"
+        ) from exc
     if not isinstance(payload, dict):
         raise DatasetContractError(f"多任务数据清单顶层必须是对象：{manifest_path}")
     return manifest_path, payload
@@ -68,7 +88,9 @@ def load_multitask_dataset_manifest(
         )
     raw_tasks = payload.get("tasks")
     if not isinstance(raw_tasks, list) or not raw_tasks:
-        raise DatasetContractError(f"多任务数据清单 tasks 必须是非空数组：{manifest_path}")
+        raise DatasetContractError(
+            f"多任务数据清单 tasks 必须是非空数组：{manifest_path}"
+        )
     if expected_task_count is not None and len(raw_tasks) != int(expected_task_count):
         raise DatasetContractError(
             f"多任务数据清单必须包含 {expected_task_count} 个任务，实际为 {len(raw_tasks)}"
@@ -92,6 +114,11 @@ def load_multitask_dataset_manifest(
             TaskDatasetEntry(
                 task_name=task_name,
                 dataset_path=str(Path(dataset_path).expanduser().resolve()),
+                valid_clips=(
+                    int(raw_entry["valid_clips"])
+                    if raw_entry.get("valid_clips") is not None
+                    else None
+                ),
             )
         )
     names = [entry.task_name for entry in entries]
@@ -100,13 +127,126 @@ def load_multitask_dataset_manifest(
         raise DatasetContractError(f"多任务数据清单包含重复任务：{names}")
     if len(paths) != len(set(paths)):
         raise DatasetContractError("多任务数据清单不允许多个任务复用同一数据目录")
+    manifest_digest = payload.get("manifest_digest")
+    if manifest_digest is not None:
+        actual_digest = training_manifest_digest(payload)
+        if str(manifest_digest) != actual_digest:
+            raise DatasetContractError(
+                "多任务数据清单摘要不匹配："
+                f"expected={manifest_digest}, actual={actual_digest}"
+            )
+    total_valid_clips = payload.get("total_valid_clips")
+    if total_valid_clips is not None:
+        declared_total = int(total_valid_clips)
+        entry_counts = [entry.valid_clips for entry in entries]
+        if any(count is None for count in entry_counts):
+            raise DatasetContractError(
+                "声明 total_valid_clips 时每个任务都必须包含 valid_clips"
+            )
+        if declared_total != sum(
+            int(count) for count in entry_counts if count is not None
+        ):
+            raise DatasetContractError(
+                "total_valid_clips 与任务 valid_clips 求和不一致"
+            )
     return MultiTaskDatasetManifest(
         name=str(payload.get("name", manifest_path.stem)),
         scope="atomic_only",
         sampling=sampling,
         tasks=tuple(entries),
         source_path=str(manifest_path),
+        manifest_digest=str(manifest_digest) if manifest_digest is not None else None,
+        total_valid_clips=(
+            int(total_valid_clips) if total_valid_clips is not None else None
+        ),
     )
+
+
+def build_atomic_training_manifest_report(
+    *,
+    dataset_root: str | Path,
+    atomic_task_manifest: str | Path,
+    explicit_paths: dict[str, str] | None = None,
+    sequence_length: int = 9,
+    frame_skip: int = 4,
+) -> dict[str, Any]:
+    """Audit every task in a versioned atomic manifest for formal training."""
+    allowed_manifest = load_task_manifest(atomic_task_manifest)
+    task_names = list(allowed_manifest.tasks)
+    configured_paths = explicit_paths or {}
+    unknown = sorted(set(configured_paths) - set(task_names))
+    errors = [f"--task-path 指定了清单外任务：{unknown}"] if unknown else []
+    required_span = (int(sequence_length) - 1) * int(frame_skip)
+    if required_span <= 0:
+        raise ValueError("sequence_length/frame_skip 必须产生正 required_span")
+
+    tasks: list[dict[str, Any]] = []
+    for task_name in task_names:
+        try:
+            configured = configured_paths.get(task_name)
+            task_path = (
+                Path(configured).expanduser().resolve()
+                if configured is not None
+                else resolve_task_dataset_directory(dataset_root, task_name)
+            )
+            if configured is not None and task_name not in task_path.parts:
+                raise DatasetContractError(
+                    f"显式目录必须包含任务名路径分量 {task_name!r}：{task_path}"
+                )
+            summary = inspect_dataset(
+                task_path,
+                manifest=allowed_manifest,
+                task_name=task_name,
+                require_data=True,
+                require_videos=True,
+            )
+            if not summary.ok:
+                raise DatasetContractError("; ".join(summary.errors))
+            _, _, episodes = load_episode_records(task_path)
+            valid_clips = sum(
+                max(episode.length - required_span, 0) for episode in episodes
+            )
+            if valid_clips <= 0:
+                raise DatasetContractError(
+                    f"没有满足 required_span={required_span} 的有效 clip"
+                )
+            tasks.append(
+                {
+                    "task_name": task_name,
+                    "dataset_path": str(task_path),
+                    "episodes": summary.total_episodes,
+                    "frames": summary.total_frames,
+                    "valid_clips": valid_clips,
+                    "state_dim": summary.state_dim,
+                    "action_dim": summary.action_dim,
+                    "camera_keys": summary.camera_keys,
+                }
+            )
+        except (DatasetContractError, OSError, ValueError) as exc:
+            errors.append(f"{task_name}: {exc}")
+
+    ok = not errors and len(tasks) == len(task_names)
+    report: dict[str, Any] = {
+        "schema_version": 1,
+        "name": "robocasa365_m6_atomic_seen18_pretrain",
+        "scope": "atomic_only",
+        "split": "pretrain",
+        "sampling": "natural_proportional",
+        "atomic_task_manifest": str(Path(atomic_task_manifest).expanduser()),
+        "dataset_root": str(Path(dataset_root).expanduser()),
+        "sequence_length": int(sequence_length),
+        "frame_skip": int(frame_skip),
+        "required_span": required_span,
+        "expected_task_count": len(task_names),
+        "total_valid_clips": sum(int(task["valid_clips"]) for task in tasks),
+        "total_frames": sum(int(task["frames"]) for task in tasks),
+        "tasks": tasks,
+        "errors": errors,
+        "ok": ok,
+        "result": "pass" if ok else "fail",
+    }
+    report["manifest_digest"] = training_manifest_digest(report)
+    return report
 
 
 def resolve_task_dataset_directory(dataset_root: str | Path, task_name: str) -> Path:
@@ -159,7 +299,9 @@ def build_m3_multitask_manifest_report(
         errors.append(f"--task-path 指定了未选择的任务：{unknown_path_tasks}")
     for name in names:
         if name not in allowed:
-            errors.append(f"任务 {name!r} 不属于 atomic-only 清单 {allowed_manifest.name}")
+            errors.append(
+                f"任务 {name!r} 不属于 atomic-only 清单 {allowed_manifest.name}"
+            )
 
     for task_name in names:
         try:
@@ -249,7 +391,9 @@ class BalancedRoundRobinDataset:
         if position < 0:
             position += self._length
         if position < 0 or position >= self._length:
-            raise IndexError(f"多任务 sample index {position} 超出范围 [0, {self._length})")
+            raise IndexError(
+                f"多任务 sample index {position} 超出范围 [0, {self._length})"
+            )
         task_index = position % len(self.datasets)
         sample_round = position // len(self.datasets)
         local_index = sample_round % self.task_lengths[task_index]
@@ -260,7 +404,9 @@ class BalancedRoundRobinDataset:
         output["task_index"] = task_index
         output["task_name"] = self.task_names[task_index]
         if "episode_key" in output:
-            output["episode_key"] = f"{self.task_names[task_index]}:{output['episode_key']}"
+            output["episode_key"] = (
+                f"{self.task_names[task_index]}:{output['episode_key']}"
+            )
         return output
 
     def provenance(self) -> dict[str, Any]:
@@ -271,4 +417,76 @@ class BalancedRoundRobinDataset:
             "task_lengths": list(self.task_lengths),
             "raw_samples": sum(self.task_lengths),
             "balanced_samples": self._length,
+        }
+
+
+class NaturalConcatDataset:
+    """Concatenate task datasets without oversampling and preserve task identity."""
+
+    def __init__(
+        self,
+        datasets: Sequence[Any],
+        *,
+        task_names: Sequence[str],
+        manifest_path: str,
+        manifest_digest: str | None = None,
+    ):
+        self.datasets = tuple(datasets)
+        self.task_names = tuple(str(name) for name in task_names)
+        if not self.datasets or len(self.datasets) != len(self.task_names):
+            raise ValueError("datasets 与 task_names 必须是等长非空序列")
+        self.task_lengths = tuple(len(dataset) for dataset in self.datasets)
+        if any(length <= 0 for length in self.task_lengths):
+            raise ValueError(f"多任务子数据集不能为空：{self.task_lengths}")
+        contracts = {
+            (int(dataset.action_num), int(dataset.action_dim), int(dataset.proprio_dim))
+            for dataset in self.datasets
+        }
+        if len(contracts) != 1:
+            raise ValueError(f"多任务 Dataset 张量合同不一致：{sorted(contracts)}")
+        self.action_num, self.action_dim, self.proprio_dim = next(iter(contracts))
+        self.manifest_path = str(Path(manifest_path).expanduser().resolve())
+        self.manifest_digest = manifest_digest
+        total = 0
+        self.cumulative_lengths: list[int] = []
+        for length in self.task_lengths:
+            total += length
+            self.cumulative_lengths.append(total)
+        self._length = total
+
+    def __len__(self) -> int:
+        return self._length
+
+    def __getitem__(self, index: int) -> Any:
+        position = int(index)
+        if position < 0:
+            position += self._length
+        if position < 0 or position >= self._length:
+            raise IndexError(
+                f"多任务 sample index {position} 超出范围 [0, {self._length})"
+            )
+        task_index = bisect.bisect_right(self.cumulative_lengths, position)
+        previous = 0 if task_index == 0 else self.cumulative_lengths[task_index - 1]
+        local_index = position - previous
+        sample = self.datasets[task_index][local_index]
+        if not isinstance(sample, dict):
+            return sample
+        output = dict(sample)
+        output["task_index"] = task_index
+        output["task_name"] = self.task_names[task_index]
+        if "episode_key" in output:
+            output["episode_key"] = (
+                f"{self.task_names[task_index]}:{output['episode_key']}"
+            )
+        return output
+
+    def provenance(self) -> dict[str, Any]:
+        return {
+            "type": "natural_proportional",
+            "manifest_path": self.manifest_path,
+            "manifest_digest": self.manifest_digest,
+            "task_names": list(self.task_names),
+            "task_lengths": list(self.task_lengths),
+            "raw_samples": self._length,
+            "effective_samples": self._length,
         }

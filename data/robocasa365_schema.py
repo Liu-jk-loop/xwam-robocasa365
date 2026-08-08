@@ -50,7 +50,9 @@ class PandaOmronSchema:
 
     @property
     def canonical_sha256(self) -> str:
-        canonical = json.dumps(self.payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        canonical = json.dumps(
+            self.payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -98,7 +100,9 @@ def _parse_tensor_schema(name: str, payload: Any) -> TensorSchema:
         try:
             start, end = int(raw.get("start")), int(raw.get("end"))
         except (TypeError, ValueError) as exc:
-            raise DatasetContractError(f"schema.{name} 组件切片必须是整数：{raw}") from exc
+            raise DatasetContractError(
+                f"schema.{name} 组件切片必须是整数：{raw}"
+            ) from exc
         if not isinstance(component_name, str) or not component_name:
             raise DatasetContractError(f"schema.{name} 组件缺少名称：{raw}")
         if component_name in seen_names:
@@ -119,14 +123,23 @@ def _parse_tensor_schema(name: str, payload: Any) -> TensorSchema:
                 start=start,
                 end=end,
                 normalization=normalization,
-                metadata={key: value for key, value in raw.items() if key not in {"name", "start", "end", "normalization"}},
+                metadata={
+                    key: value
+                    for key, value in raw.items()
+                    if key not in {"name", "start", "end", "normalization"}
+                },
             )
         )
     if expected_start != dimension:
         raise DatasetContractError(
             f"schema.{name} 组件只覆盖到 {expected_start}，dimension={dimension}"
         )
-    return TensorSchema(name=name, original_key=original_key, dimension=dimension, components=tuple(components))
+    return TensorSchema(
+        name=name,
+        original_key=original_key,
+        dimension=dimension,
+        components=tuple(components),
+    )
 
 
 def load_panda_omron_schema(path: str | Path) -> PandaOmronSchema:
@@ -135,11 +148,19 @@ def load_panda_omron_schema(path: str | Path) -> PandaOmronSchema:
     if payload.get("scope") != "atomic_only":
         raise DatasetContractError(f"M2 schema 必须为 scope=atomic_only：{schema_path}")
     videos = payload.get("videos")
-    if not isinstance(videos, list) or len(videos) != 3 or not all(isinstance(item, dict) for item in videos):
+    if (
+        not isinstance(videos, list)
+        or len(videos) != 3
+        or not all(isinstance(item, dict) for item in videos)
+    ):
         raise DatasetContractError(f"M2 schema 必须配置三路 video：{schema_path}")
     video_keys = [item.get("original_key") for item in videos]
-    if len(set(video_keys)) != 3 or not all(isinstance(key, str) and key for key in video_keys):
-        raise DatasetContractError(f"M2 schema video original_key 必须是三个不重复字符串：{schema_path}")
+    if len(set(video_keys)) != 3 or not all(
+        isinstance(key, str) and key for key in video_keys
+    ):
+        raise DatasetContractError(
+            f"M2 schema video original_key 必须是三个不重复字符串：{schema_path}"
+        )
     checkpoint_mapping = payload.get("checkpoint_mapping")
     if not isinstance(checkpoint_mapping, dict):
         raise DatasetContractError(f"M2 schema 缺少 checkpoint_mapping：{schema_path}")
@@ -176,9 +197,9 @@ def _canonical_modality_contract(payload: dict[str, Any]) -> dict[str, Any]:
         raise DatasetContractError("modality.json 缺少 video 对象")
     output["video"] = sorted(
         [
-        {"name": name, "original_key": spec.get("original_key")}
-        for name, spec in raw_videos.items()
-        if isinstance(spec, dict)
+            {"name": name, "original_key": spec.get("original_key")}
+            for name, spec in raw_videos.items()
+            if isinstance(spec, dict)
         ],
         key=lambda item: str(item["original_key"]),
     )
@@ -188,11 +209,21 @@ def _canonical_modality_contract(payload: dict[str, Any]) -> dict[str, Any]:
 def expected_modality_contract(schema: PandaOmronSchema) -> dict[str, Any]:
     return {
         "state": [
-            {"name": component.name, "original_key": schema.state.original_key, "start": component.start, "end": component.end}
+            {
+                "name": component.name,
+                "original_key": schema.state.original_key,
+                "start": component.start,
+                "end": component.end,
+            }
             for component in schema.state.components
         ],
         "action": [
-            {"name": component.name, "original_key": schema.action.original_key, "start": component.start, "end": component.end}
+            {
+                "name": component.name,
+                "original_key": schema.action.original_key,
+                "start": component.start,
+                "end": component.end,
+            }
             for component in schema.action.components
         ],
         "video": sorted(
@@ -205,7 +236,9 @@ def expected_modality_contract(schema: PandaOmronSchema) -> dict[str, Any]:
     }
 
 
-def validate_dataset_modality(dataset_path: str | Path, schema: PandaOmronSchema) -> dict[str, Any]:
+def validate_dataset_modality(
+    dataset_path: str | Path, schema: PandaOmronSchema
+) -> dict[str, Any]:
     root = resolve_lerobot_root(dataset_path)
     path = root / "meta" / "modality.json"
     raw_bytes = path.read_bytes()
@@ -225,7 +258,9 @@ def validate_dataset_modality(dataset_path: str | Path, schema: PandaOmronSchema
     }
 
 
-def _stat_vector(block: dict[str, Any], key: str, dimension: int, path: Path) -> np.ndarray:
+def _stat_vector(
+    block: dict[str, Any], key: str, dimension: int, path: Path
+) -> np.ndarray:
     value = block.get(key)
     try:
         array = np.asarray(value, dtype=np.float64)
@@ -238,38 +273,73 @@ def _stat_vector(block: dict[str, Any], key: str, dimension: int, path: Path) ->
     return array
 
 
-def load_statistics(dataset_path: str | Path, tensor_schema: TensorSchema) -> Statistics:
-    root = resolve_lerobot_root(dataset_path)
-    path = root / "meta" / "stats.json"
+def load_statistics_file(
+    stats_path: str | Path, tensor_schema: TensorSchema
+) -> Statistics:
+    path = Path(stats_path).expanduser().resolve()
     payload = _read_json(path)
     block = payload.get(tensor_schema.original_key)
     if not isinstance(block, dict):
-        raise DatasetContractError(f"stats.json 缺少 {tensor_schema.original_key!r}：{path}")
+        raise DatasetContractError(
+            f"stats.json 缺少 {tensor_schema.original_key!r}：{path}"
+        )
     q01 = _stat_vector(block, "q01", tensor_schema.dimension, path)
     q99 = _stat_vector(block, "q99", tensor_schema.dimension, path)
     if np.any(q99 < q01):
         raise DatasetContractError(f"stats q99 存在小于 q01 的维度：{path}")
-    minimum = _stat_vector(block, "min", tensor_schema.dimension, path) if "min" in block else None
-    maximum = _stat_vector(block, "max", tensor_schema.dimension, path) if "max" in block else None
+    minimum = (
+        _stat_vector(block, "min", tensor_schema.dimension, path)
+        if "min" in block
+        else None
+    )
+    maximum = (
+        _stat_vector(block, "max", tensor_schema.dimension, path)
+        if "max" in block
+        else None
+    )
     return Statistics(q01=q01, q99=q99, minimum=minimum, maximum=maximum)
+
+
+def load_statistics(
+    dataset_path: str | Path, tensor_schema: TensorSchema
+) -> Statistics:
+    root = resolve_lerobot_root(dataset_path)
+    return load_statistics_file(root / "meta" / "stats.json", tensor_schema)
 
 
 class PandaOmronTensorCodec:
     """Normalize state/action by named components and preserve the full 12D action."""
 
-    def __init__(self, schema: PandaOmronSchema, state_stats: Statistics, action_stats: Statistics):
+    def __init__(
+        self,
+        schema: PandaOmronSchema,
+        state_stats: Statistics,
+        action_stats: Statistics,
+    ):
         self.schema = schema
         self.state_stats = state_stats
         self.action_stats = action_stats
 
     @classmethod
-    def from_dataset(cls, dataset_path: str | Path, schema_path: str | Path) -> "PandaOmronTensorCodec":
+    def from_dataset(
+        cls,
+        dataset_path: str | Path,
+        schema_path: str | Path,
+        *,
+        statistics_path: str | Path | None = None,
+    ) -> "PandaOmronTensorCodec":
         schema = load_panda_omron_schema(schema_path)
         validate_dataset_modality(dataset_path, schema)
+        if statistics_path is None:
+            state_stats = load_statistics(dataset_path, schema.state)
+            action_stats = load_statistics(dataset_path, schema.action)
+        else:
+            state_stats = load_statistics_file(statistics_path, schema.state)
+            action_stats = load_statistics_file(statistics_path, schema.action)
         return cls(
             schema=schema,
-            state_stats=load_statistics(dataset_path, schema.state),
-            action_stats=load_statistics(dataset_path, schema.action),
+            state_stats=state_stats,
+            action_stats=action_stats,
         )
 
     @staticmethod
@@ -311,7 +381,9 @@ class PandaOmronTensorCodec:
         return np.clip(output, -1.0, 1.0) if clip else output
 
     @staticmethod
-    def _denormalize(values: Any, tensor_schema: TensorSchema, stats: Statistics) -> np.ndarray:
+    def _denormalize(
+        values: Any, tensor_schema: TensorSchema, stats: Statistics
+    ) -> np.ndarray:
         normalized = PandaOmronTensorCodec._validate_values(values, tensor_schema)
         output = np.empty_like(normalized, dtype=np.float32)
         for component in tensor_schema.components:
@@ -323,9 +395,9 @@ class PandaOmronTensorCodec:
                 stable = span > 1e-8
                 raw = np.broadcast_to(lower, block.shape).astype(np.float32).copy()
                 if np.any(stable):
-                    raw[..., stable] = (
-                        (block[..., stable] + 1.0) * 0.5 * span[stable] + lower[stable]
-                    )
+                    raw[..., stable] = (block[..., stable] + 1.0) * 0.5 * span[
+                        stable
+                    ] + lower[stable]
                 output[..., sl] = raw
             else:
                 output[..., sl] = block
@@ -340,16 +412,26 @@ class PandaOmronTensorCodec:
     def encode_action(self, values: Any, *, clip: bool = True) -> np.ndarray:
         return self._normalize(values, self.schema.action, self.action_stats, clip=clip)
 
-    def decode_action(self, values: Any, *, discretize_control_mode: bool = False) -> np.ndarray:
+    def decode_action(
+        self, values: Any, *, discretize_control_mode: bool = False
+    ) -> np.ndarray:
         output = self._denormalize(values, self.schema.action, self.action_stats)
         if discretize_control_mode:
-            component = next(item for item in self.schema.action.components if item.name == "control_mode")
+            component = next(
+                item
+                for item in self.schema.action.components
+                if item.name == "control_mode"
+            )
             sl = slice(component.start, component.end)
             output[..., sl] = np.where(output[..., sl] >= 0.0, 1.0, -1.0)
         return output
 
-    def component_summary(self, values: Any, tensor_name: str) -> dict[str, dict[str, Any]]:
-        tensor_schema = self.schema.state if tensor_name == "state" else self.schema.action
+    def component_summary(
+        self, values: Any, tensor_name: str
+    ) -> dict[str, dict[str, Any]]:
+        tensor_schema = (
+            self.schema.state if tensor_name == "state" else self.schema.action
+        )
         array = self._validate_values(values, tensor_schema)
         return {
             component.name: {

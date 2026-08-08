@@ -21,14 +21,15 @@ from project_tools.training_run import (
 class TrainingRunTest(unittest.TestCase):
     def test_m3_layered_configs_keep_debug_and_formal_boundaries_explicit(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
-        model = (repo_root / "configs/model/wan22_5b_robocasa365_atomic.yaml").read_text()
+        model = (
+            repo_root / "configs/model/wan22_5b_robocasa365_atomic.yaml"
+        ).read_text()
         hardware = (repo_root / "configs/hardware/a800_80gb_debug.yaml").read_text()
         low_memory_hardware = (
             repo_root / "configs/hardware/a800_80gb_120g_debug.yaml"
         ).read_text()
         experiment = (
-            repo_root
-            / "configs/experiment/robocasa365_close_fridge_m3_overfit.yaml"
+            repo_root / "configs/experiment/robocasa365_close_fridge_m3_overfit.yaml"
         ).read_text()
         self.assertIn("action_dim: 12", model)
         self.assertIn("use_depth: false", model)
@@ -59,7 +60,7 @@ class TrainingRunTest(unittest.TestCase):
             '"global_step": int(trainer.global_step)',
             '"process_max_rss_raw"',
             '"gpu_names"',
-            "persist_generator_state 当前只允许 M3 单 GPU",
+            "allow_distributed_generator_state",
             "ResourceAwareModelCheckpoint",
             "checkpoint_save_start",
             '"memory_at_result"',
@@ -68,6 +69,7 @@ class TrainingRunTest(unittest.TestCase):
         ):
             self.assertIn(token, entrypoint)
         self.assertIn("xwam_generator_state", runner)
+        self.assertIn("xwam_generator_states_by_rank", runner)
         self.assertIn("Restored training generator state", runner)
         self.assertIn("resume checkpoint 缺少 xwam_generator_state", runner)
         self.assertIn("Excluded-frozen resume load accepted", runner)
@@ -75,7 +77,9 @@ class TrainingRunTest(unittest.TestCase):
         self.assertIn("train/action_proprio_supervision_ratio", runner)
         self.assertIn("train/task_index", runner)
 
-    def test_m3_three_task_short_config_preserves_original_training_semantics(self) -> None:
+    def test_m3_three_task_short_config_preserves_original_training_semantics(
+        self,
+    ) -> None:
         repo_root = Path(__file__).resolve().parents[1]
         data_config = (
             repo_root / "configs/data/robocasa365_m3_three_task.yaml"
@@ -109,9 +113,7 @@ class TrainingRunTest(unittest.TestCase):
             resolve_subset_indices(dataset_length=100, subset_size=1, subset_start=7),
             (7,),
         )
-        self.assertIsNone(
-            resolve_subset_indices(dataset_length=100, subset_size=None)
-        )
+        self.assertIsNone(resolve_subset_indices(dataset_length=100, subset_size=None))
         with self.assertRaisesRegex(ValueError, "超出"):
             resolve_subset_indices(dataset_length=3, subset_size=2, subset_start=2)
 
@@ -126,7 +128,9 @@ class TrainingRunTest(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 resolve_resume_checkpoint(Path(tmp) / "missing.ckpt")
 
-    def test_excluded_frozen_resume_accepts_only_frozen_missing_parameters(self) -> None:
+    def test_excluded_frozen_resume_accepts_only_frozen_missing_parameters(
+        self,
+    ) -> None:
         report = validate_excluded_frozen_resume_keys(
             missing_keys={"text_encoder.weight", "vae.bias"},
             unexpected_keys=set(),

@@ -707,6 +707,187 @@ ffprobe -v error \
 
 反馈`git rev-parse HEAD`、`audit.json`、`server_report.json`、`server_requests.jsonl`、两段client日志、summary/episode/progress、视频ffprobe和三个进程退出码。原始产物继续保留在Git之外。
 
+## M6：4×H100 RGB-only训练
+
+本阶段只使用 Atomic-Seen 同名18任务的 `pretrain/atomic` 数据，不读取 composite，也不启用depth。模型前向保持BF16 mixed precision；正式optimizer state恢复FP32，并关闭A800调试所用的CPU offload和冻结参数排除。
+
+### 1. 公共路径与18任务数据清单
+
+```bash
+conda activate xwam-robocasa365
+
+cd /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/xwam-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+git rev-parse HEAD
+git status --short --branch
+
+DATA_ROOT=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/robocasa/robocasa/datasets/v1.0/pretrain/atomic
+WAN_DIR=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/Wan-AI/Wan2.2-TI2V-5B
+XWAM_CKPT=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/models/x-wam/xwam_checkpoints
+EXP_ROOT=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/experiments/xwam-robocasa365
+STATS_WORK=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/tmp/xwam-m6-stats
+
+python scripts/build_robocasa365_m6_training_manifest.py \
+  --dataset-root "$DATA_ROOT" \
+  --output logs/cluster/robocasa365_m6_atomic_seen18_manifest.json
+```
+
+如果某个任务下存在多个日期目录，脚本会失败而不是猜测。核对数据版本后为每个歧义任务追加一次：
+
+```bash
+  --task-path TaskName=/absolute/path/to/TaskName/YYYYMMDD
+```
+
+manifest必须为`ok=true/result=pass`、18个唯一任务，且每项包含`valid_clips`。有效clip跨度固定为32，即`(sequence_length-1)*frame_skip=(9-1)*4`。
+
+### 2. 跨任务统计与精确step
+
+```bash
+mkdir -p "$STATS_WORK"
+
+python scripts/compute_robocasa365_global_stats.py \
+  --manifest logs/cluster/robocasa365_m6_atomic_seen18_manifest.json \
+  --work-dir "$STATS_WORK" \
+  --output logs/cluster/robocasa365_m6_atomic_seen18_global_stats.json
+
+python scripts/audit_robocasa365_m6_preflight.py \
+  --manifest logs/cluster/robocasa365_m6_atomic_seen18_manifest.json \
+  --stats logs/cluster/robocasa365_m6_atomic_seen18_global_stats.json \
+  --global-batch-size 128 \
+  --epochs 5 \
+  --output logs/cluster/robocasa365_m6_h100_preflight.json
+```
+
+统计脚本不解码视频、不生成depth；它用临时memmap读取全部Parquet frame，临时原始矩阵大小约为`total_frames×28 bytes`。preflight输出以下精确关系：
+
+```text
+N = total_valid_clips
+steps_per_epoch = floor(N / 128)
+num_training_steps = 5 * steps_per_epoch
+samples_dropped_per_epoch = N % 128
+```
+
+只有preflight为`pass`才申请4×H100训练节点。
+
+### 3. H100门禁：全新运行到step 2
+
+确认当前节点只暴露4张H100 80GB。不要使用`torchrun`；Lightning根据`devices: 4`启动四个本地进程。
+
+```bash
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+export PYTHONUNBUFFERED=1
+
+GATE_NAME=robocasa365_m6_h100_gate_rgb_seed42
+
+python scripts/train_sft.py \
+  model_config=configs/model/wan22_5b_robocasa365_atomic.yaml \
+  data_config=configs/data/robocasa365_m6_atomic_seen18.yaml \
+  hardware_config=configs/hardware/h100x4_80gb_gbs128.yaml \
+  experiment_config=configs/experiment/robocasa365_m6_h100_gate.yaml \
+  wan_checkpoint_dir="$WAN_DIR" \
+  pretrained_checkpoint="$XWAM_CKPT" \
+  exp_root="$EXP_ROOT" \
+  exp_name="$GATE_NAME" \
+  2>&1 | tee logs/cluster/robocasa365_m6_h100_gate_initial.log
+```
+
+首选profile是`4 GPU×micro-batch 4×gradient accumulation 8=GBS 128`。预期达到global step 2、完成DeepSpeed checkpoint，并在`runs/<run-id>_optimizer_state/`产生四个rank的FP32实态报告。先保存首轮证据路径：
+
+```bash
+GATE_EXP="$EXP_ROOT/$GATE_NAME"
+INITIAL_RESULT=$(ls -1t "$GATE_EXP"/runs/*_result.json | head -n 1)
+INITIAL_PREFIX=${INITIAL_RESULT%_result.json}
+test -e "$GATE_EXP/checkpoints/last.ckpt"
+```
+
+### 4. H100门禁：从step 2恢复到step 4
+
+```bash
+python scripts/train_sft.py \
+  model_config=configs/model/wan22_5b_robocasa365_atomic.yaml \
+  data_config=configs/data/robocasa365_m6_atomic_seen18.yaml \
+  hardware_config=configs/hardware/h100x4_80gb_gbs128.yaml \
+  experiment_config=configs/experiment/robocasa365_m6_h100_gate.yaml \
+  wan_checkpoint_dir="$WAN_DIR" \
+  pretrained_checkpoint="$XWAM_CKPT" \
+  exp_root="$EXP_ROOT" \
+  exp_name="$GATE_NAME" \
+  trainer_max_steps=4 \
+  resume_checkpoint="$GATE_EXP/checkpoints/last.ckpt" \
+  2>&1 | tee logs/cluster/robocasa365_m6_h100_gate_resumed.log
+
+RESUMED_RESULT=$(ls -1t "$GATE_EXP"/runs/*_result.json | head -n 1)
+RESUMED_PREFIX=${RESUMED_RESULT%_result.json}
+
+python scripts/audit_robocasa365_m6_h100_gate.py \
+  --initial-metadata "${INITIAL_PREFIX}_metadata.json" \
+  --initial-result "${INITIAL_PREFIX}_result.json" \
+  --initial-events "${INITIAL_PREFIX}_checkpoint_events.jsonl" \
+  --initial-optimizer-dir "${INITIAL_PREFIX}_optimizer_state" \
+  --initial-log logs/cluster/robocasa365_m6_h100_gate_initial.log \
+  --resumed-metadata "${RESUMED_PREFIX}_metadata.json" \
+  --resumed-result "${RESUMED_PREFIX}_result.json" \
+  --resumed-events "${RESUMED_PREFIX}_checkpoint_events.jsonl" \
+  --resumed-optimizer-dir "${RESUMED_PREFIX}_optimizer_state" \
+  --resumed-log logs/cluster/robocasa365_m6_h100_gate_resumed.log \
+  --output logs/cluster/robocasa365_m6_h100_gate_audit.json
+```
+
+门禁要求：两段运行分别精确达到step 2/4；第二段明确从checkpoint恢复；四个rank的optimizer浮点state实际均为FP32且非空；H100/显存/GBS/ZeRO合同通过；loss有限、depth loss为0；两次checkpoint保存均有complete事件。
+
+如果首选profile发生CUDA OOM，使用新的`GATE_NAME`从公开X-WAM权重重新开始，并把两条训练命令的hardware层统一替换为：
+
+```text
+configs/hardware/h100x4_80gb_gbs128_safe.yaml
+```
+
+safe profile为`4×micro-batch 2×accumulation 16`，GBS仍为128。不要把首选profile的半成品checkpoint与safe profile混用，也不要改回A800的BF16 optimizer state、CPU offload或排除冻结参数。
+
+### 5. 正式5-epoch训练
+
+只有门禁audit为`ok=true/result=pass`才启动。正式实验必须是新目录，从公开X-WAM pretrained checkpoint初始化，不能接着step-4门禁训练。
+
+```bash
+FORMAL_NAME=robocasa365_m6_atomic_seen18_rgb_seed42
+
+python scripts/train_sft.py \
+  model_config=configs/model/wan22_5b_robocasa365_atomic.yaml \
+  data_config=configs/data/robocasa365_m6_atomic_seen18.yaml \
+  hardware_config=configs/hardware/h100x4_80gb_gbs128.yaml \
+  experiment_config=configs/experiment/robocasa365_m6_h100_rgb_formal.yaml \
+  wan_checkpoint_dir="$WAN_DIR" \
+  pretrained_checkpoint="$XWAM_CKPT" \
+  exp_root="$EXP_ROOT" \
+  exp_name="$FORMAL_NAME" \
+  2>&1 | tee logs/cluster/robocasa365_m6_h100_formal.log
+```
+
+若门禁最终采用safe profile，正式命令也使用同一safe hardware层。训练步数不手填，由已审计manifest自动计算；每轮全局shuffle后只丢弃不足128的尾部。正常结束会额外保存`final-step=<num_training_steps>.ckpt`。
+
+正式训练因调度或节点中断时，保留完全相同的model/data/hardware/experiment层和`FORMAL_NAME`，只追加：
+
+```bash
+resume_checkpoint="$EXP_ROOT/$FORMAL_NAME/checkpoints/last.ckpt"
+```
+
+不得改变world size、GBS、manifest、global stats或总epoch数。完成后定位最新证据并审计：
+
+```bash
+FORMAL_EXP="$EXP_ROOT/$FORMAL_NAME"
+FORMAL_RESULT=$(ls -1t "$FORMAL_EXP"/runs/*_result.json | head -n 1)
+FORMAL_PREFIX=${FORMAL_RESULT%_result.json}
+
+python scripts/audit_robocasa365_m6_formal_training.py \
+  --metadata "${FORMAL_PREFIX}_metadata.json" \
+  --result "${FORMAL_PREFIX}_result.json" \
+  --events "${FORMAL_PREFIX}_checkpoint_events.jsonl" \
+  --optimizer-dir "${FORMAL_PREFIX}_optimizer_state" \
+  --log logs/cluster/robocasa365_m6_h100_formal.log \
+  --output logs/cluster/robocasa365_m6_h100_formal_audit.json
+```
+
+如果正式训练经历多次resume，传给审计器的log应为本次最终调用的完整log；metadata/result/events/optimizer目录必须来自同一个run prefix。最终反馈commit、preflight、门禁audit、正式audit、两段门禁日志、正式日志、`nvidia-smi`和实验checkpoint目录清单。所有`logs/`与实验产物保持在Git之外。
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：

@@ -116,7 +116,7 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - `num_training_steps` 表示学习率计划总步数，`trainer_max_steps` 表示本次调用停止位置。初始运行和 resume 必须使用相同的学习率计划总步数。
 - 极小样本门禁通过 `train_subset_size/train_subset_start` 选择固定 clip，并显式关闭 shuffle；它只用于验证过拟合和恢复，不能充当正式数据抽样策略。
 - Lightning/DeepSpeed 完整恢复统一走 `Trainer.fit(ckpt_path=...)`。恢复时不再重复加载公开 X-WAM checkpoint，模型、optimizer、scheduler、global step 和 loop state 由训练 checkpoint 接管。
-- M3 单卡确定性门禁把 X-WAM 自定义 CPU generator state 写入 checkpoint 并在 resume 时恢复。该能力显式限制为 world size 1；多卡 RNG 恢复在正式 H100 profile 中另行设计。
+- M3 单卡确定性门禁把 X-WAM 自定义 CPU generator state 写入 checkpoint 并在 resume 时恢复。M6 H100 profile 将四个 rank 的 generator state 一并写入 DeepSpeed checkpoint，并禁止改变 world size 后恢复；真实多卡 hook 行为由 2→4 step 门禁验证。
 - 每次调用写出独立的 resolved config、run metadata 和 run result JSON。metadata 包含 Git commit/dirty state、命令、配置来源、环境版本、数据/manifest/schema、子集、拓扑、DeepSpeed 和 checkpoint 来源；result 包含 pass/fail、global step、耗时、进程 max RSS、CUDA 峰值和 checkpoint 路径。
 - A800 debug profile 可以使用已验证的 ZeRO-2 CPUAdam offload。正式 H100 profile 不继承该决定，必须依据 GPU 数量、显存和吞吐单独冻结。
 - `a800_80gb_120g_debug` 是独立的低内存工程门禁：CPUAdam momentum/variance 随 BF16 参数保存，并在 DeepSpeed checkpoint 中排除冻结 T5/VAE。它只验证连续训练和完整恢复 wiring，不作为正式优化器数值配置。
@@ -126,6 +126,16 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - M3.2 保持原训练语义 `clean_action_ratio=0.5`，同时记录 action/proprio 监督比例和 task index。12-step FP32/no-checkpoint 门禁要求三个任务均被采到、task index 合法且任务计数最大差不超过 2，并验证两类采样分支、有限 loss 与 RGB-only depth=0；不设置人为 loss 降幅阈值，也不把短烟测解释为收敛。
 - CPUAdam 默认和原有 A800/M2/upstream profile 均保持 `fp32_optimizer_states=true`。H100 正式门禁必须显式使用 FP32 optimizer state 并重新验证 checkpoint/resume，禁止从 120 GiB profile 隐式继承 BF16 state。
 - 每次 DeepSpeed checkpoint 保存前后向独立 JSONL fsync 写入 process RSS、cgroup memory current/peak/max/events。缺少 `checkpoint_save_complete` 时，结合 `oom_kill` 和 checkpoint 文件结构区分保存期 OOM 与普通 Python 异常。
+
+### M6 H100 RGB-only 正式训练合同
+
+- 训练任务固定为版本化 Atomic-Seen 清单中的18个同名任务，但数据来源固定为 `pretrain/atomic`；manifest 必须逐任务解析唯一日期目录、检查真实 Parquet/三路视频，并按 `sum(max(episode_length-32, 0))` 记录有效 clip。任何缺失、重复、多日期歧义或 composite 路径都会阻塞。
+- 正式采样使用 `natural_proportional`，不再沿用 M3 的三任务等量过采样。18任务共用一份与 manifest SHA-256 绑定的跨任务 q01/q99/min/max；每个任务仍单独验证16D state、12D action与 modality schema。
+- `EpochAlignedDistributedSampler` 每个 epoch 先按 `seed+epoch` 全局打乱，只丢弃不足一个 GBS=128 的尾部，再等长切分给4个rank。`steps_per_epoch=floor(total_valid_clips/128)`，总步数固定为 `5*steps_per_epoch`，从而让配置中的5 epoch与实际 optimizer update一致。
+- 首选 H100 profile 为 `4 GPU × micro-batch 4 × accumulation 8 = GBS 128`；显存回退仅改为 `4×2×16`，不改变全局 batch、epoch、LR计划或数据清单。正式配置强制单节点4张至少75 GiB且名称为H100的GPU。
+- 模型前向保留 `bf16-mixed`。A800 120 GiB工程让步不进入正式训练：ZeRO-2 optimizer不offload、AdamW state要求实际为FP32、通信overlap开启、checkpoint不排除冻结参数。每个rank在首个update后单独写出实际 optimizer-state dtype 审计。
+- H100门禁使用完整正式scheduler和数据，仅把本次上限设为step 2，保存后从同一checkpoint恢复到step 4；机器审计联合验证四rank FP32 state、H100拓扑、有限loss、RGB-only depth loss为0、保存完成及resume来源。门禁通过后正式训练必须从公开 X-WAM pretrained权重新建实验，不能接着门禁checkpoint训练。
+- 公共 metadata/result/checkpoint事件只由rank 0写入；四个rank共享父进程生成的run ID。正式结束额外保存一个明确的 `final-step=*.ckpt`，审计要求global step等于自动计算的5-epoch总步数。
 
 ## Current external paths
 
