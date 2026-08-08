@@ -1,13 +1,13 @@
 # 项目进度
 
-更新时间：2026-08-07
+更新时间：2026-08-08
 
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：M4.2——X-WAM broker 单请求闭环门禁
+- 当前阶段：M4.3——CloseFridge 900-step 长 horizon 闭环准备
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1、M2、M3、M4.0、M4.1 门禁通过；M4.2 为 `cluster-pending`
+- 超算运行状态：M1、M2、M3、M4.0、M4.1、M4.2 门禁通过；M4.3 尚未实现
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -18,7 +18,7 @@
 | M1 原生 RoboCasa365 loader | 已完成 | commit `e4249b9` 真实 batch `ok=true` | 已关闭 |
 | M2 动作与 checkpoint 适配 | 已完成 | 两种初始化、完整动作契约及 DeepSpeedCPUAdam 单 batch 参数更新均通过 | 已关闭 |
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
-| M4 闭环评测器 | M4.0/M4.1 已关闭，M4.2 本地实现完成 | 随机 rollout `pass`；真实 X-WAM 单请求为 `cluster-pending` | broker + M3 checkpoint 完成一次 32x12 输出和4步执行 |
+| M4 闭环评测器 | M4.0/M4.1/M4.2 已关闭 | commit `b5b6f53`：真实 X-WAM 单请求、32x12输出和4步执行 `pass` | 完善长 horizon 恢复/证据后运行 CloseFridge 900步 |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
 | M6 Atomic 正式训练与评测 | 未开始 | 待验证 | 通过 H100 正式训练门禁 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
@@ -76,6 +76,15 @@ M4.1 随机闭环集群证据：
 - 在线 state/action dimension 为 16/12；随机动作在20步中底盘均非零，control mode 与 gripper 都覆盖 `-1/+1`。随机任务没有成功，符合工程门禁预期，不作为策略指标。
 - 三相机视频为有效 H.264、`768x256`、5 FPS、6帧、102479 bytes；抽帧确认左/右 agentview 与 eye-in-hand 顺序、内容和运动连续性正常。
 - RoboCasa 1.0.1、robosuite 1.5.2、MuJoCo 3.3.1、Gymnasium 0.29.1、PyZMQ 27.1.0 和 EGL provenance 完整；M4.1 正式关闭。
+
+M4.2 X-WAM 单请求闭环集群证据：
+
+- run id `20260808T015103Z`，测试 commit `b5b6f53da075919cfb7cab4588623dd7d1e5ba76`；server/client 均记录正确分支、相同 commit 和干净工作区。
+- A800 policy server 从 M3 global step 10 checkpoint 定向严格恢复；missing frozen 为438、missing non-frozen 为0、unexpected为0，使用真实 CloseFridge stats 和版本化 schema。
+- Broker 完成一次请求转发；server 返回 `[32,12]`，inference/round-trip 为30.566/31.593秒，processed/failed requests为1/0，CUDA峰值 allocated/reserved 为31.985/32.070 GiB。
+- Client在固定 `CloseFridge(target, seed=0, layout=1, style=1)` 中执行前4步，episode expected/observed/completed为`1/1/1`，failed/missing为`0/0`，四步底盘均非零，结果为`pass`。
+- 视频为H.264、`768x256`、5 FPS、5帧、66961 bytes；三相机顺序与运动连续性正常。4步内`success=false`不影响工程门禁，也不代表正式策略指标。
+- Policy与simulator分别运行于`xwam-robocasa365`和`robocasa-abot`；M4.2正式关闭，下一步为900-step长horizon运行可靠性和证据设计。
 
 M1 原生 loader 本地证据：
 
@@ -234,8 +243,8 @@ M3.2 12-step 训练反馈与 audit 修正：
 - M3 不再需要补充输入或重跑。
 - M4.0 不再需要重跑；`robocasa-abot` 已选为当前 simulator smoke 环境。
 - M4.1 不再需要重跑；本地 `log/` 证据只读保留并由根级 ignore 排除，机器日志、视频、模型和评测产物继续位于 Git 之外。
-- M4.2 需在同一 Pod 的三个终端依次运行 broker、X-WAM policy server 和 simulator client。反馈 broker/client/server 三份日志、server startup JSON、client metadata/summary/episode JSON 和视频文件大小。
-- 首轮只要求从 `close_fridge_m3_overfit_120g_gate1/checkpoints/last.ckpt` 严格加载一次，确认其训练任务与请求均为 `CloseFridge`，返回 `[32,12]`、执行4步且证据完整；任务成功不是该门禁条件。之后才扩展到900-step完整 rollout。
+- M4.2 不再需要补充输入或重跑；原始日志与视频保持在 Git ignore 目录，不上传仓库。
+- M4.3 开始前由 Codex 先评估并实现900-step所需的多请求 server 生命周期、中断恢复、逐请求证据和视频体积控制；当前不要直接把4-step命令扩大到900步。
 
 ## 当前执行过程
 
@@ -268,3 +277,4 @@ M3.2 12-step 训练反馈与 audit 修正：
 27. Codex 已实现 M4.1 dependency-light 随机闭环门禁：冻结 Atomic-Seen 18 官方 horizon，固定 `CloseFridge` scene/seed，按名称完成在线 16D observation 与完整 12D Gym action 映射，保存逐 episode JSON、三相机视频和可重算 summary。本地不具备 RoboCasa runtime，真实 20-step rollout 标记为 `cluster-pending`。
 28. 用户在 commit `a916547` 完成 M4.1：20步、完整12D动作、三相机视频和可重算 summary 全部通过；M4.1 关闭。
 29. Codex 已实现 M4.2 版本化 NPZ/JSON policy 协议、透明 broker、严格 M3 checkpoint policy server 和 X-WAM simulator client；补充单任务 checkpoint/request 一致性、至少一次真实请求和 CUDA 峰值证据门禁。本地协议/路由/静态测试通过，A800真实模型加载与一次4-action闭环为 `cluster-pending`。
+30. 用户在 commit `b5b6f53` 完成 M4.2：M3 step-10 checkpoint 严格恢复、一次32x12推理、broker往返、四步完整12D环境动作和三相机视频全部通过；M4.2关闭，进入M4.3长horizon准备。

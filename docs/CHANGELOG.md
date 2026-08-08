@@ -1,5 +1,25 @@
 # 变更记录
 
+## 2026-08-08 — M4.2 X-WAM 单请求闭环集群验收
+
+- 验收实现：commit `b5b6f53da075919cfb7cab4588623dd7d1e5ba76`，分支 `dev/atomic-robocasa365`，server 与 client metadata 均为干净工作区。
+- 运行状态：run id `20260808T015103Z` 的 broker、policy server、simulator client 和机器可读证据全部通过；M4.2 正式关闭。
+
+### 集群证据
+
+- A800 policy server 从 M3 `epoch=9-step=10.ckpt` 加载约 10.08 GB 的 DeepSpeed model state；定向严格加载只缺少 438 个保存时主动排除的冻结 T5/VAE 参数，非冻结 missing 为 0、unexpected 为 0。
+- Server 使用 `CloseFridge/20250819` 的真实 `stats.json` 和 schema SHA `e95f2b71...f08b4`，模型合同为 16D proprio、12D action、`frame_num=9/action_num=4`，因此单次返回 `[32,12]`。
+- Broker 完成一次 request queue、dispatch 和 result forward；server `processed_requests=1`、`failed_requests=0`，固定 inference seed `3928109185`，模型推理耗时 30.566 秒，client round-trip 为 31.593 秒。
+- Client 固定 `CloseFridge(target, seed=0, layout=1, style=1)`，一次请求执行首个4-action chunk；episode `1/1` 完成、failed/missing 为 0、total steps 为 4、四步底盘动作均非零，summary 与 episode 均为 `pass`。
+- A800 80GB 上 CUDA 峰值 allocated/reserved 为 31.985/32.070 GiB；Torch 2.9.0+cu128、CUDA 12.8、Lightning 2.6.5、PyZMQ 27.1.0。Simulator 使用 RoboCasa 1.0.1、robosuite 1.5.2、MuJoCo 3.3.1、EGL 和独立 `robocasa-abot` 环境。
+- 本轮三相机视频为有效 H.264、`768x256`、5 FPS、5帧、66961 bytes；抽帧确认左/右 agentview 与 eye-in-hand 顺序正确且四步运动连续。
+
+### 结论与限制
+
+- `robosuite_models`、GR1 mink 和 mimicgen 缺失警告与 PandaOmron 路径无关，不阻塞本轮。Wan base 构造时打印的新模块初始化提示发生在 M3 checkpoint 严格恢复之前，不表示最终机器人模块未加载。
+- `success=false` 符合4步工程门禁预期；该 checkpoint 只经过 M3 单 clip 10-step 工程训练，本结果只证明推理、归一化、网络和完整12D环境动作闭环，不构成900-step成功率或有效策略质量结论。
+- 原始 JSON、日志和视频继续只读保存在根级忽略的 `log/` 中，不加入 Git。下一步先完善长 horizon 的运行恢复与证据策略，再进行 `CloseFridge` 900-step 闭环。
+
 ## 2026-08-07 — M4.2 X-WAM broker 单请求闭环门禁
 
 - 修改前基线：`a916547`（M4.1 随机闭环实现）
