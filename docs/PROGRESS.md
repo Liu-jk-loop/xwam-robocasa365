@@ -5,9 +5,9 @@
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：M4.3——CloseFridge 900-step 长 horizon 闭环准备
+- 当前阶段：M6.0——H100 RGB-only 正式训练门禁规划
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1、M2、M3、M4.0、M4.1、M4.2 门禁通过；M4.3 本地实现完成、为 `cluster-pending`
+- 超算运行状态：M1、M2、M3、M4.0、M4.1、M4.2、M4.3 门禁均通过；下一步切换 H100 验证正式训练配置
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -18,9 +18,9 @@
 | M1 原生 RoboCasa365 loader | 已完成 | commit `e4249b9` 真实 batch `ok=true` | 已关闭 |
 | M2 动作与 checkpoint 适配 | 已完成 | 两种初始化、完整动作契约及 DeepSpeedCPUAdam 单 batch 参数更新均通过 | 已关闭 |
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
-| M4 闭环评测器 | M4.0/M4.1/M4.2 已关闭，M4.3本地实现完成 | commit `b5b6f53`：真实 X-WAM 单请求、32x12输出和4步执行 `pass` | 故意中断/恢复后完成 CloseFridge 900步 |
+| M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
-| M6 Atomic 正式训练与评测 | 未开始 | 待验证 | 通过 H100 正式训练门禁 |
+| M6 Atomic 正式训练与评测 | 准备开始 RGB-only H100 门禁 | 待验证 | 冻结 H100 配置并完成最小正式训练 smoke |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
 ## 已确认资源
@@ -85,6 +85,15 @@ M4.2 X-WAM 单请求闭环集群证据：
 - Client在固定 `CloseFridge(target, seed=0, layout=1, style=1)` 中执行前4步，episode expected/observed/completed为`1/1/1`，failed/missing为`0/0`，四步底盘均非零，结果为`pass`。
 - 视频为H.264、`768x256`、5 FPS、5帧、66961 bytes；三相机顺序与运动连续性正常。4步内`success=false`不影响工程门禁，也不代表正式策略指标。
 - Policy与simulator分别运行于`xwam-robocasa365`和`robocasa-abot`；M4.2正式关闭，下一步为900-step长horizon运行可靠性和证据设计。
+
+M4.3 900-step 可恢复闭环集群证据：
+
+- run id `20260808T023440Z`，测试 commit `f9e1b6bebde87eeb99cff2151a0eef3bc2501a31`；分支为 `dev/atomic-robocasa365`，工作区干净。
+- 使用 M3 `epoch=9-step=10.ckpt` 的 DeepSpeed model state；固定 `CloseFridge(target, seed=0, layout=1, style=1)` 完成官方 900/900 step，共 225 次 policy request。
+- 首轮故意中断后使用同一 run 恢复；机器审计的 `intentional_resume_verified=true`，progress、request 数、server journal、单一 checkpoint、请求 shape、16D state/12D action 和动作边界检查均通过。
+- RGB-only 视频证据为 46 帧；帧名称、持久化帧完整性和非空视频检查均通过。审计 19 项 checks 全真、`errors=[]`、`ok=true/result=pass`，M4.3 工程门禁关闭。
+- episode 在 900 step 时 `success=false`。这是仅训练 10 step 的工程 checkpoint，结果证明长时推理、断点恢复、完整动作和落盘链路可靠，不代表 RoboCasa365 benchmark 策略性能达标。
+- 本机只归档了 M4.3 `audit.log`；同级 `summary.json`、`metadata.json`、`episode.json` 仍是 M4.2 run `20260808T015103Z` 的旧副本。完整 M4.3 原始证据继续保存在超算忽略目录，不加入 Git。
 
 M1 原生 loader 本地证据：
 
@@ -244,8 +253,8 @@ M3.2 12-step 训练反馈与 audit 修正：
 - M4.0 不再需要重跑；`robocasa-abot` 已选为当前 simulator smoke 环境。
 - M4.1 不再需要重跑；本地 `log/` 证据只读保留并由根级 ignore 排除，机器日志、视频、模型和评测产物继续位于 Git 之外。
 - M4.2 不再需要补充输入或重跑；原始日志与视频保持在 Git ignore 目录，不上传仓库。
-- M4.3 需在同一 A800 Pod 启动 broker、连续 policy server 和可恢复 client；client达到8步后故意中断一次，再使用同一个 run目录恢复并完成官方900-step或提前成功。
-- 反馈 server report/request JSONL、client两段日志、metadata/progress/summary/episode、审计JSON和视频信息。真实回放确定性、225次左右连续推理及完整视频仍为 `cluster-pending`。
+- M4.3 不再需要重跑；900-step、225 次请求、故意中断恢复和视频证据已通过机器审计。
+- 下一步由 Codex 冻结 H100 RGB-only 训练目标、数据任务范围、硬件 profile、保存频率和首轮 smoke 验收项；depth 试点暂不混入首轮 H100 RGB 基线。
 
 ## 当前执行过程
 
@@ -280,3 +289,4 @@ M3.2 12-step 训练反馈与 audit 修正：
 29. Codex 已实现 M4.2 版本化 NPZ/JSON policy 协议、透明 broker、严格 M3 checkpoint policy server 和 X-WAM simulator client；补充单任务 checkpoint/request 一致性、至少一次真实请求和 CUDA 峰值证据门禁。本地协议/路由/静态测试通过，A800真实模型加载与一次4-action闭环为 `cluster-pending`。
 30. 用户在 commit `b5b6f53` 完成 M4.2：M3 step-10 checkpoint 严格恢复、一次32x12推理、broker往返、四步完整12D环境动作和三相机视频全部通过；M4.2关闭，进入M4.3长horizon准备。
 31. Codex 已实现 M4.3 900-step配置、逐请求/逐动作原子progress、相同seed动作回放与16D state漂移阻塞、可恢复PNG帧缓存、server fsync请求JSONL和长运行机器审计；本地静态验证完成，星光故意中断/恢复及完整horizon为`cluster-pending`。
+32. 用户在 commit `f9e1b6b` 完成 M4.3：故意中断后确定性恢复，最终完成 CloseFridge 900步和225次模型请求；机器审计19项全真、`ok=true/result=pass`。M4工程链路全部关闭，下一步转入H100 RGB-only正式训练门禁规划。

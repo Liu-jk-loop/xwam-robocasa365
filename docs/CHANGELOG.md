@@ -3,7 +3,8 @@
 ## 2026-08-08 — M4.3 900-step可恢复评测实现
 
 - 修改前基线：`8790a06`（M4.2集群验收记录）
-- 运行状态：本地dependency-light合同、恢复进度、900-step合成审计和CLI检查完成；真实RoboCasa回放确定性、连续A800推理和完整horizon为`cluster-pending`
+- 验收实现：commit `f9e1b6bebde87eeb99cff2151a0eef3bc2501a31`，分支 `dev/atomic-robocasa365`，工作区干净
+- 运行状态：本地dependency-light检查和A800真实900-step恢复评测均通过；M4.3正式关闭
 
 ### 加入的逻辑
 
@@ -18,8 +19,11 @@
 ### 验证、限制与回滚
 
 - 新增纯NumPy进度状态机、state漂移阻塞、完整900-step/225请求合成证据和dependency-light CLI测试；本地不导入Torch或RoboCasa。
-- 同seed动作回放是否在当前RoboCasa/robosuite/MuJoCo版本逐步满足`1e-5`必须在星光故意中断后验证；失败时先报告首个漂移step和误差，不提高容差或跳过校验。
+- A800 run `20260808T023440Z` 完成固定 CloseFridge 官方900/900 step和225次policy request；故意中断后恢复、server journal、单一checkpoint、请求shape、16D/12D合同、完整动作边界和46帧视频证据全部通过。
+- 机器审计19项checks全真，`errors=[]`、`ok=true/result=pass`；真实同seed动作回放满足配置的state漂移门禁，M4.3不再是`cluster-pending`。
+- 本机归档的M4.3证据为`log/audit.log`；同级其他JSON仍属于M4.2旧run，完整M4.3原始产物保留在超算忽略目录且不上传Git。
 - 当前M3 checkpoint只用于工程闭环，900-step结果不解释为有效策略质量；完成M4.3后才进入H100训练测试。
+- 本轮900步`success=false`，符合10-step工程checkpoint不具备有效任务能力的预期；它不构成benchmark性能通过，正式成功率必须由H100完整训练后的checkpoint评测。
 - 回退本次commit会移除可恢复client/config/audit和server长服务证据逻辑，恢复M4.2单请求入口；不会修改或删除外部checkpoint、数据、实验目录、日志、progress或视频。
 
 ## 2026-08-08 — M4.2 X-WAM 单请求闭环集群验收
