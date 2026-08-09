@@ -1,0 +1,138 @@
+FROM nvcr.io/nvidia/pytorch:24.10-py3
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG XWAM_SHA
+ARG DECORD_SHA=6a3617cef035535193f390f86399dde139fa2a53
+ARG FLASH_ATTN_SHA=060c9188beec3a8b62b33a3bfa6d5d2d44975fab
+
+ENV PIP_CONSTRAINT="" \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONUNBUFFERED=1 \
+    TOKENIZERS_PARALLELISM=false
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      build-essential \
+      ca-certificates \
+      cmake \
+      curl \
+      ffmpeg \
+      git \
+      git-lfs \
+      libavcodec-dev \
+      libavdevice-dev \
+      libavfilter-dev \
+      libavformat-dev \
+      libavutil-dev \
+      libswresample-dev \
+      libswscale-dev \
+      ninja-build \
+      pkg-config \
+      rsync \
+      unzip \
+      wget && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --upgrade \
+      "pip==25.1.1" \
+      "setuptools==75.8.2" \
+      "wheel==0.45.1" \
+      "packaging==24.2" \
+      "ninja==1.13.0" \
+      "psutil==7.0.0"
+
+# NGC 24.10 provides the CUDA 12.6 compiler and Python 3.10. Replace its
+# development Torch snapshot with the same stable Torch family that passed the
+# existing X-WAM A800 gates. On aarch64, torchvision/torchaudio wheel names do
+# not carry the +cu126 suffix even though they come from the CUDA index.
+RUN python -m pip uninstall -y \
+      torch torchvision torchaudio flash-attn flash_attn || true && \
+    python -m pip install --no-cache-dir \
+      --index-url https://download.pytorch.org/whl/cu126 \
+      "torch==2.9.0" \
+      "torchvision==0.24.0" \
+      "torchaudio==2.9.0"
+
+COPY constraints-clariden.txt /opt/xwam-build/constraints-clariden.txt
+COPY requirements-clariden.txt /opt/xwam-build/requirements-clariden.txt
+
+RUN python -m pip install --no-cache-dir \
+      --constraint /opt/xwam-build/constraints-clariden.txt \
+      --requirement /opt/xwam-build/requirements-clariden.txt
+
+# Official Decord 0.6.0 publishes no Linux aarch64 wheel. Build its CPU video
+# decoder from the exact upstream tag commit instead of installing an x86 wheel
+# or changing the X-WAM data-loader semantics.
+RUN git clone --recursive https://github.com/dmlc/decord.git /opt/decord && \
+    git -C /opt/decord checkout "${DECORD_SHA}" && \
+    cmake -S /opt/decord -B /opt/decord/build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DUSE_CUDA=OFF && \
+    cmake --build /opt/decord/build --parallel 16 && \
+    python -m pip install --no-cache-dir /opt/decord/python && \
+    rm -rf /opt/decord/.git /opt/decord/build
+
+# FlashAttention has no official aarch64 wheel for this stack. Compile only the
+# Hopper architecture used by Clariden GH200 and cap parallelism to bound RAM.
+RUN git clone --recursive https://github.com/Dao-AILab/flash-attention.git /opt/flash-attention && \
+    git -C /opt/flash-attention checkout "${FLASH_ATTN_SHA}" && \
+    cd /opt/flash-attention && \
+    MAX_JOBS=8 \
+    TORCH_CUDA_ARCH_LIST="9.0" \
+    FLASH_ATTENTION_FORCE_BUILD=TRUE \
+    python -m pip install --no-cache-dir --no-build-isolation . && \
+    rm -rf /opt/flash-attention/.git /opt/flash-attention/build
+
+# Keep an immutable source copy for image-level import validation. Runtime uses
+# the persistent Store checkout through the EDF mount and PYTHONPATH.
+RUN test -n "${XWAM_SHA}" && \
+    git clone https://github.com/Liu-jk-loop/xwam-robocasa365.git /opt/xwam && \
+    git -C /opt/xwam checkout "${XWAM_SHA}" && \
+    rm -rf /opt/xwam/.git
+
+ENV PYTHONPATH=/opt/xwam
+
+RUN python - <<'PY'
+import importlib.metadata
+import platform
+import sys
+
+import accelerate
+import decord
+import deepspeed
+import diffusers
+import flash_attn
+import lightning
+import numpy
+import pyarrow
+import torch
+import transformers
+
+from modules.attention import HAS_FLASH_ATTN
+
+print("architecture:", platform.machine())
+print("python:", sys.version)
+print("torch:", torch.__version__)
+print("torch CUDA build:", torch.version.cuda)
+print("numpy:", numpy.__version__)
+print("flash-attn:", flash_attn.__version__)
+print("decord:", importlib.metadata.version("decord"))
+print("diffusers:", diffusers.__version__)
+print("transformers:", transformers.__version__)
+print("lightning:", lightning.__version__)
+print("deepspeed:", deepspeed.__version__)
+print("pyarrow:", pyarrow.__version__)
+print("accelerate:", accelerate.__version__)
+
+assert platform.machine() == "aarch64"
+assert sys.version_info[:2] == (3, 10)
+assert torch.__version__.startswith("2.9.0")
+assert torch.version.cuda == "12.6"
+assert numpy.__version__ == "1.23.5"
+assert flash_attn.__version__ == "2.8.3"
+assert HAS_FLASH_ATTN
+print("[PASS] X-WAM Clariden software stack")
+PY
+
+WORKDIR /workspace
+CMD ["/bin/bash"]

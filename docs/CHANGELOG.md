@@ -1,5 +1,35 @@
 # 变更记录
 
+## 2026-08-09 — Clariden aarch64/GH200 X-WAM policy 容器部署基线
+
+- 修改前基线：`c64681a`（M6 H100 atomic training 实现）
+- 目标范围：只迁移已有 X-WAM × RoboCasa365 atomic-only policy；复用 Clariden 现有 simulator、数据和 Wan2.2，不合并两套 Python 环境
+- 运行状态：Clariden 资源与官方 ARM64 wheel 已盘点；部署文件和 dependency-light 测试为 `local-static`，实际构建与运行均为 `cluster-pending`
+
+### 环境决策与兼容性
+
+- 选择已在 Clariden 成功构建 RoboCasa 的 `nvcr.io/nvidia/pytorch:24.10-py3`，固定 Ubuntu 22.04、Python 3.10 和 CUDA toolkit 12.6.2；不采用 Python 3.12 的 NGC 25.03。
+- 从 PyTorch 官方 cu126 index 固定 aarch64 Torch 2.9.0；torchvision 0.24.0 和 torchaudio 2.9.0 在 ARM64 wheel 名中没有 `+cu126` 后缀，不能按 x86 文件名判断为 CPU wheel。
+- 保持原 A800 已验证的 NumPy 1.23.5、Transformers 4.51.3、Diffusers 0.38.0、Lightning 2.6.5、DeepSpeed 0.19.4、PyArrow 16.1.0 和 PyZMQ 27.1.0 核心版本。
+- FlashAttention 2.8.3 没有匹配该 Python/Torch 的官方 Linux aarch64 wheel，固定官方 tag commit `060c918`，只为 GH200 `sm90` 源码编译并限制八个并行 job。
+- Decord 0.6.0 官方 PyPI 只有 Linux x86_64 wheel；固定官方 tag commit `6a3617c`，使用 FFmpeg 开发库构建 CPU decoder，不更改现有 Parquet/MP4 Dataset adapter。
+
+### 部署与复用逻辑
+
+- 新增 Clariden Containerfile、精确 requirements/constraints、持久化 bootstrap、Slurm build/export、EDF 模板和 GH200 validation 作业。
+- build 作业强制在同一 allocation 中完成 Podman 构建、software import、`enroot import` 和 manifest 写入，避免 `/dev/shm` image 随 allocation 消失。
+- EDF 只挂载既有 Store/Capstor scratch/IOPS scratch，workdir 与 PYTHONPATH 指向 Store repo；缓存写 IOPS，并开启 Hugging Face/Transformers offline，阻止运行时隐式下载。
+- bootstrap 只链接 FastWAM 已有 Wan2.2 大文件与 UMT5 tokenizer。经 loader 审计确认 FastWAM 目录缺少 `config.json`、`configuration.json` 和 safetensors index，脚本从 Wan 官方 revision `921dbaf` 只补三个小文件。
+- X-WAM checkpoint 只从官方 revision `bb6fd16` 下载 `pretrained` 路径，保留 Wan base、X-WAM pretrained 和 RoboCasa post-training 三层语义；不下载或误用官方 RoboCasa SFT。
+- 4×GH200 validation 检查四卡可见、Torch/CUDA/NumPy/FlashAttention 精确版本、BF16 FlashAttention forward/backward kernel、全部 Wan/T5/VAE/tokenizer/X-WAM pretrained 文件和真实 CloseFridge atomic 数据发现。
+
+### 验证、风险与回滚
+
+- 新增 dependency-light 测试，检查 policy/simulator 隔离、ARM64 关键 pin、官方源码 commit、EDF cache/offline 约束和三个 shell 脚本语法。
+- 本地没有 Clariden container runtime；Podman build、aarch64 native extension、SQSH、EDF、GH200 kernel、真实 model load、dataset batch 和训练仍为 `cluster-pending`，不得从静态检查推断通过。
+- 最大构建风险是 FlashAttention/Decord ARM64 源码编译；失败时保留 build log，并先按 Python/Torch/CUDA/arch/ABI 分类，不升级模型语义依赖。
+- 回退本次 commit 可删除 `deployment/clariden/`、Clariden environment manifest、测试和文档记录；不会删除 Clariden 既有 RoboCasa/FastWAM SQSH、数据、权重或作业。
+
 ## 2026-08-08 — M6 4×H100 RGB-only训练门禁与正式配置
 
 - 修改前基线：`e9c3bf3`（M4.3集群验收记录）

@@ -1,13 +1,13 @@
 # 项目进度
 
-更新时间：2026-08-08
+更新时间：2026-08-09
 
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：M6.1——H100 RGB-only 正式训练门禁实现
+- 当前阶段：Clariden 迁移——独立 X-WAM aarch64/GH200 policy 容器部署
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3门禁均通过；M6代码与配置已完成本地静态检查，等待生成18任务manifest/global stats并在4×H100执行2→4步门禁
+- 超算运行状态：M1～M4.3门禁均已在原 A800 环境通过；Clariden 已完成现有资源盘点和容器方案静态检查，镜像构建、GH200 kernel 与训练门禁为 `cluster-pending`
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -22,6 +22,18 @@
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
 | M6 Atomic 正式训练与评测 | 18任务RGB训练实现完成 | cluster-pending | 生成全局统计，完成4×H100 step 2→4保存恢复门禁 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
+
+## Clariden 部署状态
+
+- 登录节点确认为 `clariden-ln002`，架构为 `aarch64`；Store、IOPS scratch 和 Capstor scratch 可用。
+- 复用既有 RoboCasa365 SQSH/EDF，不修改 simulator：`robocasa365-ngc2410-b4684e6e.sqsh` 已存在。
+- 复用既有 65 个 atomic human pretrain 任务；训练入口继续只指向 `pretrain/atomic`，不读取同级 composite。
+- 复用 FastWAM 已下载的 Wan2.2 三个 safetensors 分片、T5 和 VAE；tokenizer 复用其 Wan2.1 UMT5 目录。
+- FastWAM 的 Wan2.2 目录缺少 X-WAM Diffusers loader 必需的三个小文件，部署脚本从官方固定 revision `921dbaf` 补 `config.json`、`configuration.json` 和权重 index。
+- X-WAM 公开 cross-embodiment checkpoint 在 Clariden Store 尚不存在；部署脚本只下载 `pretrained` 初始化权重，不下载 RoboCasa/Robotwin SFT 权重。
+- 容器基线冻结为 NGC 24.10（Ubuntu 22.04、Python 3.10、CUDA 12.6.2）+ 官方 aarch64 Torch 2.9.0 cu126；FlashAttention 2.8.3 和 Decord 0.6.0 使用官方固定 commit 源码构建。
+- `deployment/clariden/` 已提供 Containerfile、约束、Store/bootstrap、allocation 内 build→validate→enroot import、EDF 模板和 4×GH200 kernel/discovery 门禁。
+- 本地静态状态：`local-static`；真实 build、SQSH、EDF、CUDA、FlashAttention kernel、checkpoint、dataset 和 training 状态均保持 `cluster-pending`，等待 Clariden 作业证据。
 
 ## 已确认资源
 

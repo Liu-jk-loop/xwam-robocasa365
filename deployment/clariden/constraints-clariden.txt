@@ -1,0 +1,13 @@
+# Critical ABI and model-stack constraints for Clariden aarch64/GH200.
+torch==2.9.0
+torchvision==0.24.0
+torchaudio==2.9.0
+numpy==1.23.5
+transformers==4.51.3
+tokenizers==0.21.4
+diffusers==0.38.0
+accelerate==1.14.0
+lightning==2.6.5
+deepspeed==0.19.4
+pyarrow==16.1.0
+pyzmq==27.1.0
