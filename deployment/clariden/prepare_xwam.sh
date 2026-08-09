@@ -60,10 +60,13 @@ for DEPLOY_FILE in \
   configuration.json \
   diffusion_pytorch_model.safetensors.index.json; do
   if [[ ! -s "$WAN_DIR/$DEPLOY_FILE" ]]; then
+    echo "Downloading Wan2.2 metadata: $DEPLOY_FILE"
     curl \
       --fail \
       --location \
       --retry 5 \
+      --show-error \
+      --silent \
       --output "$WAN_DIR/$DEPLOY_FILE.partial" \
       "https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B/resolve/$WAN_REVISION/$DEPLOY_FILE?download=true"
     mv "$WAN_DIR/$DEPLOY_FILE.partial" "$WAN_DIR/$DEPLOY_FILE"
@@ -75,22 +78,28 @@ PRETRAINED_MODEL="$PRETRAINED_ROOT/checkpoints/last.ckpt/checkpoint/mp_rank_00_m
 mkdir -p "$(dirname "$PRETRAINED_MODEL")"
 
 if [[ ! -s "$PRETRAINED_ROOT/config.yaml" ]]; then
+  echo "Downloading X-WAM pretrained config"
   curl \
     --fail \
     --location \
     --retry 5 \
+    --show-error \
+    --silent \
     --output "$PRETRAINED_ROOT/config.yaml.partial" \
     "https://huggingface.co/sharinka0715/X-WAM-checkpoints/resolve/$XWAM_CHECKPOINT_REVISION/pretrained/config.yaml?download=true"
   mv "$PRETRAINED_ROOT/config.yaml.partial" "$PRETRAINED_ROOT/config.yaml"
 fi
 
 if [[ ! -s "$PRETRAINED_MODEL" ]]; then
+  echo "Downloading/resuming X-WAM pretrained model state"
   curl \
     --continue-at - \
     --fail \
     --location \
     --retry 10 \
     --retry-delay 10 \
+    --show-error \
+    --silent \
     --output "$PRETRAINED_MODEL.partial" \
     "https://huggingface.co/sharinka0715/X-WAM-checkpoints/resolve/$XWAM_CHECKPOINT_REVISION/pretrained/checkpoints/last.ckpt/checkpoint/mp_rank_00_model_states.pt?download=true"
   mv "$PRETRAINED_MODEL.partial" "$PRETRAINED_MODEL"

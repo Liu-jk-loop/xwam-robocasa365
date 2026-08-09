@@ -21,6 +21,7 @@
 - EDF 只挂载既有 Store/Capstor scratch/IOPS scratch，workdir 与 PYTHONPATH 指向 Store repo；缓存写 IOPS，并开启 Hugging Face/Transformers offline，阻止运行时隐式下载。
 - bootstrap 只链接 FastWAM 已有 Wan2.2 大文件与 UMT5 tokenizer。经 loader 审计确认 FastWAM 目录缺少 `config.json`、`configuration.json` 和 safetensors index，脚本从 Wan 官方 revision `921dbaf` 只补三个小文件。
 - X-WAM checkpoint 只从官方 revision `bb6fd16` 下载 `pretrained` 路径，保留 Wan base、X-WAM pretrained 和 RoboCasa post-training 三层语义；不下载或误用官方 RoboCasa SFT。
+- checkpoint 下载使用可恢复的 `.partial` 文件和安静日志；连接中断后重跑会续传 38.9 GB model state，不会覆盖已完成文件或在终端刷出巨量进度行。
 - 4×GH200 validation 检查四卡可见、Torch/CUDA/NumPy/FlashAttention 精确版本、BF16 FlashAttention forward/backward kernel、全部 Wan/T5/VAE/tokenizer/X-WAM pretrained 文件和真实 CloseFridge atomic 数据发现。
 
 ### 验证、风险与回滚
