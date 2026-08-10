@@ -15,6 +15,13 @@
 - 将 T5 默认 device 改为构造时延迟解析：未显式传 device 时仍选当前 CUDA device，但纯 import 不再需要 driver。保留 Containerfile 的 X-WAM/FlashAttention import 门禁，真正的 CUDA kernel 仍由 `validate_xwam.sbatch` 在 4×GH200 上验证。
 - 迭代构建建议先申请 normal 交互式 allocation，再在同一节点内直接重跑 `build_xwam.sbatch`；Podman 节点本地 layer cache 可复用已完成的 FlashAttention 层。换节点或 allocation 结束后不保证保留该 cache。
 
+### Clariden 容器与 GH200 验收证据
+
+- commit `6594d898a87145101afe5f8a45fa6ba907b2b3c3` 完成 24 GB Podman image 和 17,803,421,177-byte zstd SquashFS；`unsquashfs -s` 确认为有效 SquashFS 4.0，持久化路径为 `/capstor/scratch/cscs/zjingchen/terry_nys/containers/xwam-ngc2410-cu126-6594d898.sqsh`。
+- `enroot import` 在已写出有效 SQSH 后返回非零，导致原脚本未写 EDF/manifest；本轮已手工补齐。build 脚本改为仅在 SQSH 存在且 `unsquashfs -s` 通过时允许带警告继续，否则仍保留原错误码退出。
+- 用户回报 `validate_xwam.sbatch` 全部通过：4×GH200 可见、Torch CUDA 12.6、NumPy 1.23.5、FlashAttention 2.8.3 BF16 forward/backward kernel、Wan/T5/VAE/tokenizer、X-WAM pretrained 和 CloseFridge 路径发现均通过。本次未提供 validation Job ID，不补写未知 provenance。
+- 新增 1-GPU `smoke_batch_xwam.sbatch`，在 EDF 中真实解码 CloseFridge clip 0，检查三路 RGB、16D state、12D action、确定性和 RGB-only 合同。该门禁与训练分开，当前仍为 `cluster-pending`。
+
 ## 2026-08-09 — Clariden aarch64/GH200 X-WAM policy 容器部署基线
 
 - 修改前基线：`c64681a`（M6 H100 atomic training 实现）

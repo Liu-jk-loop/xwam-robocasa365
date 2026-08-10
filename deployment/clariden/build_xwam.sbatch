@@ -47,10 +47,20 @@ if [[ -e "$SQSH" ]]; then
   exit 2
 fi
 
+ENROOT_STATUS=0
 enroot import \
   -x mount \
   -o "$SQSH" \
-  "podman://localhost/$IMAGE_TAG:latest"
+  "podman://localhost/$IMAGE_TAG:latest" || ENROOT_STATUS=$?
+
+if (( ENROOT_STATUS != 0 )); then
+  if [[ -s "$SQSH" ]] && unsquashfs -s "$SQSH" >/dev/null; then
+    echo "[WARN] enroot import exited $ENROOT_STATUS after producing a valid SQSH; continuing finalization" >&2
+  else
+    echo "enroot import failed with status $ENROOT_STATUS and produced no valid SQSH" >&2
+    exit "$ENROOT_STATUS"
+  fi
+fi
 
 test -s "$SQSH"
 sed "s|@SQSH@|$SQSH|g" "$BUILD_DIR/xwam.toml.template" > "$EDF"

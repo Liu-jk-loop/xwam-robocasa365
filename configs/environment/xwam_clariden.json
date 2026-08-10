@@ -48,11 +48,19 @@
   },
   "validation": {
     "local_static": "pass",
-    "container_build": "cluster-pending",
-    "gh200_cuda": "cluster-pending",
-    "flash_attn_kernel": "cluster-pending",
-    "checkpoint_discovery": "cluster-pending",
+    "container_build": "pass",
+    "gh200_cuda": "pass",
+    "flash_attn_kernel": "pass",
+    "checkpoint_discovery": "pass",
     "dataset_smoke": "cluster-pending",
     "training": "cluster-pending"
+  },
+  "cluster_evidence": {
+    "source_commit": "6594d898a87145101afe5f8a45fa6ba907b2b3c3",
+    "sqsh": "/capstor/scratch/cscs/zjingchen/terry_nys/containers/xwam-ngc2410-cu126-6594d898.sqsh",
+    "sqsh_size_bytes": 17803421177,
+    "gpu_topology": "4x NVIDIA GH200",
+    "validation_result": "pass",
+    "validation_job_id": null
   }
 }

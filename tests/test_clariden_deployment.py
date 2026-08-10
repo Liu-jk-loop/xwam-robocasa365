@@ -23,6 +23,16 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertEqual(contract["packages"]["numpy"], "1.23.5")
         self.assertEqual(contract["packages"]["safetensors"], "0.8.0")
         self.assertTrue(contract["simulator_contract"]["separate_container"])
+        for gate in (
+            "container_build",
+            "gh200_cuda",
+            "flash_attn_kernel",
+            "checkpoint_discovery",
+        ):
+            self.assertEqual(contract["validation"][gate], "pass")
+        self.assertEqual(
+            contract["validation"]["dataset_smoke"], "cluster-pending"
+        )
 
     def test_containerfile_pins_arm64_critical_builds(self) -> None:
         containerfile = (DEPLOY_ROOT / "Containerfile").read_text(encoding="utf-8")
@@ -90,7 +100,12 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertNotIn("MUJOCO_GL", template)
 
     def test_cluster_scripts_pass_shell_syntax(self) -> None:
-        for script in ("prepare_xwam.sh", "build_xwam.sbatch", "validate_xwam.sbatch"):
+        for script in (
+            "prepare_xwam.sh",
+            "build_xwam.sbatch",
+            "validate_xwam.sbatch",
+            "smoke_batch_xwam.sbatch",
+        ):
             result = subprocess.run(
                 ["bash", "-n", str(DEPLOY_ROOT / script)],
                 cwd=REPO_ROOT,
@@ -100,6 +115,12 @@ class ClaridenDeploymentTest(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
+
+        build_script = (DEPLOY_ROOT / "build_xwam.sbatch").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("unsquashfs -s", build_script)
+        self.assertIn("ENROOT_STATUS", build_script)
 
 
 if __name__ == "__main__":
