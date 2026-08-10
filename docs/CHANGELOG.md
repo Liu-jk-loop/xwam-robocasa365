@@ -1,5 +1,14 @@
 # 变更记录
 
+## 2026-08-10 — Clariden DeepSpeed NVTX domain 兼容修复
+
+- 首次 1×GH200 单步训练 Job `3044897` 已进入 Lightning `training_step`，但 DeepSpeed 0.19.4 在执行模型 wrapper 前调用 `nvtx.get_domain`，当前 SQSH 中被 import 的 `nvtx` 不提供该 API，作业以 `AttributeError` 退出。该次 CUDA 峰值 allocated/reserved 为 30.677/40.076 GiB，不是 OOM；真实 X-WAM forward/backward/optimizer update 尚未得到验证。
+- 为避免因一个小型 Python 包重建 16.98 GiB SQSH 并重新编译 FlashAttention，新增 `prepare_runtime_overlay_xwam.sbatch`：在计算节点从精确哈希 requirements 安装 `nvtx==0.2.12` 到版本化 IOPS 目录，先在临时目录验证版本、模块来源和 `get_domain`，再原子发布并记录 Store manifest。已存在的合法 overlay 会直接复用，非法目录会失败而不覆盖。
+- `smoke_train_xwam.sbatch` 在启动 5B 模型前显式把该 overlay 放到 `PYTHONPATH` 首位，并再次校验模块确实来自 overlay、版本精确且 API 可调用；缺失或 shadowing 会立即退出。
+- `requirements-clariden.txt`、constraints、Containerfile、build import 门禁和环境 manifest 同步固定 `nvtx==0.2.12`，因此未来正常重建镜像会内置同一修复；EDF 模板也记录 overlay 优先级，当前已有 EDF 无需为本次 smoke 手工改写。
+- 本地通过 shell 语法、dependency-light 单元测试、JSON 解析、文档同步和 diff 门禁。当前工作站没有 Clariden runtime；ARM64 wheel 下载、overlay import、DeepSpeed domain push/pop 和真实单步训练均为 `cluster-pending`。
+- 回滚本次 commit 会移除 overlay 安装/前置检查，并恢复旧依赖清单；不会删除服务器已有 SQSH、IOPS overlay、日志、模型、数据或实验目录。若需删除外部 overlay，应单独确认路径后由用户执行。
+
 ## 2026-08-10 — Clariden 首次构建 dependency resolver 修复
 
 - Clariden 首次真实 build 已证明 Torch 2.9.0/cu126 overlay 安装成功，但在 requirements 解析阶段中止，尚未进入 Decord、FlashAttention 编译和 SQSH 导出。

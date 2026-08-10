@@ -14,7 +14,7 @@ entrypoint = false
 [env]
 PYTHONUNBUFFERED = "1"
 TOKENIZERS_PARALLELISM = "false"
-PYTHONPATH = "/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365"
+PYTHONPATH = "/iopsstor/scratch/cscs/zjingchen/terry_nys/python/xwam-nvtx-0.2.12:/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365"
 HF_HOME = "/iopsstor/scratch/cscs/zjingchen/terry_nys/cache/huggingface"
 HF_HUB_OFFLINE = "1"
 TRANSFORMERS_OFFLINE = "1"

@@ -109,6 +109,7 @@ import diffusers
 import flash_attn
 import lightning
 import numpy
+import nvtx
 import pyarrow
 import safetensors
 import torch
@@ -127,6 +128,7 @@ print("diffusers:", diffusers.__version__)
 print("transformers:", transformers.__version__)
 print("lightning:", lightning.__version__)
 print("deepspeed:", deepspeed.__version__)
+print("nvtx:", importlib.metadata.version("nvtx"))
 print("pyarrow:", pyarrow.__version__)
 print("accelerate:", accelerate.__version__)
 print("safetensors:", safetensors.__version__)
@@ -138,6 +140,8 @@ assert torch.version.cuda == "12.6"
 assert numpy.__version__ == "1.23.5"
 assert safetensors.__version__ == "0.8.0"
 assert flash_attn.__version__ == "2.8.3"
+assert importlib.metadata.version("nvtx") == "0.2.12"
+assert callable(nvtx.get_domain)
 assert HAS_FLASH_ATTN
 for removed_distribution in (
     "transformer-engine",

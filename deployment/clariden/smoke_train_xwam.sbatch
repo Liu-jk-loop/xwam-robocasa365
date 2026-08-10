@@ -13,7 +13,9 @@ set -euo pipefail
 
 DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
 DEPLOY_CAPSCR=/capstor/scratch/cscs/zjingchen/terry_nys
+DEPLOY_IOPS=/iopsstor/scratch/cscs/zjingchen/terry_nys
 EDF="$DEPLOY_STORE/containers/edf/xwam.toml"
+RUNTIME_OVERLAY="$DEPLOY_IOPS/python/xwam-nvtx-0.2.12"
 DATASET="$DEPLOY_STORE/datasets/robocasa/v1.0/pretrain/atomic/CloseFridge/20250819/lerobot"
 WAN_DIR="$DEPLOY_STORE/checkpoints/xwam/wan22_5b"
 PRETRAINED="$DEPLOY_STORE/checkpoints/xwam/pretrained/checkpoints/last.ckpt"
@@ -30,6 +32,7 @@ test -s "$WAN_DIR/config.json"
 test -s "$WAN_DIR/models_t5_umt5-xxl-enc-bf16.pth"
 test -s "$WAN_DIR/Wan2.2_VAE.pth"
 test -s "$PRETRAINED/checkpoint/mp_rank_00_model_states.pt"
+test -d "$RUNTIME_OVERLAY"
 mkdir -p "$EXP_ROOT"
 
 srun --environment="$EDF" bash -lc "
@@ -38,6 +41,21 @@ export MAX_JOBS=8
 export OMP_NUM_THREADS=32
 export MKL_NUM_THREADS=32
 export XWAM_RUN_ID='$RUN_ID'
+export PYTHONPATH='$RUNTIME_OVERLAY':\${PYTHONPATH:-}
+
+python - <<'PY'
+import importlib.metadata
+from pathlib import Path
+
+import nvtx
+
+overlay = Path('$RUNTIME_OVERLAY').resolve()
+module = Path(nvtx.__file__).resolve()
+assert module.is_relative_to(overlay), (module, overlay)
+assert importlib.metadata.version('nvtx') == '0.2.12'
+assert callable(nvtx.get_domain)
+print('Clariden NVTX runtime overlay:', module)
+PY
 
 nvidia-smi
 free -h

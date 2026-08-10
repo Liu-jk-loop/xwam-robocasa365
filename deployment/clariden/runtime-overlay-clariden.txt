@@ -1,0 +1,2 @@
+nvtx==0.2.12 \
+    --hash=sha256:0d3070d71e5b9661d40ae6f1a6bae289939ee8ca073283f6be84799de393b4eb
