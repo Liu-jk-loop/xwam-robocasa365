@@ -50,6 +50,10 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertEqual(
             contract["cluster_evidence"]["multigpu_resume_result"], "not-run"
         )
+        self.assertEqual(
+            contract["cluster_evidence"]["multigpu_resume_retry_failure"]["job_id"],
+            3047286,
+        )
 
     def test_containerfile_pins_arm64_critical_builds(self) -> None:
         containerfile = (DEPLOY_ROOT / "Containerfile").read_text(encoding="utf-8")
@@ -240,6 +244,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "resume_checkpoint='$CHECKPOINT'",
             "unset SLURM_NTASKS",
             'env INITIAL_RESULT="$INITIAL_RESULT" CHECKPOINT_RECORD="$CHECKPOINT_RECORD"',
+            "resolve_clariden_initial_checkpoint.py",
             'INITIAL_METADATA="$INITIAL_METADATA"',
             "--allow-orchestration-only-commit-delta",
             "audit_clariden_4gpu_resume.py",
@@ -247,6 +252,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
         ):
             self.assertIn(expected, script)
         self.assertNotIn('CHECKPOINT="$(python - "$INITIAL_RESULT"', script)
+        self.assertNotIn("payload['result']", script)
 
 
 if __name__ == "__main__":

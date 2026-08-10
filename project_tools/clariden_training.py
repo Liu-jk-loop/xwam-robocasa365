@@ -18,6 +18,29 @@ def _load_json(path: str | Path) -> dict[str, Any]:
     return payload
 
 
+def resolve_clariden_initial_checkpoint(
+    *, result_path: str | Path, record_path: str | Path
+) -> Path:
+    """Validate a completed step-2 initial result and persist its checkpoint path."""
+    payload = _load_json(result_path)
+    if payload.get("result") != "pass":
+        raise ValueError(f"initial result不是pass：{payload}")
+    if int(payload.get("global_step", -1)) != 2:
+        raise ValueError(f"initial global_step不是2：{payload}")
+    if payload.get("error") is not None:
+        raise ValueError(f"initial result包含error：{payload}")
+    checkpoint = payload.get("last_checkpoint")
+    if not checkpoint:
+        raise ValueError(f"initial result缺少last_checkpoint：{payload}")
+    checkpoint_path = Path(str(checkpoint)).expanduser().resolve()
+    if not checkpoint_path.is_dir():
+        raise ValueError(f"initial checkpoint目录不存在：{checkpoint_path}")
+    output = Path(record_path).expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(f"{checkpoint_path}\n", encoding="utf-8")
+    return checkpoint_path
+
+
 def _load_events(path: str | Path) -> list[dict[str, Any]]:
     resolved = Path(path).expanduser().resolve()
     events = []

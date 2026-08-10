@@ -92,6 +92,12 @@
     "multigpu_initial_result": "pass",
     "multigpu_initial_global_step": 2,
     "multigpu_resume_result": "not-run",
-    "multigpu_orchestration_failure": "The outer Slurm host had no python command, so checkpoint parsing failed after the successful initial phase and before the resumed srun"
+    "multigpu_orchestration_failure": "The outer Slurm host had no python command, so checkpoint parsing failed after the successful initial phase and before the resumed srun",
+    "multigpu_resume_retry_failure": {
+      "job_id": 3047286,
+      "source_commit": "d7a62d4817723e93061c050ea45d5bbd24e176dc",
+      "result": "fail",
+      "reason": "Nested shell quoting removed Python string quotes in the in-container initial-result parser; resumed training did not start"
+    }
   }
 }

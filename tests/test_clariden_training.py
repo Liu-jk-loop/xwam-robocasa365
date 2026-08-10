@@ -5,7 +5,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from project_tools.clariden_training import build_clariden_4gpu_resume_report
+from project_tools.clariden_training import (
+    build_clariden_4gpu_resume_report,
+    resolve_clariden_initial_checkpoint,
+)
 
 
 METRICS = (
@@ -126,6 +129,52 @@ def _write_run(
 
 
 class ClaridenTrainingAuditTest(unittest.TestCase):
+    def test_initial_checkpoint_resolver_writes_validated_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            checkpoint = root / "step=2.ckpt"
+            checkpoint.mkdir()
+            result = root / "initial_result.json"
+            record = root / "checkpoint.txt"
+            result.write_text(
+                json.dumps(
+                    {
+                        "result": "pass",
+                        "global_step": 2,
+                        "error": None,
+                        "last_checkpoint": str(checkpoint),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            resolved = resolve_clariden_initial_checkpoint(
+                result_path=result,
+                record_path=record,
+            )
+            self.assertEqual(resolved, checkpoint.resolve())
+            self.assertEqual(record.read_text(encoding="utf-8").strip(), str(resolved))
+
+    def test_initial_checkpoint_resolver_rejects_failed_result(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = root / "initial_result.json"
+            result.write_text(
+                json.dumps(
+                    {
+                        "result": "fail",
+                        "global_step": 2,
+                        "error": "boom",
+                        "last_checkpoint": None,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "initial result不是pass"):
+                resolve_clariden_initial_checkpoint(
+                    result_path=result,
+                    record_path=root / "checkpoint.txt",
+                )
+
     def test_four_gpu_step_two_to_four_resume_evidence_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

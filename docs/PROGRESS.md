@@ -46,6 +46,7 @@
 - 新增 Clariden 专用四卡恢复门禁：固定 CloseFridge 前8个clip、4×micro-batch 1、ZeRO-2 FP32 CPUAdam offload和四步scheduler；同一allocation内先到step 2保存，再从该checkpoint严格恢复到step 4。Debug checkpoint排除冻结T5/VAE，但恢复仍拒绝任何可训练参数缺失。
 - Job `3046423` 在commit `1b5f350e5e889f12716d380fe00827e784541eab`完成4×GH200 initial阶段：四rank topology与FP32 optimizer state audit通过，step 0/1 loss有限且depth loss为0，step 2 checkpoint保存完成，result为pass；每rank峰值显存allocated/reserved为30.677/33.039 GiB。
 - Job `3046423` 的外层Slurm脚本随后因宿主机没有`python`而在解析checkpoint时退出，resume阶段未运行，因此两个日志不能解释为两阶段均通过。脚本已将解析与最终审计移入EDF，并支持设置`XWAM_INITIAL_JOB_ID=3046423`复用现有initial checkpoint；复用审计只接受新旧commit间的编排/审计/测试/文档白名单差异，训练相关文件变化会阻塞。step 2→4严格恢复与最终联合审计仍为`cluster-pending`。
+- 复用重试Job `3047286`在容器内解析阶段因嵌套shell引号删除Python字符串引号而触发`SyntaxError`，尚未启动resumed模型或训练。解析逻辑已移到独立CLI并增加有效/失败result测试；继续复用Job `3046423`，step 2→4状态保持`cluster-pending`。
 
 ## 已确认资源
 

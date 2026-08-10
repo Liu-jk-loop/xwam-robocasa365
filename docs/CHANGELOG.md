@@ -9,6 +9,7 @@
 - 新增dependency-light联合审计器，验证四张GH200/单节点world size 4、相同干净Git commit和数据、固定scheduler、有限RGB-only loss、四rank实际FP32 optimizer state、step 2/4保存完成、非空model state、四个ZeRO optimizer shard、恢复源精确一致及最终`global_step=4`。
 - Clariden Job `3046423` 在commit `1b5f350e5e889f12716d380fe00827e784541eab`上完成initial阶段：4×GH200 120GB、world size 4、四rank FP32 optimizer state audit、step 0/1有限loss、step 2 checkpoint保存和`result=pass`均有日志证据。每rank峰值显存为allocated/reserved 30.677/33.039 GiB。
 - 该作业未进入resume阶段：EDF训练`srun`结束后，外层Slurm宿主脚本用`python`解析result，Clariden宿主环境报`python: command not found`。现将checkpoint解析和最终联合审计均移入EDF容器，并允许通过`XWAM_INITIAL_JOB_ID=3046423`复用已通过的initial产物，只重跑step 2→4恢复阶段。复用时审计器会用Git验证新旧commit差异严格局限于冻结的Slurm编排、审计、测试和文档路径；模型、数据、训练配置或runner有任何改动仍会失败。
+- 首次复用重试Job `3047286`在进入resumed训练前失败：嵌入单引号`srun bash -lc`的Python heredoc仍包含`payload['result']`等单引号，shell quote removal将其变成`payload[result]`并触发`SyntaxError`。现移除内嵌Python，新增独立、可单测的checkpoint解析CLI；它在EDF内严格验证initial `result=pass/global_step=2/error=null`和checkpoint目录后写出路径。该失败没有启动模型加载或训练，不影响Job `3046423` checkpoint。
 - 本地已通过聚焦测试、shell语法、Python compile和CLI help；工作站无Torch/Clariden。四卡initial已通过，但严格恢复到step 4和最终联合审计仍为`cluster-pending`。
 - 回退本次commit会移除GH200四卡配置、作业、审计器和测试，不会删除服务器现有单卡结果、模型、数据、overlay或未来产生的外部checkpoint。外部实验目录如需清理必须由用户单独确认。
 

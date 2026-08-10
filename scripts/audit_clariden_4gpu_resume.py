@@ -27,6 +27,7 @@ ORCHESTRATION_ONLY_PATHS = {
     "docs/PROGRESS.md",
     "project_tools/clariden_training.py",
     "scripts/audit_clariden_4gpu_resume.py",
+    "scripts/resolve_clariden_initial_checkpoint.py",
     "tests/test_clariden_deployment.py",
     "tests/test_clariden_training.py",
 }

@@ -119,29 +119,13 @@ test -s "$INITIAL_METADATA"
 test -s "$INITIAL_RESULT"
 test -s "$INITIAL_EVENTS"
 
-rm -f "$CHECKPOINT_RECORD"
 srun --kill-on-bad-exit=1 --environment="$EDF" \
   env INITIAL_RESULT="$INITIAL_RESULT" CHECKPOINT_RECORD="$CHECKPOINT_RECORD" \
   bash -lc '
 set -euo pipefail
-python - <<'"'"'PY'"'"'
-import json
-import os
-from pathlib import Path
-
-result_path = Path(os.environ["INITIAL_RESULT"])
-record_path = Path(os.environ["CHECKPOINT_RECORD"])
-payload = json.loads(result_path.read_text(encoding="utf-8"))
-assert payload['result'] == 'pass', payload
-assert payload['global_step'] == 2, payload
-assert payload['error'] is None, payload
-checkpoint = payload.get('last_checkpoint')
-assert checkpoint, payload
-checkpoint_path = Path(checkpoint).resolve()
-assert checkpoint_path.is_dir(), checkpoint_path
-record_path.write_text(f"{checkpoint_path}\n", encoding="utf-8")
-print(f"Initial checkpoint: {checkpoint_path}")
-PY
+python scripts/resolve_clariden_initial_checkpoint.py \
+  --result "$INITIAL_RESULT" \
+  --output "$CHECKPOINT_RECORD"
 '
 test -s "$CHECKPOINT_RECORD"
 IFS= read -r CHECKPOINT < "$CHECKPOINT_RECORD"
