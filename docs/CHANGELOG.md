@@ -7,7 +7,9 @@
 - 每阶段只由`srun`启动一个持有四张GPU的EDF容器任务，延续仓库既有“Lightning按`devices=4`派生四个本地进程”的合同；训练前清除step级单任务Slurm拓扑变量，避免`SLURM_NTASKS=1`与训练world size 4冲突。
 - Debug checkpoint显式排除冻结T5/VAE以控制保存体积；既有严格恢复适配只允许这些冻结参数缺失，任何可训练参数缺失、额外参数或shape错误仍会失败。保留两个step checkpoint便于诊断，不把门禁checkpoint用于正式训练。
 - 新增dependency-light联合审计器，验证四张GH200/单节点world size 4、相同干净Git commit和数据、固定scheduler、有限RGB-only loss、四rank实际FP32 optimizer state、step 2/4保存完成、非空model state、四个ZeRO optimizer shard、恢复源精确一致及最终`global_step=4`。
-- 本地已通过聚焦测试、shell语法、Python compile和CLI help；工作站无Torch/Clariden，真实NCCL、四卡forward/backward、checkpoint I/O、严格恢复和审计为`cluster-pending`。
+- Clariden Job `3046423` 在commit `1b5f350e5e889f12716d380fe00827e784541eab`上完成initial阶段：4×GH200 120GB、world size 4、四rank FP32 optimizer state audit、step 0/1有限loss、step 2 checkpoint保存和`result=pass`均有日志证据。每rank峰值显存为allocated/reserved 30.677/33.039 GiB。
+- 该作业未进入resume阶段：EDF训练`srun`结束后，外层Slurm宿主脚本用`python`解析result，Clariden宿主环境报`python: command not found`。现将checkpoint解析和最终联合审计均移入EDF容器，并允许通过`XWAM_INITIAL_JOB_ID=3046423`复用已通过的initial产物，只重跑step 2→4恢复阶段。复用时审计器会用Git验证新旧commit差异严格局限于冻结的Slurm编排、审计、测试和文档路径；模型、数据、训练配置或runner有任何改动仍会失败。
+- 本地已通过聚焦测试、shell语法、Python compile和CLI help；工作站无Torch/Clariden。四卡initial已通过，但严格恢复到step 4和最终联合审计仍为`cluster-pending`。
 - 回退本次commit会移除GH200四卡配置、作业、审计器和测试，不会删除服务器现有单卡结果、模型、数据、overlay或未来产生的外部checkpoint。外部实验目录如需清理必须由用户单独确认。
 
 ## 2026-08-10 — Clariden DeepSpeed NVTX domain 兼容修复

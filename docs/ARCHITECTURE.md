@@ -134,6 +134,7 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - Slurm allocation内每阶段只由`srun`启动一个EDF容器任务，四个本地rank继续由Lightning的`devices=4` launcher派生；进入训练前移除step级`SLURM_NTASKS=1`拓扑变量，避免Lightning把容器任务数误判为训练world size。
 - Debug checkpoint 可以排除冻结 T5/VAE以控制空间，但恢复报告只能接受这些冻结参数缺失，任何可训练参数缺失或额外参数仍阻塞。四个rank都必须报告实际FP32 optimizer state，checkpoint必须包含非空model state和四个ZeRO optimizer shard。
 - dependency-light审计同时检查四张GH200、有限RGB-only loss、step 2/4 checkpoint完成事件、恢复源一致性及`global_step=4`。通过只关闭部署恢复门禁，不代表M6正式训练配置、吞吐或模型质量。
+- 两阶段编排不依赖Clariden宿主机Python：checkpoint result解析和最终联合审计都在EDF内执行。若initial阶段已保存并通过，可用其Slurm Job ID重建实验/run路径并只执行恢复阶段；复用仍会重新验证initial result与checkpoint目录，不会跳过最终联合审计。由于编排修复会改变Git commit，复用模式只在Git diff严格局限于冻结的编排、审计、测试和文档路径时接受commit差异；任何训练runtime、模型、数据或实验配置变化都会阻塞。
 
 ### M6 H100 RGB-only 正式训练合同
 

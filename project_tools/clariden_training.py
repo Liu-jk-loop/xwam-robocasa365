@@ -239,7 +239,10 @@ def _run_contract(
 
 
 def build_clariden_4gpu_resume_report(
-    *, initial: dict[str, str], resumed: dict[str, str]
+    *,
+    initial: dict[str, str],
+    resumed: dict[str, str],
+    commit_compatibility: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     errors: list[str] = []
     try:
@@ -255,12 +258,21 @@ def build_clariden_4gpu_resume_report(
             expected_metric_steps=[2, 3],
             expect_resume=True,
         )
+        same_commit = bool(initial_report["git_commit"]) and (
+            initial_report["git_commit"] == resumed_report["git_commit"]
+        )
+        compatible_commit_delta = bool(commit_compatibility) and (
+            commit_compatibility.get("ok") is True
+            and commit_compatibility.get("initial_commit")
+            == initial_report["git_commit"]
+            and commit_compatibility.get("resumed_commit")
+            == resumed_report["git_commit"]
+        )
         cross_checks = {
             "different_run_ids": bool(initial_report["run_id"])
             and bool(resumed_report["run_id"])
             and initial_report["run_id"] != resumed_report["run_id"],
-            "same_clean_commit": bool(initial_report["git_commit"])
-            and initial_report["git_commit"] == resumed_report["git_commit"],
+            "compatible_training_source": same_commit or compatible_commit_delta,
             "same_dataset": bool(initial_report["dataset_path"])
             and initial_report["dataset_path"] == resumed_report["dataset_path"],
             "same_scheduler_horizon": initial_report["schedule"].get(
@@ -294,6 +306,7 @@ def build_clariden_4gpu_resume_report(
         "ok": ok,
         "initial": initial_report,
         "resumed": resumed_report,
+        "commit_compatibility": commit_compatibility,
         "checks": cross_checks,
         "errors": errors,
     }

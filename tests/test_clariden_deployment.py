@@ -41,6 +41,15 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertEqual(contract["cluster_evidence"]["training_smoke_result"], "pass")
         self.assertIsNone(contract["cluster_evidence"]["training_smoke_job_id"])
         self.assertIsNone(contract["cluster_evidence"]["training_source_commit"])
+        self.assertEqual(
+            contract["cluster_evidence"]["multigpu_initial_job_id"], 3046423
+        )
+        self.assertEqual(
+            contract["cluster_evidence"]["multigpu_initial_result"], "pass"
+        )
+        self.assertEqual(
+            contract["cluster_evidence"]["multigpu_resume_result"], "not-run"
+        )
 
     def test_containerfile_pins_arm64_critical_builds(self) -> None:
         containerfile = (DEPLOY_ROOT / "Containerfile").read_text(encoding="utf-8")
@@ -225,13 +234,19 @@ class ClaridenDeploymentTest(unittest.TestCase):
             self.assertIn(expected, experiment)
         for expected in (
             "#SBATCH --gpus-per-node=4",
+            'SOURCE_JOB_ID="${XWAM_INITIAL_JOB_ID:-$SLURM_JOB_ID}"',
+            'REUSE_INITIAL=true',
             "trainer_max_steps=4",
             "resume_checkpoint='$CHECKPOINT'",
             "unset SLURM_NTASKS",
+            'env INITIAL_RESULT="$INITIAL_RESULT" CHECKPOINT_RECORD="$CHECKPOINT_RECORD"',
+            'INITIAL_METADATA="$INITIAL_METADATA"',
+            "--allow-orchestration-only-commit-delta",
             "audit_clariden_4gpu_resume.py",
             "[PASS] X-WAM Clariden 4xGH200 step 2 to 4 resume gate",
         ):
             self.assertIn(expected, script)
+        self.assertNotIn('CHECKPOINT="$(python - "$INITIAL_RESULT"', script)
 
 
 if __name__ == "__main__":

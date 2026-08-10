@@ -190,6 +190,46 @@ class ClaridenTrainingAuditTest(unittest.TestCase):
             self.assertFalse(report["ok"])
             self.assertFalse(report["checks"]["resume_uses_initial_checkpoint"])
 
+    def test_orchestration_only_commit_delta_can_reuse_initial(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            initial_commit = "c" * 40
+            resumed_commit = "d" * 40
+            initial = _write_run(
+                root,
+                name="initial",
+                global_step=2,
+                metric_steps=[0, 1],
+                resume_checkpoint=None,
+                commit=initial_commit,
+            )
+            resumed = _write_run(
+                root,
+                name="resumed",
+                global_step=4,
+                metric_steps=[2, 3],
+                resume_checkpoint=initial["checkpoint"],
+                commit=resumed_commit,
+            )
+            initial.pop("checkpoint")
+            resumed.pop("checkpoint")
+            report = build_clariden_4gpu_resume_report(
+                initial=initial,
+                resumed=resumed,
+                commit_compatibility={
+                    "ok": True,
+                    "mode": "orchestration_only_commit_delta",
+                    "initial_commit": initial_commit,
+                    "resumed_commit": resumed_commit,
+                    "changed_paths": [
+                        "deployment/clariden/smoke_train_resume_xwam.sbatch"
+                    ],
+                    "disallowed_paths": [],
+                },
+            )
+            self.assertTrue(report["ok"], report)
+            self.assertTrue(report["checks"]["compatible_training_source"])
+
 
 if __name__ == "__main__":
     unittest.main()

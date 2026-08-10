@@ -86,6 +86,12 @@
     "training_smoke_result": "pass",
     "training_smoke_job_id": null,
     "training_source_commit": null,
-    "training_evidence_note": "User reported the nvtx 0.2.15 overlay and one-step Clariden smoke passed; Job ID and git rev-parse output were not provided"
+    "training_evidence_note": "User reported the nvtx 0.2.15 overlay and one-step Clariden smoke passed; Job ID and git rev-parse output were not provided",
+    "multigpu_initial_job_id": 3046423,
+    "multigpu_initial_source_commit": "1b5f350e5e889f12716d380fe00827e784541eab",
+    "multigpu_initial_result": "pass",
+    "multigpu_initial_global_step": 2,
+    "multigpu_resume_result": "not-run",
+    "multigpu_orchestration_failure": "The outer Slurm host had no python command, so checkpoint parsing failed after the successful initial phase and before the resumed srun"
   }
 }

@@ -20,14 +20,24 @@ DATASET="$DEPLOY_STORE/datasets/robocasa/v1.0/pretrain/atomic/CloseFridge/202508
 WAN_DIR="$DEPLOY_STORE/checkpoints/xwam/wan22_5b"
 PRETRAINED="$DEPLOY_STORE/checkpoints/xwam/pretrained/checkpoints/last.ckpt"
 EXP_ROOT="$DEPLOY_CAPSCR/experiments/xwam"
-EXP_NAME="clariden_close_fridge_4gpu_resume_${SLURM_JOB_ID}"
+SOURCE_JOB_ID="${XWAM_INITIAL_JOB_ID:-$SLURM_JOB_ID}"
+[[ "$SOURCE_JOB_ID" =~ ^[0-9]+$ ]] || {
+  echo "XWAM_INITIAL_JOB_ID must be a numeric Slurm job ID" >&2
+  exit 2
+}
+REUSE_INITIAL=false
+if [[ -n "${XWAM_INITIAL_JOB_ID:-}" ]]; then
+  REUSE_INITIAL=true
+fi
+EXP_NAME="clariden_close_fridge_4gpu_resume_${SOURCE_JOB_ID}"
 EXP_DIR="$EXP_ROOT/$EXP_NAME"
 RUN_DIR="$EXP_DIR/runs"
-INITIAL_RUN_ID="clariden4-${SLURM_JOB_ID}-initial"
+INITIAL_RUN_ID="clariden4-${SOURCE_JOB_ID}-initial"
 RESUMED_RUN_ID="clariden4-${SLURM_JOB_ID}-resumed"
-INITIAL_LOG="$DEPLOY_STORE/logs/xwam/train4-resume-${SLURM_JOB_ID}-initial.log"
+INITIAL_LOG="$DEPLOY_STORE/logs/xwam/train4-resume-${SOURCE_JOB_ID}-initial.log"
 RESUMED_LOG="$DEPLOY_STORE/logs/xwam/train4-resume-${SLURM_JOB_ID}-resumed.log"
 AUDIT="$DEPLOY_STORE/logs/xwam/train4-resume-${SLURM_JOB_ID}-audit.json"
+CHECKPOINT_RECORD="$RUN_DIR/${INITIAL_RUN_ID}_checkpoint_path.txt"
 
 INITIAL_METADATA="$RUN_DIR/${INITIAL_RUN_ID}_metadata.json"
 INITIAL_RESULT="$RUN_DIR/${INITIAL_RUN_ID}_result.json"
@@ -47,7 +57,10 @@ test -s "$WAN_DIR/Wan2.2_VAE.pth"
 test -s "$PRETRAINED/checkpoint/mp_rank_00_model_states.pt"
 mkdir -p "$EXP_ROOT" "$RUN_DIR" "$(dirname "$AUDIT")"
 
-srun --kill-on-bad-exit=1 --environment="$EDF" bash -lc "
+if [[ "$REUSE_INITIAL" == true ]]; then
+  echo "[INFO] Reusing initial phase artifacts from Slurm job $SOURCE_JOB_ID"
+else
+  srun --kill-on-bad-exit=1 --environment="$EDF" bash -lc "
 set -euo pipefail
 export MAX_JOBS=8
 export OMP_NUM_THREADS=16
@@ -100,25 +113,38 @@ python scripts/train_sft.py \\
   exp_root='$EXP_ROOT' \\
   exp_name='$EXP_NAME'
 " 2>&1 | tee "$INITIAL_LOG"
+fi
 
 test -s "$INITIAL_METADATA"
 test -s "$INITIAL_RESULT"
 test -s "$INITIAL_EVENTS"
 
-CHECKPOINT="$(python - "$INITIAL_RESULT" <<'PY'
+rm -f "$CHECKPOINT_RECORD"
+srun --kill-on-bad-exit=1 --environment="$EDF" \
+  env INITIAL_RESULT="$INITIAL_RESULT" CHECKPOINT_RECORD="$CHECKPOINT_RECORD" \
+  bash -lc '
+set -euo pipefail
+python - <<'"'"'PY'"'"'
 import json
-import sys
+import os
 from pathlib import Path
 
-payload = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+result_path = Path(os.environ["INITIAL_RESULT"])
+record_path = Path(os.environ["CHECKPOINT_RECORD"])
+payload = json.loads(result_path.read_text(encoding="utf-8"))
 assert payload['result'] == 'pass', payload
 assert payload['global_step'] == 2, payload
 assert payload['error'] is None, payload
 checkpoint = payload.get('last_checkpoint')
 assert checkpoint, payload
-print(Path(checkpoint).resolve())
+checkpoint_path = Path(checkpoint).resolve()
+assert checkpoint_path.is_dir(), checkpoint_path
+record_path.write_text(f"{checkpoint_path}\n", encoding="utf-8")
+print(f"Initial checkpoint: {checkpoint_path}")
 PY
-)"
+'
+test -s "$CHECKPOINT_RECORD"
+IFS= read -r CHECKPOINT < "$CHECKPOINT_RECORD"
 test -d "$CHECKPOINT"
 
 srun --kill-on-bad-exit=1 --environment="$EDF" bash -lc "
@@ -151,6 +177,26 @@ test -s "$RESUMED_METADATA"
 test -s "$RESUMED_RESULT"
 test -s "$RESUMED_EVENTS"
 
+srun --kill-on-bad-exit=1 --environment="$EDF" \
+  env \
+    INITIAL_METADATA="$INITIAL_METADATA" \
+    INITIAL_RESULT="$INITIAL_RESULT" \
+    INITIAL_EVENTS="$INITIAL_EVENTS" \
+    INITIAL_OPTIMIZER="$INITIAL_OPTIMIZER" \
+    INITIAL_LOG="$INITIAL_LOG" \
+    RESUMED_METADATA="$RESUMED_METADATA" \
+    RESUMED_RESULT="$RESUMED_RESULT" \
+    RESUMED_EVENTS="$RESUMED_EVENTS" \
+    RESUMED_OPTIMIZER="$RESUMED_OPTIMIZER" \
+    RESUMED_LOG="$RESUMED_LOG" \
+    AUDIT="$AUDIT" \
+    ALLOW_ORCHESTRATION_COMMIT_DELTA="$REUSE_INITIAL" \
+  bash -lc '
+set -euo pipefail
+AUDIT_COMMIT_ARGS=()
+if [[ "$ALLOW_ORCHESTRATION_COMMIT_DELTA" == true ]]; then
+  AUDIT_COMMIT_ARGS+=(--allow-orchestration-only-commit-delta)
+fi
 python scripts/audit_clariden_4gpu_resume.py \
   --initial-metadata "$INITIAL_METADATA" \
   --initial-result "$INITIAL_RESULT" \
@@ -162,8 +208,11 @@ python scripts/audit_clariden_4gpu_resume.py \
   --resumed-events "$RESUMED_EVENTS" \
   --resumed-optimizer-dir "$RESUMED_OPTIMIZER" \
   --resumed-log "$RESUMED_LOG" \
-  --output "$AUDIT"
+  --output "$AUDIT" \
+  "${AUDIT_COMMIT_ARGS[@]}"
+'
 
+echo "initial_job_id=$SOURCE_JOB_ID"
 echo "initial_result=$INITIAL_RESULT"
 echo "resume_checkpoint=$CHECKPOINT"
 echo "resumed_result=$RESUMED_RESULT"

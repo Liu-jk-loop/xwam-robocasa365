@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -17,17 +19,77 @@ from project_tools.clariden_training import (  # noqa: E402
 from project_tools.training_run import write_json_atomic  # noqa: E402
 
 
+ORCHESTRATION_ONLY_PATHS = {
+    "configs/environment/xwam_clariden.json",
+    "deployment/clariden/smoke_train_resume_xwam.sbatch",
+    "docs/ARCHITECTURE.md",
+    "docs/CHANGELOG.md",
+    "docs/PROGRESS.md",
+    "project_tools/clariden_training.py",
+    "scripts/audit_clariden_4gpu_resume.py",
+    "tests/test_clariden_deployment.py",
+    "tests/test_clariden_training.py",
+}
+
+
 def _artifact_arguments(parser: argparse.ArgumentParser, prefix: str) -> None:
     for name in ("metadata", "result", "events", "optimizer-dir", "log"):
         parser.add_argument(f"--{prefix}-{name}", required=True)
+
+
+def _metadata_commit(path: str) -> str:
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    commit = str((payload.get("git") or {}).get("commit") or "")
+    if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        raise ValueError(f"metadata中的Git commit无效：{path}")
+    return commit
+
+
+def _orchestration_only_commit_compatibility(
+    *, initial_metadata: str, resumed_metadata: str
+) -> dict[str, object]:
+    initial_commit = _metadata_commit(initial_metadata)
+    resumed_commit = _metadata_commit(resumed_metadata)
+    process = subprocess.run(
+        ["git", "diff", "--name-only", initial_commit, resumed_commit, "--"],
+        cwd=REPO_ROOT,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    changed_paths = sorted(line for line in process.stdout.splitlines() if line)
+    disallowed_paths = sorted(set(changed_paths) - ORCHESTRATION_ONLY_PATHS)
+    return {
+        "ok": bool(changed_paths) and not disallowed_paths,
+        "mode": "orchestration_only_commit_delta",
+        "initial_commit": initial_commit,
+        "resumed_commit": resumed_commit,
+        "changed_paths": changed_paths,
+        "disallowed_paths": disallowed_paths,
+    }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     _artifact_arguments(parser, "initial")
     _artifact_arguments(parser, "resumed")
+    parser.add_argument(
+        "--allow-orchestration-only-commit-delta",
+        action="store_true",
+        help=(
+            "允许复用旧initial，但两个commit之间只能改动本审计器冻结的编排、"
+            "审计、测试和文档文件"
+        ),
+    )
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
+    commit_compatibility = None
+    if args.allow_orchestration_only_commit_delta:
+        commit_compatibility = _orchestration_only_commit_compatibility(
+            initial_metadata=args.initial_metadata,
+            resumed_metadata=args.resumed_metadata,
+        )
     report = build_clariden_4gpu_resume_report(
         initial={
             "metadata_path": args.initial_metadata,
@@ -43,6 +105,7 @@ def main() -> int:
             "optimizer_dir": args.resumed_optimizer_dir,
             "log_path": args.resumed_log,
         },
+        commit_compatibility=commit_compatibility,
     )
     output = write_json_atomic(args.output, report)
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
