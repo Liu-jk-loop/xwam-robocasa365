@@ -43,10 +43,13 @@ RUN python -m pip install --upgrade \
 
 # NGC 24.10 provides the CUDA 12.6 compiler and Python 3.10. Replace its
 # development Torch snapshot with the same stable Torch family that passed the
-# existing X-WAM A800 gates. On aarch64, torchvision/torchaudio wheel names do
-# not carry the +cu126 suffix even though they come from the CUDA index.
+# existing X-WAM A800 gates. Remove NGC's optional Torch-coupled accelerators:
+# their bundled versions target the replaced development Torch and X-WAM does
+# not import them. On aarch64, torchvision/torchaudio wheel names do not carry
+# the +cu126 suffix even though they come from the CUDA index.
 RUN python -m pip uninstall -y \
-      torch torchvision torchaudio flash-attn flash_attn || true && \
+      torch torchvision torchaudio flash-attn flash_attn \
+      transformer-engine transformer-engine-cu12 torch-tensorrt || true && \
     python -m pip install --no-cache-dir \
       --index-url https://download.pytorch.org/whl/cu126 \
       "torch==2.9.0" \
@@ -107,6 +110,7 @@ import flash_attn
 import lightning
 import numpy
 import pyarrow
+import safetensors
 import torch
 import transformers
 
@@ -125,14 +129,26 @@ print("lightning:", lightning.__version__)
 print("deepspeed:", deepspeed.__version__)
 print("pyarrow:", pyarrow.__version__)
 print("accelerate:", accelerate.__version__)
+print("safetensors:", safetensors.__version__)
 
 assert platform.machine() == "aarch64"
 assert sys.version_info[:2] == (3, 10)
 assert torch.__version__.startswith("2.9.0")
 assert torch.version.cuda == "12.6"
 assert numpy.__version__ == "1.23.5"
+assert safetensors.__version__ == "0.8.0"
 assert flash_attn.__version__ == "2.8.3"
 assert HAS_FLASH_ATTN
+for removed_distribution in (
+    "transformer-engine",
+    "transformer-engine-cu12",
+    "torch-tensorrt",
+):
+    try:
+        version = importlib.metadata.version(removed_distribution)
+    except importlib.metadata.PackageNotFoundError:
+        continue
+    raise AssertionError(f"unexpected {removed_distribution}=={version}")
 print("[PASS] X-WAM Clariden software stack")
 PY
 

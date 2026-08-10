@@ -1,13 +1,13 @@
 # 项目进度
 
-更新时间：2026-08-09
+更新时间：2026-08-10
 
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：Clariden 迁移——独立 X-WAM aarch64/GH200 policy 容器部署
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3门禁均已在原 A800 环境通过；Clariden 已完成现有资源盘点和容器方案静态检查，镜像构建、GH200 kernel 与训练门禁为 `cluster-pending`
+- 超算运行状态：M1～M4.3门禁均已在原 A800 环境通过；Clariden 首次构建在 requirements resolver 阶段因 safetensors 版本冲突退出，修复已完成本地检查，重试构建、GH200 kernel 与训练门禁为 `cluster-pending`
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -34,6 +34,7 @@
 - 容器基线冻结为 NGC 24.10（Ubuntu 22.04、Python 3.10、CUDA 12.6.2）+ 官方 aarch64 Torch 2.9.0 cu126；FlashAttention 2.8.3 和 Decord 0.6.0 使用官方固定 commit 源码构建。
 - `deployment/clariden/` 已提供 Containerfile、约束、Store/bootstrap、allocation 内 build→validate→enroot import、EDF 模板和 4×GH200 kernel/discovery 门禁。
 - Decord/FlashAttention 的固定 commit 与递归子模块更新顺序已完成静态门禁；build allocation 时限为8小时，实际编译耗时仍待 Clariden 证据。
+- 首次 Clariden build 的 Torch 2.9.0/cu126 安装已通过；requirements 因 Diffusers 0.38.0 要求 safetensors >=0.8.0-rc.0，与旧 pin 0.5.3 冲突而退出。现已改为 safetensors 0.8.0、huggingface-hub 0.36.0，并移除与 Torch 2.9 冲突的未使用 NGC Transformer Engine/Torch-TensorRT；等待重试。
 - 本地静态状态：`local-static`；真实 build、SQSH、EDF、CUDA、FlashAttention kernel、checkpoint、dataset 和 training 状态均保持 `cluster-pending`，等待 Clariden 作业证据。
 
 ## 已确认资源

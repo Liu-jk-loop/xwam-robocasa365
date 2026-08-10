@@ -40,7 +40,7 @@ podman run \
   --rm \
   --env NVIDIA_VISIBLE_DEVICES=void \
   "localhost/$IMAGE_TAG:latest" \
-  python -c 'import sys, torch, numpy, flash_attn, decord, diffusers, transformers, deepspeed; print("python:", sys.version); print("torch:", torch.__version__); print("torch CUDA build:", torch.version.cuda); print("numpy:", numpy.__version__); print("flash-attn:", flash_attn.__version__); print("decord:", decord.__version__); print("diffusers:", diffusers.__version__); print("transformers:", transformers.__version__); print("deepspeed:", deepspeed.__version__)'
+  python -c 'import sys, torch, numpy, flash_attn, decord, diffusers, transformers, deepspeed, huggingface_hub, safetensors; print("python:", sys.version); print("torch:", torch.__version__); print("torch CUDA build:", torch.version.cuda); print("numpy:", numpy.__version__); print("flash-attn:", flash_attn.__version__); print("decord:", decord.__version__); print("diffusers:", diffusers.__version__); print("transformers:", transformers.__version__); print("huggingface-hub:", huggingface_hub.__version__); print("safetensors:", safetensors.__version__); print("deepspeed:", deepspeed.__version__)'
 
 if [[ -e "$SQSH" ]]; then
   echo "Refusing to overwrite existing SQSH: $SQSH" >&2

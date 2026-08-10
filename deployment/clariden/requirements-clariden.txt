@@ -3,6 +3,7 @@ opencv-python-headless==4.11.0.86
 scipy==1.15.3
 diffusers==0.38.0
 transformers==4.51.3
+huggingface-hub==0.36.0
 tokenizers==0.21.4
 accelerate==1.14.0
 tqdm==4.66.5
@@ -20,4 +21,4 @@ lightning==2.6.5
 deepspeed==0.19.4
 pyzmq==27.1.0
 sentencepiece==0.2.1
-safetensors==0.5.3
+safetensors==0.8.0

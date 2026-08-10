@@ -17,6 +17,8 @@
     "numpy": "1.23.5",
     "transformers": "4.51.3",
     "diffusers": "0.38.0",
+    "huggingface_hub": "0.36.0",
+    "safetensors": "0.8.0",
     "flash_attn": "2.8.3",
     "deepspeed": "0.19.4",
     "lightning": "2.6.5",

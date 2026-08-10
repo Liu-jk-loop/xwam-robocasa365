@@ -21,6 +21,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertEqual(contract["base_contract"]["python"], "3.10")
         self.assertEqual(contract["packages"]["torch"], "2.9.0+cu126")
         self.assertEqual(contract["packages"]["numpy"], "1.23.5")
+        self.assertEqual(contract["packages"]["safetensors"], "0.8.0")
         self.assertTrue(contract["simulator_contract"]["separate_container"])
 
     def test_containerfile_pins_arm64_critical_builds(self) -> None:
@@ -36,6 +37,8 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "submodule update --init --recursive",
             'TORCH_CUDA_ARCH_LIST="9.0"',
             "--no-build-isolation",
+            "transformer-engine transformer-engine-cu12 torch-tensorrt",
+            'assert safetensors.__version__ == "0.8.0"',
         ):
             self.assertIn(expected, containerfile)
         self.assertNotIn("pip install decord", containerfile)
@@ -57,6 +60,8 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "numpy==1.23.5",
             "transformers==4.51.3",
             "diffusers==0.38.0",
+            "huggingface-hub==0.36.0",
+            "safetensors==0.8.0",
             "lightning==2.6.5",
             "deepspeed==0.19.4",
             "pyarrow==16.1.0",
@@ -66,6 +71,8 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "torch==2.9.0",
             "torchvision==0.24.0",
             "torchaudio==2.9.0",
+            "huggingface-hub==0.36.0",
+            "safetensors==0.8.0",
         ):
             self.assertIn(expected, constraints)
 

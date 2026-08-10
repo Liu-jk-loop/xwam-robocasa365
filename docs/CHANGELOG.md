@@ -1,5 +1,13 @@
 # 变更记录
 
+## 2026-08-10 — Clariden 首次构建 dependency resolver 修复
+
+- Clariden 首次真实 build 已证明 Torch 2.9.0/cu126 overlay 安装成功，但在 requirements 解析阶段中止，尚未进入 Decord、FlashAttention 编译和 SQSH 导出。
+- 致命冲突为本仓库固定 `safetensors==0.5.3`，而 Diffusers 0.38.0 的发布元数据要求 `safetensors>=0.8.0-rc.0`；现固定 `safetensors==0.8.0`。
+- 固定 `huggingface-hub==0.36.0`，同时满足 Transformers 4.51.3 的 `<1.0,>=0.30.0` 和 Diffusers 0.38.0 的 `<2.0,>=0.34.0`，避免 pip 先选 1.x 再回溯。
+- Torch overlay 前一并移除 NGC 24.10 中与新 Torch 耦合的 `transformer-engine` / `transformer-engine-cu12` 和 `torch-tensorrt`。它们不在 X-WAM import 路径上；原日志中它们的 pip 警告不是本次退出原因，但保留会产生已知的坏环境。
+- 容器内建验证新增 safetensors 精确版本及三个已移除 NGC distribution 不存在检查；真实 aarch64 build、GH200 kernel、SQSH 和训练仍为 `cluster-pending`。
+
 ## 2026-08-09 — Clariden aarch64/GH200 X-WAM policy 容器部署基线
 
 - 修改前基线：`c64681a`（M6 H100 atomic training 实现）
