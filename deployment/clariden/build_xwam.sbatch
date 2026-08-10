@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=64
-#SBATCH --time=04:00:00
+#SBATCH --time=08:00:00
 #SBATCH --job-name=xwam_build
 #SBATCH --output=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/build-%j.log
 

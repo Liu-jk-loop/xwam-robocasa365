@@ -13,6 +13,7 @@
 - 保持原 A800 已验证的 NumPy 1.23.5、Transformers 4.51.3、Diffusers 0.38.0、Lightning 2.6.5、DeepSpeed 0.19.4、PyArrow 16.1.0 和 PyZMQ 27.1.0 核心版本。
 - FlashAttention 2.8.3 没有匹配该 Python/Torch 的官方 Linux aarch64 wheel，固定官方 tag commit `060c918`，只为 GH200 `sm90` 源码编译并限制八个并行 job。
 - Decord 0.6.0 官方 PyPI 只有 Linux x86_64 wheel；固定官方 tag commit `6a3617c`，使用 FFmpeg 开发库构建 CPU decoder，不更改现有 Parquet/MP4 Dataset adapter。
+- 两个源码依赖均先 checkout 固定 commit，再按该 commit 更新递归子模块，避免默认分支子模块与目标 tag 漂移；build allocation 放宽到8小时，覆盖 ARM64 编译和同一 allocation 内的 enroot 导出。
 
 ### 部署与复用逻辑
 

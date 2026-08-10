@@ -33,6 +33,7 @@
 - X-WAM 公开 cross-embodiment checkpoint 在 Clariden Store 尚不存在；部署脚本只下载 `pretrained` 初始化权重，不下载 RoboCasa/Robotwin SFT 权重。
 - 容器基线冻结为 NGC 24.10（Ubuntu 22.04、Python 3.10、CUDA 12.6.2）+ 官方 aarch64 Torch 2.9.0 cu126；FlashAttention 2.8.3 和 Decord 0.6.0 使用官方固定 commit 源码构建。
 - `deployment/clariden/` 已提供 Containerfile、约束、Store/bootstrap、allocation 内 build→validate→enroot import、EDF 模板和 4×GH200 kernel/discovery 门禁。
+- Decord/FlashAttention 的固定 commit 与递归子模块更新顺序已完成静态门禁；build allocation 时限为8小时，实际编译耗时仍待 Clariden 证据。
 - 本地静态状态：`local-static`；真实 build、SQSH、EDF、CUDA、FlashAttention kernel、checkpoint、dataset 和 training 状态均保持 `cluster-pending`，等待 Clariden 作业证据。
 
 ## 已确认资源

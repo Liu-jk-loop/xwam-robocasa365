@@ -33,6 +33,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             '"torchaudio==2.9.0"',
             "6a3617cef035535193f390f86399dde139fa2a53",
             "060c9188beec3a8b62b33a3bfa6d5d2d44975fab",
+            "submodule update --init --recursive",
             'TORCH_CUDA_ARCH_LIST="9.0"',
             "--no-build-isolation",
         ):
@@ -40,6 +41,10 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertNotIn("pip install decord", containerfile)
         self.assertNotIn("github.com/robocasa/robocasa", containerfile.lower())
         self.assertNotIn("pip install robocasa", containerfile.lower())
+        self.assertLess(
+            containerfile.index('checkout "${FLASH_ATTN_SHA}"'),
+            containerfile.index("submodule update --init --recursive", containerfile.index("flash-attention")),
+        )
 
     def test_requirements_preserve_validated_xwam_versions(self) -> None:
         requirements = (DEPLOY_ROOT / "requirements-clariden.txt").read_text(
