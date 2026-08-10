@@ -1,0 +1,19 @@
+# Clariden GH200 单卡调试层；只用于真实 batch 的单步训练门禁。
+precision: bf16-mixed
+batch_size_per_gpu: 1
+devices: 1
+num_workers_per_gpu: 0
+prefetch_factor: 2
+use_gradient_checkpointing: true
+accumulate_grad_batches: 1
+
+# 5B trainable parameters 的两组 FP32 Adam moments 不适合在单卡复制。
+# 使用 M2 已验证的 ZeRO-2 CPUAdam offload；Clariden IOPS 持久化 JIT cache。
+deepspeed_stage: 2
+deepspeed_offload_optimizer: true
+deepspeed_offload_optimizer_device: cpu
+deepspeed_pin_memory: false
+deepspeed_overlap_comm: false
+deepspeed_bucket_size: 100000000
+deepspeed_fp32_optimizer_states: true
+deepspeed_exclude_frozen_parameters: false

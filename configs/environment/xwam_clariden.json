@@ -52,7 +52,7 @@
     "gh200_cuda": "pass",
     "flash_attn_kernel": "pass",
     "checkpoint_discovery": "pass",
-    "dataset_smoke": "cluster-pending",
+    "dataset_smoke": "pass",
     "training": "cluster-pending"
   },
   "cluster_evidence": {
@@ -61,6 +61,8 @@
     "sqsh_size_bytes": 17803421177,
     "gpu_topology": "4x NVIDIA GH200",
     "validation_result": "pass",
-    "validation_job_id": null
+    "validation_job_id": null,
+    "batch_smoke_result": "pass",
+    "batch_smoke_job_id": null
   }
 }

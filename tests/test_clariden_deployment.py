@@ -30,8 +30,9 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "checkpoint_discovery",
         ):
             self.assertEqual(contract["validation"][gate], "pass")
+        self.assertEqual(contract["validation"]["dataset_smoke"], "pass")
         self.assertEqual(
-            contract["validation"]["dataset_smoke"], "cluster-pending"
+            contract["validation"]["training"], "cluster-pending"
         )
 
     def test_containerfile_pins_arm64_critical_builds(self) -> None:
@@ -105,6 +106,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "build_xwam.sbatch",
             "validate_xwam.sbatch",
             "smoke_batch_xwam.sbatch",
+            "smoke_train_xwam.sbatch",
         ):
             result = subprocess.run(
                 ["bash", "-n", str(DEPLOY_ROOT / script)],
@@ -121,6 +123,34 @@ class ClaridenDeploymentTest(unittest.TestCase):
         )
         self.assertIn("unsquashfs -s", build_script)
         self.assertIn("ENROOT_STATUS", build_script)
+
+    def test_clariden_train_smoke_is_one_gpu_one_step_without_checkpoint(self) -> None:
+        hardware = (
+            REPO_ROOT / "configs/hardware/gh200_96gb_debug.yaml"
+        ).read_text(encoding="utf-8")
+        experiment = (
+            REPO_ROOT / "configs/experiment/robocasa365_clariden_single_step.yaml"
+        ).read_text(encoding="utf-8")
+        script = (DEPLOY_ROOT / "smoke_train_xwam.sbatch").read_text(
+            encoding="utf-8"
+        )
+        for expected in (
+            "devices: 1",
+            "batch_size_per_gpu: 1",
+            "deepspeed_offload_optimizer: true",
+            "deepspeed_fp32_optimizer_states: true",
+        ):
+            self.assertIn(expected, hardware)
+        for expected in (
+            "num_training_steps: 1",
+            "trainer_max_steps: 1",
+            "train_subset_size: 1",
+            "clean_action_ratio: 0.0",
+            "enable_checkpointing: false",
+        ):
+            self.assertIn(expected, experiment)
+        self.assertIn("torch.cuda.get_device_capability(0) == (9, 0)", script)
+        self.assertIn("[PASS] X-WAM Clariden one-step train", script)
 
 
 if __name__ == "__main__":

@@ -21,6 +21,9 @@
 - `enroot import` 在已写出有效 SQSH 后返回非零，导致原脚本未写 EDF/manifest；本轮已手工补齐。build 脚本改为仅在 SQSH 存在且 `unsquashfs -s` 通过时允许带警告继续，否则仍保留原错误码退出。
 - 用户回报 `validate_xwam.sbatch` 全部通过：4×GH200 可见、Torch CUDA 12.6、NumPy 1.23.5、FlashAttention 2.8.3 BF16 forward/backward kernel、Wan/T5/VAE/tokenizer、X-WAM pretrained 和 CloseFridge 路径发现均通过。本次未提供 validation Job ID，不补写未知 provenance。
 - 新增 1-GPU `smoke_batch_xwam.sbatch`，在 EDF 中真实解码 CloseFridge clip 0，检查三路 RGB、16D state、12D action、确定性和 RGB-only 合同。该门禁与训练分开，当前仍为 `cluster-pending`。
+- 用户回报上述真实 batch smoke 通过；Job ID 未提供。Clariden `dataset_smoke` 关闭，只剩真实模型训练 step 待验证。
+- 新增 Clariden GH200 单卡硬件层、单步实验层和 `smoke_train_xwam.sbatch`。该作业固定 CloseFridge clip 0、batch 1、BF16 compute、ZeRO-2 FP32 CPUAdam offload、RGB-only 和一次 optimizer update；`clean_action_ratio=0` 只为确保该工程门禁实际覆盖 action/proprio 监督，不作为正式训练语义。
+- 单步作业不保存巨型 training checkpoint，但必须产生 checkpoint initialization report 和 `result=pass/global_step=1/error=null`；真实 GH200 model load、forward/backward/optimizer update 仍为 `cluster-pending`。
 
 ## 2026-08-09 — Clariden aarch64/GH200 X-WAM policy 容器部署基线
 

@@ -1,0 +1,30 @@
+# Clariden 部署门禁：固定 CloseFridge clip 0，完成一次 forward/backward/update。
+exp_root: ./experiments/
+exp_name: clariden_close_fridge_single_step
+seed: 42
+
+lr: 1e-5
+weight_decay: 0.01
+num_warmup_steps: 0
+num_training_steps: 1
+trainer_max_steps: 1
+gradient_clip_val: 1.0
+gradient_clip_algorithm: norm
+
+train_subset_size: 1
+train_subset_start: 0
+train_shuffle: false
+persist_generator_state: true
+clean_action_ratio: 0.0
+text_dropout_prob: 0.0
+
+enable_tensorboard: false
+enable_checkpointing: false
+save_interval: 1
+save_top_k: 0
+save_last: false
+save_on_exception: false
+resume_checkpoint: null
+log_interval: 1
+val_interval: 1
+limit_val_batches: 0
