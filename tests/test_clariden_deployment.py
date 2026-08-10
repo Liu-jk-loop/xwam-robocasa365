@@ -76,6 +76,12 @@ class ClaridenDeploymentTest(unittest.TestCase):
         ):
             self.assertIn(expected, constraints)
 
+    def test_t5_default_device_is_not_resolved_during_import(self) -> None:
+        source = (REPO_ROOT / "modules/t5.py").read_text(encoding="utf-8")
+        self.assertNotIn("device=torch.cuda.current_device()", source)
+        self.assertIn("device=None", source)
+        self.assertIn("device = torch.cuda.current_device()", source)
+
     def test_edf_uses_persistent_source_and_iops_caches(self) -> None:
         template = (DEPLOY_ROOT / "xwam.toml.template").read_text(encoding="utf-8")
         self.assertIn("src/xwam-robocasa365", template)

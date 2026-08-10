@@ -8,6 +8,13 @@
 - Torch overlay 前一并移除 NGC 24.10 中与新 Torch 耦合的 `transformer-engine` / `transformer-engine-cu12` 和 `torch-tensorrt`。它们不在 X-WAM import 路径上；原日志中它们的 pip 警告不是本次退出原因，但保留会产生已知的坏环境。
 - 容器内建验证新增 safetensors 精确版本及三个已移除 NGC distribution 不存在检查；真实 aarch64 build、GH200 kernel、SQSH 和训练仍为 `cluster-pending`。
 
+### 第二次真实 build 反馈
+
+- commit `f27ad003dff93b88188ffcfe92bae0e70c0959ac` 已通过 requirements resolver、Decord 源码构建和 FlashAttention 2.8.3 `linux_aarch64` wheel 构建；生成的 FlashAttention wheel 约 116.8 MB，说明 Python/Torch/CUDA/sm90 编译组合可用。
+- 新阻塞位于 Containerfile STEP 17 的无 GPU 软件验证：`from modules.attention` 会先执行 `modules/__init__.py`，而 `T5EncoderModel.__init__` 的默认参数在模块 import 时立即调用 `torch.cuda.current_device()`，Podman build 没有 NVIDIA driver 因而退出。
+- 将 T5 默认 device 改为构造时延迟解析：未显式传 device 时仍选当前 CUDA device，但纯 import 不再需要 driver。保留 Containerfile 的 X-WAM/FlashAttention import 门禁，真正的 CUDA kernel 仍由 `validate_xwam.sbatch` 在 4×GH200 上验证。
+- 迭代构建建议先申请 normal 交互式 allocation，再在同一节点内直接重跑 `build_xwam.sbatch`；Podman 节点本地 layer cache 可复用已完成的 FlashAttention 层。换节点或 allocation 结束后不保证保留该 cache。
+
 ## 2026-08-09 — Clariden aarch64/GH200 X-WAM policy 容器部署基线
 
 - 修改前基线：`c64681a`（M6 H100 atomic training 实现）
