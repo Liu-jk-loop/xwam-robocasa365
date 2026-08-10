@@ -54,8 +54,8 @@
     "flash_attn_kernel": "pass",
     "checkpoint_discovery": "pass",
     "dataset_smoke": "pass",
-    "nvtx_runtime_overlay": "cluster-pending",
-    "training": "cluster-pending"
+    "nvtx_runtime_overlay": "pass",
+    "training": "pass"
   },
   "cluster_evidence": {
     "source_commit": "6594d898a87145101afe5f8a45fa6ba907b2b3c3",
@@ -79,6 +79,12 @@
       "reason": "nvtx 0.2.12 exposed get_domain, but its DummyDomain.push_range did not accept the message/category keyword arguments used by DeepSpeed 0.19.4",
       "cuda_peak_allocated_gib": 30.677,
       "cuda_peak_reserved_gib": 40.076
-    }
+    },
+    "nvtx_runtime_overlay_result": "pass",
+    "nvtx_runtime_overlay_job_id": null,
+    "training_smoke_result": "pass",
+    "training_smoke_job_id": null,
+    "training_source_commit": null,
+    "training_evidence_note": "User reported the nvtx 0.2.15 overlay and one-step Clariden smoke passed; Job ID and git rev-parse output were not provided"
   }
 }

@@ -16,6 +16,12 @@
 - overlay、Containerfile 和训练 preflight 现在真实调用 `domain.push_range(message='probe', category=None)` 后再 `pop_range()`，与 DeepSpeed 0.19.4 的失败路径保持同一参数形式。0.2.15 使用新版本化目录，不覆盖或删除已有 0.2.12 overlay。
 - Job `3046110` 的显存峰值仍是 allocated/reserved 30.677/40.076 GiB，失败仍发生在 wrapper 进入模型 forward 前；数据、模型和 optimizer 不能由这次日志重新判错。0.2.15 ARM64 安装与单步训练为 `cluster-pending`。
 
+### `nvtx 0.2.15` 与单步训练关闭证据
+
+- 用户回报 0.2.15 环境门禁和更新后的 Clariden 单步训练均已通过。该训练脚本只有在 checkpoint 初始化报告为 `pass`，且 run result 同时满足 `result=pass`、`global_step=1`、`error=null` 时才输出最终 PASS，因此真实模型 forward、backward 和一次 FP32 CPUAdam optimizer update 门禁关闭。
+- 本次没有提供最终 overlay/train Job ID 或 `git rev-parse HEAD` 输出；manifest 明确保存 `null` 和 provenance 备注，不把修复 commit `a942c34` 自动冒充为集群实测 commit。
+- `configs/environment/xwam_clariden.json` 将 `nvtx_runtime_overlay` 与 `training` 更新为 `pass`。这只关闭当前单卡 CloseFridge 工程 smoke，不代表多卡 checkpoint/resume、18任务正式训练或策略质量已经通过。
+
 ## 2026-08-10 — Clariden 首次构建 dependency resolver 修复
 
 - Clariden 首次真实 build 已证明 Torch 2.9.0/cu126 overlay 安装成功，但在 requirements 解析阶段中止，尚未进入 Decord、FlashAttention 编译和 SQSH 导出。

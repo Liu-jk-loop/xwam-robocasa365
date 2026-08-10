@@ -32,9 +32,11 @@ class ClaridenDeploymentTest(unittest.TestCase):
         ):
             self.assertEqual(contract["validation"][gate], "pass")
         self.assertEqual(contract["validation"]["dataset_smoke"], "pass")
-        self.assertEqual(
-            contract["validation"]["training"], "cluster-pending"
-        )
+        self.assertEqual(contract["validation"]["nvtx_runtime_overlay"], "pass")
+        self.assertEqual(contract["validation"]["training"], "pass")
+        self.assertEqual(contract["cluster_evidence"]["training_smoke_result"], "pass")
+        self.assertIsNone(contract["cluster_evidence"]["training_smoke_job_id"])
+        self.assertIsNone(contract["cluster_evidence"]["training_source_commit"])
 
     def test_containerfile_pins_arm64_critical_builds(self) -> None:
         containerfile = (DEPLOY_ROOT / "Containerfile").read_text(encoding="utf-8")
