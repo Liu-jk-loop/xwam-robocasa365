@@ -127,6 +127,14 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - CPUAdam 默认和原有 A800/M2/upstream profile 均保持 `fp32_optimizer_states=true`。H100 正式门禁必须显式使用 FP32 optimizer state 并重新验证 checkpoint/resume，禁止从 120 GiB profile 隐式继承 BF16 state。
 - 每次 DeepSpeed checkpoint 保存前后向独立 JSONL fsync 写入 process RSS、cgroup memory current/peak/max/events。缺少 `checkpoint_save_complete` 时，结合 `oom_kill` 和 checkpoint 文件结构区分保存期 OOM 与普通 Python 异常。
 
+### Clariden 4×GH200 部署恢复门禁
+
+- 该门禁只验证 Clariden 容器的单节点四卡通信、ZeRO-2 FP32 CPUAdam、分布式 generator state、DeepSpeed checkpoint 和严格恢复，不复用 H100 正式训练的18任务、GBS 128或无 offload 合同。
+- 固定 CloseFridge 前8个 clip、micro-batch 1、GBS 4和四步 scheduler。第一次运行到step 2并保存，第二次必须以同一个完整checkpoint恢复到step 4；两阶段使用不同run id但相同干净Git commit、数据路径和scheduler horizon。
+- Slurm allocation内每阶段只由`srun`启动一个EDF容器任务，四个本地rank继续由Lightning的`devices=4` launcher派生；进入训练前移除step级`SLURM_NTASKS=1`拓扑变量，避免Lightning把容器任务数误判为训练world size。
+- Debug checkpoint 可以排除冻结 T5/VAE以控制空间，但恢复报告只能接受这些冻结参数缺失，任何可训练参数缺失或额外参数仍阻塞。四个rank都必须报告实际FP32 optimizer state，checkpoint必须包含非空model state和四个ZeRO optimizer shard。
+- dependency-light审计同时检查四张GH200、有限RGB-only loss、step 2/4 checkpoint完成事件、恢复源一致性及`global_step=4`。通过只关闭部署恢复门禁，不代表M6正式训练配置、吞吐或模型质量。
+
 ### M6 H100 RGB-only 正式训练合同
 
 - 训练任务固定为版本化 Atomic-Seen 清单中的18个同名任务，但数据来源固定为 `pretrain/atomic`；manifest 必须逐任务解析唯一日期目录、检查真实 Parquet/三路视频，并按 `sum(max(episode_length-32, 0))` 记录有效 clip。任何缺失、重复、多日期歧义或 composite 路径都会阻塞。

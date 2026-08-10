@@ -1,0 +1,195 @@
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from project_tools.clariden_training import build_clariden_4gpu_resume_report
+
+
+METRICS = (
+    "train/video_loss: 1.0, train/action_loss: 0.5, "
+    "train/proprio_loss: 0.25, "
+    "train/action_proprio_supervision_ratio: 1.0, "
+    "train/task_index: 0.0, train/depth_loss: 0.0, train/loss: 1.75"
+)
+
+
+def _write_run(
+    root: Path,
+    *,
+    name: str,
+    global_step: int,
+    metric_steps: list[int],
+    resume_checkpoint: str | None,
+    commit: str,
+) -> dict[str, str]:
+    run_root = root / name
+    checkpoint = run_root / f"step={global_step}.ckpt"
+    state_root = checkpoint / "checkpoint"
+    state_root.mkdir(parents=True)
+    (state_root / "mp_rank_00_model_states.pt").write_bytes(b"model")
+    for rank in range(4):
+        (state_root / f"zero_pp_rank_{rank}_mp_rank_00_optim_states.pt").write_bytes(
+            b"optimizer"
+        )
+
+    metadata = {
+        "run_id": name,
+        "git": {"commit": commit, "dirty": False, "status": []},
+        "dataset": {
+            "path": "/data/CloseFridge/lerobot",
+            "task_name": "CloseFridge",
+            "subset_indices": list(range(8)),
+            "shuffle": False,
+            "use_depth": False,
+        },
+        "environment": {"gpu_names": ["NVIDIA GH200 96GB"] * 4},
+        "training": {"num_training_steps": 4, "trainer_max_steps": global_step},
+        "topology": {
+            "world_size": 4,
+            "num_nodes": 1,
+            "visible_devices": 4,
+        },
+        "deepspeed": {
+            "stage": 2,
+            "offload_optimizer": True,
+            "exclude_frozen_parameters": True,
+        },
+        "optimizer": {
+            "backend": "deepspeed_cpu_adam",
+            "fp32_optimizer_states": True,
+        },
+    }
+    result = {
+        "result": "pass",
+        "error": None,
+        "global_step": global_step,
+        "trainer_max_steps": global_step,
+        "resume_checkpoint": resume_checkpoint,
+        "resume_module_load": (
+            {
+                "mode": "excluded_frozen_parameters",
+                "missing_frozen_count": 438,
+                "unexpected_count": 0,
+            }
+            if resume_checkpoint
+            else None
+        ),
+        "last_checkpoint": str(checkpoint),
+    }
+    metadata_path = run_root / "metadata.json"
+    result_path = run_root / "result.json"
+    events_path = run_root / "events.jsonl"
+    optimizer_dir = run_root / "optimizer"
+    log_path = run_root / "console.log"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    result_path.write_text(json.dumps(result), encoding="utf-8")
+    events_path.write_text(
+        json.dumps(
+            {
+                "event": "checkpoint_save_complete",
+                "global_step": global_step,
+                "filepath": str(checkpoint),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    optimizer_dir.mkdir()
+    for rank in range(4):
+        (optimizer_dir / f"optimizer_state_rank_{rank:03d}.json").write_text(
+            json.dumps(
+                {
+                    "global_rank": rank,
+                    "world_size": 4,
+                    "result": "pass",
+                    "fp32_only": True,
+                    "floating_state_tensors": 2,
+                }
+            ),
+            encoding="utf-8",
+        )
+    log_path.write_text(
+        "".join(f"[METRICS] Step: {step} - {METRICS}\n" for step in metric_steps),
+        encoding="utf-8",
+    )
+    return {
+        "metadata_path": str(metadata_path),
+        "result_path": str(result_path),
+        "events_path": str(events_path),
+        "optimizer_dir": str(optimizer_dir),
+        "log_path": str(log_path),
+        "checkpoint": str(checkpoint.resolve()),
+    }
+
+
+class ClaridenTrainingAuditTest(unittest.TestCase):
+    def test_four_gpu_step_two_to_four_resume_evidence_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            commit = "a" * 40
+            initial = _write_run(
+                root,
+                name="initial",
+                global_step=2,
+                metric_steps=[0, 1],
+                resume_checkpoint=None,
+                commit=commit,
+            )
+            resumed = _write_run(
+                root,
+                name="resumed",
+                global_step=4,
+                metric_steps=[2, 3],
+                resume_checkpoint=initial["checkpoint"],
+                commit=commit,
+            )
+            initial.pop("checkpoint")
+            resumed.pop("checkpoint")
+            report = build_clariden_4gpu_resume_report(
+                initial=initial,
+                resumed=resumed,
+            )
+            self.assertTrue(report["ok"], report)
+            self.assertTrue(all(report["checks"].values()))
+            self.assertEqual(
+                report["resumed"]["resume_module_load"]["missing_frozen_count"],
+                438,
+            )
+
+    def test_resume_must_use_the_initial_completed_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            commit = "b" * 40
+            initial = _write_run(
+                root,
+                name="initial",
+                global_step=2,
+                metric_steps=[0, 1],
+                resume_checkpoint=None,
+                commit=commit,
+            )
+            wrong = root / "wrong.ckpt"
+            wrong.mkdir()
+            resumed = _write_run(
+                root,
+                name="resumed",
+                global_step=4,
+                metric_steps=[2, 3],
+                resume_checkpoint=str(wrong),
+                commit=commit,
+            )
+            initial.pop("checkpoint")
+            resumed.pop("checkpoint")
+            report = build_clariden_4gpu_resume_report(
+                initial=initial,
+                resumed=resumed,
+            )
+            self.assertFalse(report["ok"])
+            self.assertFalse(report["checks"]["resume_uses_initial_checkpoint"])
+
+
+if __name__ == "__main__":
+    unittest.main()

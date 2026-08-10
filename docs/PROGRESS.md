@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：Clariden 迁移——独立 X-WAM aarch64/GH200 policy 容器部署
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3门禁均已在原 A800 环境通过；Clariden 镜像/SQSH/EDF、4×GH200 CUDA、FlashAttention BF16 kernel、checkpoint 发现、真实 CloseFridge batch、`nvtx==0.2.15` overlay 和 1×GH200 单步训练均已通过
+- 超算运行状态：M1～M4.3门禁均已在原 A800 环境通过；Clariden 镜像/SQSH/EDF、4×GH200 CUDA、FlashAttention BF16 kernel、checkpoint 发现、真实 CloseFridge batch、`nvtx==0.2.15` overlay 和 1×GH200 单步训练均已通过；下一门禁为 4×GH200 step 2保存→恢复到step 4
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -43,6 +43,8 @@
 - NVIDIA `nvtx==0.2.15` 明确加入 Domain API 事件属性关键字参数支持。新 overlay 路径与 0.2.12 分离，门禁不再只检查符号存在，而会在模型加载前真实执行与 DeepSpeed 同签名的 `push_range(message='probe', category=None)` 和 `pop_range()`；未来镜像构建也固定 0.2.15。
 - 用户回报 `nvtx==0.2.15` runtime overlay 与 1×GH200 单步训练均已通过。仓库 smoke 脚本的退出门禁要求初始化报告 `result=pass`，训练结果为 `result=pass/global_step=1/error=null`，因此 Clariden 已完成真实模型加载、forward、backward 和一次 FP32 CPUAdam update；旧 0.2.12 overlay 无需删除。
 - 本次反馈未包含最终 Job ID 和 `git rev-parse HEAD`，因此环境 manifest 中相应 provenance 保持 `null`，不推断为未知编号或 commit。Clariden 单卡基础部署门禁关闭；多卡保存/恢复和正式训练仍属于后续 `cluster-train`，不由单步 smoke 推断通过。
+- 新增 Clariden 专用四卡恢复门禁：固定 CloseFridge 前8个clip、4×micro-batch 1、ZeRO-2 FP32 CPUAdam offload和四步scheduler；同一allocation内先到step 2保存，再从该checkpoint严格恢复到step 4。Debug checkpoint排除冻结T5/VAE，但恢复仍拒绝任何可训练参数缺失。
+- 新增联合审计，要求两阶段相同干净commit/数据/scheduler、四张GH200、四rank实际FP32 optimizer state、有限loss且depth loss为0、step 2/4保存完成、四个ZeRO optimizer shard、恢复源精确一致和最终`global_step=4`。本地无Torch静态检查通过；真实运行状态为`cluster-pending`。
 
 ## 已确认资源
 

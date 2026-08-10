@@ -1,0 +1,23 @@
+# Clariden 4xGH200 checkpoint/resume 工程门禁；不作为正式训练配置。
+precision: bf16-mixed
+devices: 4
+batch_size_per_gpu: 1
+accumulate_grad_batches: 1
+global_batch_size: 4
+num_workers_per_gpu: 0
+prefetch_factor: 2
+use_gradient_checkpointing: true
+
+# 先复用已通过单卡门禁的 FP32 CPUAdam，隔离四卡通信和恢复链路。
+deepspeed_stage: 2
+deepspeed_offload_optimizer: true
+deepspeed_offload_optimizer_device: cpu
+deepspeed_pin_memory: false
+deepspeed_overlap_comm: false
+deepspeed_bucket_size: 100000000
+deepspeed_fp32_optimizer_states: true
+
+# Debug checkpoint 不复制冻结 T5/VAE；恢复时仍严格拒绝可训练参数缺失。
+deepspeed_exclude_frozen_parameters: true
+audit_optimizer_state_dtype: true
+allow_distributed_generator_state: true

@@ -55,7 +55,8 @@
     "checkpoint_discovery": "pass",
     "dataset_smoke": "pass",
     "nvtx_runtime_overlay": "pass",
-    "training": "pass"
+    "training": "pass",
+    "multigpu_checkpoint_resume": "cluster-pending"
   },
   "cluster_evidence": {
     "source_commit": "6594d898a87145101afe5f8a45fa6ba907b2b3c3",

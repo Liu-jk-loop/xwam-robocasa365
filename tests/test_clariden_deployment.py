@@ -34,6 +34,10 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertEqual(contract["validation"]["dataset_smoke"], "pass")
         self.assertEqual(contract["validation"]["nvtx_runtime_overlay"], "pass")
         self.assertEqual(contract["validation"]["training"], "pass")
+        self.assertEqual(
+            contract["validation"]["multigpu_checkpoint_resume"],
+            "cluster-pending",
+        )
         self.assertEqual(contract["cluster_evidence"]["training_smoke_result"], "pass")
         self.assertIsNone(contract["cluster_evidence"]["training_smoke_job_id"])
         self.assertIsNone(contract["cluster_evidence"]["training_source_commit"])
@@ -117,6 +121,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "smoke_batch_xwam.sbatch",
             "smoke_train_xwam.sbatch",
             "prepare_runtime_overlay_xwam.sbatch",
+            "smoke_train_resume_xwam.sbatch",
         ):
             result = subprocess.run(
                 ["bash", "-n", str(DEPLOY_ROOT / script)],
@@ -185,6 +190,46 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "callable(nvtx.get_domain)",
             'domain.push_range(message="probe", category=None)',
             "xwam_runtime_overlay.txt",
+        ):
+            self.assertIn(expected, script)
+
+    def test_clariden_four_gpu_resume_gate_is_debug_only_and_audited(self) -> None:
+        hardware = (
+            REPO_ROOT / "configs/hardware/gh200x4_96gb_resume_debug.yaml"
+        ).read_text(encoding="utf-8")
+        experiment = (
+            REPO_ROOT
+            / "configs/experiment/robocasa365_clariden_4gpu_resume_gate.yaml"
+        ).read_text(encoding="utf-8")
+        script = (DEPLOY_ROOT / "smoke_train_resume_xwam.sbatch").read_text(
+            encoding="utf-8"
+        )
+        for expected in (
+            "devices: 4",
+            "batch_size_per_gpu: 1",
+            "global_batch_size: 4",
+            "deepspeed_offload_optimizer: true",
+            "deepspeed_fp32_optimizer_states: true",
+            "deepspeed_exclude_frozen_parameters: true",
+            "audit_optimizer_state_dtype: true",
+            "allow_distributed_generator_state: true",
+        ):
+            self.assertIn(expected, hardware)
+        for expected in (
+            "num_training_steps: 4",
+            "trainer_max_steps: 2",
+            "train_subset_size: 8",
+            "save_interval: 2",
+            "save_top_k: -1",
+        ):
+            self.assertIn(expected, experiment)
+        for expected in (
+            "#SBATCH --gpus-per-node=4",
+            "trainer_max_steps=4",
+            "resume_checkpoint='$CHECKPOINT'",
+            "unset SLURM_NTASKS",
+            "audit_clariden_4gpu_resume.py",
+            "[PASS] X-WAM Clariden 4xGH200 step 2 to 4 resume gate",
         ):
             self.assertIn(expected, script)
 

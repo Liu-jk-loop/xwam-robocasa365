@@ -1,5 +1,15 @@
 # 变更记录
 
+## 2026-08-10 — Clariden 4×GH200 step 2→4 checkpoint/resume 门禁
+
+- 在单卡单步门禁关闭后新增独立的 Clariden 四卡调试层与两阶段实验层；不直接套用M6 H100正式配置。门禁固定CloseFridge前8个clip、4×micro-batch 1、GBS 4、BF16 compute、ZeRO-2 FP32 CPUAdam offload和四步scheduler。
+- `smoke_train_resume_xwam.sbatch` 在同一4×GH200 allocation内先训练到step 2并保存，再解析真实`last_checkpoint`并恢复到step 4。两阶段各自保存console log、metadata、result、checkpoint events和四rank optimizer dtype报告；任一`srun`失败会停止后续阶段。
+- 每阶段只由`srun`启动一个持有四张GPU的EDF容器任务，延续仓库既有“Lightning按`devices=4`派生四个本地进程”的合同；训练前清除step级单任务Slurm拓扑变量，避免`SLURM_NTASKS=1`与训练world size 4冲突。
+- Debug checkpoint显式排除冻结T5/VAE以控制保存体积；既有严格恢复适配只允许这些冻结参数缺失，任何可训练参数缺失、额外参数或shape错误仍会失败。保留两个step checkpoint便于诊断，不把门禁checkpoint用于正式训练。
+- 新增dependency-light联合审计器，验证四张GH200/单节点world size 4、相同干净Git commit和数据、固定scheduler、有限RGB-only loss、四rank实际FP32 optimizer state、step 2/4保存完成、非空model state、四个ZeRO optimizer shard、恢复源精确一致及最终`global_step=4`。
+- 本地已通过聚焦测试、shell语法、Python compile和CLI help；工作站无Torch/Clariden，真实NCCL、四卡forward/backward、checkpoint I/O、严格恢复和审计为`cluster-pending`。
+- 回退本次commit会移除GH200四卡配置、作业、审计器和测试，不会删除服务器现有单卡结果、模型、数据、overlay或未来产生的外部checkpoint。外部实验目录如需清理必须由用户单独确认。
+
 ## 2026-08-10 — Clariden DeepSpeed NVTX domain 兼容修复
 
 - 首次 1×GH200 单步训练 Job `3044897` 已进入 Lightning `training_step`，但 DeepSpeed 0.19.4 在执行模型 wrapper 前调用 `nvtx.get_domain`，当前 SQSH 中被 import 的 `nvtx` 不提供该 API，作业以 `AttributeError` 退出。该次 CUDA 峰值 allocated/reserved 为 30.677/40.076 GiB，不是 OOM；真实 X-WAM forward/backward/optimizer update 尚未得到验证。
