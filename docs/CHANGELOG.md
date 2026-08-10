@@ -9,6 +9,13 @@
 - 本地通过 shell 语法、dependency-light 单元测试、JSON 解析、文档同步和 diff 门禁。当前工作站没有 Clariden runtime；ARM64 wheel 下载、overlay import、DeepSpeed domain push/pop 和真实单步训练均为 `cluster-pending`。
 - 回滚本次 commit 会移除 overlay 安装/前置检查，并恢复旧依赖清单；不会删除服务器已有 SQSH、IOPS overlay、日志、模型、数据或实验目录。若需删除外部 overlay，应单独确认路径后由用户执行。
 
+### `nvtx 0.2.12` 真实重试反馈与精确签名修复
+
+- 0.2.12 overlay 环境门禁已通过，证明新包被正确优先 import，`get_domain` 也存在；但训练 Job `3046110` 在 DeepSpeed 的下一行调用失败：`DummyDomain.push_range(message=msg, category=category)` 报 `TypeError: push_range() takes exactly 2 positional arguments (1 given)`。因此首版门禁只验证 API 存在仍不充分。
+- NVIDIA 的 0.2.15 发布说明明确加入“Domain API 接受事件属性关键字参数”。Clariden pin、wheel 哈希、IOPS 路径、EDF、Containerfile、环境 manifest 和测试统一提升到 `nvtx==0.2.15`；Python 3.10 Linux aarch64 wheel SHA-256 固定为 `a4f50832fd90a1b480a9deef6e4cd48015b61869095b54dd1a7afe87b4138c6a`。
+- overlay、Containerfile 和训练 preflight 现在真实调用 `domain.push_range(message='probe', category=None)` 后再 `pop_range()`，与 DeepSpeed 0.19.4 的失败路径保持同一参数形式。0.2.15 使用新版本化目录，不覆盖或删除已有 0.2.12 overlay。
+- Job `3046110` 的显存峰值仍是 allocated/reserved 30.677/40.076 GiB，失败仍发生在 wrapper 进入模型 forward 前；数据、模型和 optimizer 不能由这次日志重新判错。0.2.15 ARM64 安装与单步训练为 `cluster-pending`。
+
 ## 2026-08-10 — Clariden 首次构建 dependency resolver 修复
 
 - Clariden 首次真实 build 已证明 Torch 2.9.0/cu126 overlay 安装成功，但在 requirements 解析阶段中止，尚未进入 Decord、FlashAttention 编译和 SQSH 导出。

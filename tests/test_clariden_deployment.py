@@ -22,7 +22,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertEqual(contract["packages"]["torch"], "2.9.0+cu126")
         self.assertEqual(contract["packages"]["numpy"], "1.23.5")
         self.assertEqual(contract["packages"]["safetensors"], "0.8.0")
-        self.assertEqual(contract["packages"]["nvtx"], "0.2.12")
+        self.assertEqual(contract["packages"]["nvtx"], "0.2.15")
         self.assertTrue(contract["simulator_contract"]["separate_container"])
         for gate in (
             "container_build",
@@ -51,8 +51,9 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "--no-build-isolation",
             "transformer-engine transformer-engine-cu12 torch-tensorrt",
             'assert safetensors.__version__ == "0.8.0"',
-            'assert importlib.metadata.version("nvtx") == "0.2.12"',
+            'assert importlib.metadata.version("nvtx") == "0.2.15"',
             "assert callable(nvtx.get_domain)",
+            'nvtx_domain.push_range(message="probe", category=None)',
         ):
             self.assertIn(expected, containerfile)
         self.assertNotIn("pip install decord", containerfile)
@@ -78,7 +79,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "safetensors==0.8.0",
             "lightning==2.6.5",
             "deepspeed==0.19.4",
-            "nvtx==0.2.12",
+            "nvtx==0.2.15",
             "pyarrow==16.1.0",
         ):
             self.assertIn(expected, requirements)
@@ -88,7 +89,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "torchaudio==2.9.0",
             "huggingface-hub==0.36.0",
             "safetensors==0.8.0",
-            "nvtx==0.2.12",
+            "nvtx==0.2.15",
         ):
             self.assertIn(expected, constraints)
 
@@ -102,7 +103,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
         template = (DEPLOY_ROOT / "xwam.toml.template").read_text(encoding="utf-8")
         self.assertIn("src/xwam-robocasa365", template)
         self.assertIn("/iopsstor/scratch/cscs/zjingchen/terry_nys/cache", template)
-        self.assertIn("python/xwam-nvtx-0.2.12", template)
+        self.assertIn("python/xwam-nvtx-0.2.15", template)
         self.assertIn('HF_HUB_OFFLINE = "1"', template)
         self.assertNotIn("MUJOCO_GL", template)
 
@@ -158,6 +159,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             self.assertIn(expected, experiment)
         self.assertIn("torch.cuda.get_device_capability(0) == (9, 0)", script)
         self.assertIn("callable(nvtx.get_domain)", script)
+        self.assertIn("domain.push_range(message='probe', category=None)", script)
         self.assertIn("module.is_relative_to(overlay)", script)
         self.assertIn("[PASS] X-WAM Clariden one-step train", script)
 
@@ -168,9 +170,9 @@ class ClaridenDeploymentTest(unittest.TestCase):
         script = (DEPLOY_ROOT / "prepare_runtime_overlay_xwam.sbatch").read_text(
             encoding="utf-8"
         )
-        self.assertIn("nvtx==0.2.12", requirements)
+        self.assertIn("nvtx==0.2.15", requirements)
         self.assertIn(
-            "sha256:0d3070d71e5b9661d40ae6f1a6bae289939ee8ca073283f6be84799de393b4eb",
+            "sha256:a4f50832fd90a1b480a9deef6e4cd48015b61869095b54dd1a7afe87b4138c6a",
             requirements,
         )
         for expected in (
@@ -179,6 +181,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "mktemp -d",
             'mv "$STAGING" "$OVERLAY"',
             "callable(nvtx.get_domain)",
+            'domain.push_range(message="probe", category=None)',
             "xwam_runtime_overlay.txt",
         ):
             self.assertIn(expected, script)

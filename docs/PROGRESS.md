@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：Clariden 迁移——独立 X-WAM aarch64/GH200 policy 容器部署
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3门禁均已在原 A800 环境通过；Clariden 镜像/SQSH/EDF、4×GH200 CUDA、FlashAttention BF16 kernel、checkpoint 发现和真实 CloseFridge batch 已通过。首次 1×GH200 单步训练 Job `3044897` 在 DeepSpeed NVTX wrapper 中失败；精确 NVTX runtime overlay 修复待计算节点验证
+- 超算运行状态：M1～M4.3门禁均已在原 A800 环境通过；Clariden 镜像/SQSH/EDF、4×GH200 CUDA、FlashAttention BF16 kernel、checkpoint 发现和真实 CloseFridge batch 已通过。单步训练 Job `3044897` 暴露缺失 Domain API，`0.2.12` overlay 环境门禁通过后 Job `3046110` 又暴露关键字调用不兼容；`nvtx==0.2.15` 精确调用修复待计算节点验证
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -39,8 +39,9 @@
 - commit `6594d89` 的 image validation 修复后成功生成有效 16.98 GiB SQSH；EDF/manifest 因 enroot 收尾非零手工补齐。后续 4×GH200 validation 全部通过，容器、CUDA、FlashAttention kernel 和模型发现门禁关闭；validation Job ID 未提供。
 - Clariden 真实 batch smoke 已由用户回报通过，但未提供 Job ID；三路 RGB、16D state、12D action 与确定性解码门禁关闭。
 - Clariden 首次单步训练 Job `3044897` 已完成 model/data/DeepSpeed 初始化并进入 `training_step`，随后在 DeepSpeed 0.19.4 的 NVTX domain wrapper 调用 `nvtx.get_domain` 时失败。峰值显存 allocated/reserved 为 30.677/40.076 GiB，因此该次失败不是 OOM，也尚未进入真实 X-WAM forward/backward。
-- 当前 SQSH 中实际 import 的 `nvtx` 不提供 domain API。新增哈希锁定的 `nvtx==0.2.12` IOPS runtime overlay，训练作业会在加载模型前验证版本、模块来源和 `get_domain`；同时把同一版本加入下一次镜像构建的固定依赖。
-- 本地静态状态：`local-static`；runtime overlay 安装与 1×GH200 单步训练复跑均为 `cluster-pending`。下一门禁先运行 `prepare_runtime_overlay_xwam.sbatch`，再运行 `smoke_train_xwam.sbatch`。
+- `nvtx==0.2.12` IOPS overlay 的版本、模块来源和 `get_domain` 门禁已通过，但 Job `3046110` 在下一行失败：DeepSpeed 0.19.4 调用 `DummyDomain.push_range(message=..., category=...)`，而 0.2.12 的 Cython 方法尚不接受这两个关键字。显存峰值仍为 allocated/reserved 30.677/40.076 GiB，说明仍未进入 X-WAM forward，且不是 OOM。
+- NVIDIA `nvtx==0.2.15` 明确加入 Domain API 事件属性关键字参数支持。新 overlay 路径与 0.2.12 分离，门禁不再只检查符号存在，而会在模型加载前真实执行与 DeepSpeed 同签名的 `push_range(message='probe', category=None)` 和 `pop_range()`；未来镜像构建也固定 0.2.15。
+- 本地静态状态：`local-static`；0.2.15 runtime overlay 安装和 1×GH200 单步训练复跑均为 `cluster-pending`。下一门禁仍按顺序运行 overlay 作业和训练作业，不删除已经通过安装门禁的 0.2.12 外部目录。
 
 ## 已确认资源
 

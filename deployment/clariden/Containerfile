@@ -140,8 +140,11 @@ assert torch.version.cuda == "12.6"
 assert numpy.__version__ == "1.23.5"
 assert safetensors.__version__ == "0.8.0"
 assert flash_attn.__version__ == "2.8.3"
-assert importlib.metadata.version("nvtx") == "0.2.12"
+assert importlib.metadata.version("nvtx") == "0.2.15"
 assert callable(nvtx.get_domain)
+nvtx_domain = nvtx.get_domain("xwam-clariden-deepspeed-probe")
+nvtx_domain.push_range(message="probe", category=None)
+nvtx_domain.pop_range()
 assert HAS_FLASH_ATTN
 for removed_distribution in (
     "transformer-engine",

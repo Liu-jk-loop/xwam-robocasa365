@@ -1,2 +1,2 @@
-nvtx==0.2.12 \
-    --hash=sha256:0d3070d71e5b9661d40ae6f1a6bae289939ee8ca073283f6be84799de393b4eb
+nvtx==0.2.15 \
+    --hash=sha256:a4f50832fd90a1b480a9deef6e4cd48015b61869095b54dd1a7afe87b4138c6a

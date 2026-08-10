@@ -16,7 +16,7 @@ DEPLOY_IOPS=/iopsstor/scratch/cscs/zjingchen/terry_nys
 XWAM_REPO="$DEPLOY_STORE/src/xwam-robocasa365"
 EDF="$DEPLOY_STORE/containers/edf/xwam.toml"
 REQUIREMENTS="$XWAM_REPO/deployment/clariden/runtime-overlay-clariden.txt"
-OVERLAY="$DEPLOY_IOPS/python/xwam-nvtx-0.2.12"
+OVERLAY="$DEPLOY_IOPS/python/xwam-nvtx-0.2.15"
 MANIFEST="$DEPLOY_STORE/manifests/xwam_runtime_overlay.txt"
 
 test -s "$EDF"
@@ -39,8 +39,11 @@ import nvtx
 overlay = Path(os.environ["OVERLAY"]).resolve()
 module = Path(nvtx.__file__).resolve()
 assert module.is_relative_to(overlay), (module, overlay)
-assert importlib.metadata.version("nvtx") == "0.2.12"
+assert importlib.metadata.version("nvtx") == "0.2.15"
 assert callable(nvtx.get_domain)
+domain = nvtx.get_domain("xwam-clariden-deepspeed-probe")
+domain.push_range(message="probe", category=None)
+domain.pop_range()
 print("nvtx version:", importlib.metadata.version("nvtx"))
 print("nvtx module:", module)
 print("nvtx get_domain:", callable(nvtx.get_domain))
@@ -53,7 +56,7 @@ if [[ -d "$OVERLAY" ]]; then
   exit 0
 fi
 
-STAGING="$(mktemp -d "$(dirname "$OVERLAY")/.xwam-nvtx-0.2.12.XXXXXX")"
+STAGING="$(mktemp -d "$(dirname "$OVERLAY")/.xwam-nvtx-0.2.15.XXXXXX")"
 trap '"'"'rm -rf "$STAGING"'"'"' EXIT
 python -m pip install \
   --no-deps \
@@ -74,7 +77,7 @@ echo "[PASS] X-WAM NVTX runtime overlay prepared"
 
 {
   printf 'overlay=%s\n' "$OVERLAY"
-  printf 'nvtx=%s\n' '0.2.12'
+  printf 'nvtx=%s\n' '0.2.15'
   printf 'requirements_sha256=%s\n' "$(sha256sum "$REQUIREMENTS" | cut -d ' ' -f 1)"
   printf 'source_commit=%s\n' "$(git -C "$XWAM_REPO" rev-parse HEAD)"
   printf 'job_id=%s\n' "${SLURM_JOB_ID:-unknown}"

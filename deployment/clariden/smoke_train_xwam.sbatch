@@ -15,7 +15,7 @@ DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
 DEPLOY_CAPSCR=/capstor/scratch/cscs/zjingchen/terry_nys
 DEPLOY_IOPS=/iopsstor/scratch/cscs/zjingchen/terry_nys
 EDF="$DEPLOY_STORE/containers/edf/xwam.toml"
-RUNTIME_OVERLAY="$DEPLOY_IOPS/python/xwam-nvtx-0.2.12"
+RUNTIME_OVERLAY="$DEPLOY_IOPS/python/xwam-nvtx-0.2.15"
 DATASET="$DEPLOY_STORE/datasets/robocasa/v1.0/pretrain/atomic/CloseFridge/20250819/lerobot"
 WAN_DIR="$DEPLOY_STORE/checkpoints/xwam/wan22_5b"
 PRETRAINED="$DEPLOY_STORE/checkpoints/xwam/pretrained/checkpoints/last.ckpt"
@@ -52,8 +52,11 @@ import nvtx
 overlay = Path('$RUNTIME_OVERLAY').resolve()
 module = Path(nvtx.__file__).resolve()
 assert module.is_relative_to(overlay), (module, overlay)
-assert importlib.metadata.version('nvtx') == '0.2.12'
+assert importlib.metadata.version('nvtx') == '0.2.15'
 assert callable(nvtx.get_domain)
+domain = nvtx.get_domain('xwam-clariden-deepspeed-probe')
+domain.push_range(message='probe', category=None)
+domain.pop_range()
 print('Clariden NVTX runtime overlay:', module)
 PY
 
