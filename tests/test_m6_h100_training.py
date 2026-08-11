@@ -83,6 +83,7 @@ def _write_gate_run(
                 "run_id": "persistent-run-id",
                 "mode": "online",
                 "resume": "allow",
+                "auth": "api_key_env",
             }
         },
     }
@@ -374,6 +375,7 @@ class M6H100TrainingTest(unittest.TestCase):
         self.assertIn("save_final_checkpoint: true", formal)
         self.assertIn("enable_wandb: true", formal)
         self.assertIn("wandb_mode: online", formal)
+        self.assertIn("wandb_require_api_key: true", formal)
 
         contract = validate_m6_formal_training_contract(
             {
@@ -439,6 +441,8 @@ class M6H100TrainingTest(unittest.TestCase):
             "final_checkpoint_save_complete",
             "WandbLogger",
             'resume="allow"',
+            "wandb_require_api_key",
+            '"auth": "api_key_env"',
         ):
             self.assertIn(token, entrypoint)
 

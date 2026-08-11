@@ -49,6 +49,10 @@ cd "$REPO"
 test -s "$EDF"
 test -d "$RUNTIME_OVERLAY"
 test -d "$WANDB_OVERLAY"
+if [[ -z "${WANDB_API_KEY:-}" ]]; then
+  echo "[FAIL] WANDB_API_KEY must be exported before sbatch submission" >&2
+  exit 2
+fi
 test -s "$WAN_DIR/config.json"
 test -s "$WAN_DIR/models_t5_umt5-xxl-enc-bf16.pth"
 test -s "$WAN_DIR/Wan2.2_VAE.pth"
@@ -174,6 +178,7 @@ export MKL_NUM_THREADS=16
 export NCCL_DEBUG=INFO
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export PYTHONUNBUFFERED=1
+unset WANDB_IDENTITY_TOKEN_FILE
 export SLURM_JOB_NAME=interactive
 unset SLURM_NTASKS SLURM_NTASKS_PER_NODE SLURM_PROCID SLURM_LOCALID SLURM_NODEID
 export XWAM_RUN_ID="$RUN_ID"
@@ -193,12 +198,13 @@ assert importlib.metadata.version("wandb") == "0.23.1"
 assert os.environ["WANDB_MODE"] == "online"
 assert os.environ["WANDB_RESUME"] == "allow"
 assert os.environ["WANDB_RUN_ID"]
+assert os.environ.get("WANDB_API_KEY")
 assert wandb.login(verify=True)
 print("wandb version:", importlib.metadata.version("wandb"))
 print("wandb module:", module)
 print("wandb project:", os.environ["WANDB_PROJECT"])
 print("wandb run id:", os.environ["WANDB_RUN_ID"])
-print("wandb authentication: pass")
+print("wandb authentication: api_key_env pass")
 PY
 
 TRAIN_ARGS=(

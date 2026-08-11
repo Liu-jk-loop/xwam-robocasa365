@@ -763,20 +763,17 @@ grep -F '[PASS] X-WAM W&B runtime overlay manifest written' \
   "/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/wandb-overlay-${WJOB}.log"
 ```
 
-如果同一账户此前已为FastWAM执行过`wandb login`且计算容器能读取该`~/.netrc`，无需重复登录。否则在一个交互计算allocation内执行下面的交互式认证；API key只在W&B提示符中输入，不要贴进sbatch、Git或聊天：
+正式训练不使用机器上已有的W&B默认账号或`~/.netrc`身份。每次提交chunk前，都在当前登录shell中隐藏读取目标账号的API key，再由Slurm默认的环境继承传给作业：
 
 ```bash
-salloc --account=aa004 --partition=normal --nodes=1 --ntasks=1 \
-  --gpus-per-node=1 --time=00:20:00
-
-srun --environment=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/containers/edf/xwam.toml \
-  env PYTHONPATH=/iopsstor/scratch/cscs/zjingchen/terry_nys/python/xwam-wandb-0.23.1:/iopsstor/scratch/cscs/zjingchen/terry_nys/python/xwam-nvtx-0.2.15 \
-  wandb login --verify
-
-exit
+read -rsp 'W&B API key: ' WANDB_API_KEY
+printf '\n'
+export WANDB_API_KEY
+export WANDB_ENTITY='<目标账号或team>'
+export WANDB_PROJECT='xwam-robocasa365'
 ```
 
-正式作业在加载5B模型前还会自动执行在线凭据验证；没有有效凭据会立即失败，不会消耗时间进入训练。默认project为`xwam-robocasa365`。若需指定W&B team/entity，提交时使用`--export=ALL,WANDB_ENTITY=<team>`；不要通过该参数传API key。
+不要把真实key直接写成`export WANDB_API_KEY=...`，也不要放入`sbatch --export=...`、脚本、Git或聊天；隐藏输入避免进入shell history和进程命令行。API key决定认证身份，`WANDB_ENTITY`明确指定指标归属的个人账号或team。正式作业要求该环境变量存在，并在加载5B模型前用它做服务端验证；不会回退到默认账号。无效key或无权访问指定entity时会立即失败，不会进入训练。
 
 首次启动：
 
@@ -786,7 +783,10 @@ git pull --ff-only origin dev/atomic-robocasa365
 git rev-parse HEAD
 git status --short
 
-sbatch deployment/clariden/train_m6_formal_xwam.sbatch
+FJOB=$(sbatch --parsable --export=ALL \
+  deployment/clariden/train_m6_formal_xwam.sbatch | cut -d';' -f1)
+echo "$FJOB"
+unset WANDB_API_KEY
 ```
 
 首次Job在固定实验目录原子写入`.wandb_run_id`。之后所有12小时chunk都必须保留同一默认实验名，并以online/`resume=allow`写入同一个W&B run；不要手工删除或修改该文件。每段chunk audit会核验metadata里的W&B ID与该持久ID完全一致。
@@ -797,9 +797,7 @@ sbatch deployment/clariden/train_m6_formal_xwam.sbatch
 [PASS] X-WAM Clariden M6 formal chunk completed at step <N>
 ```
 
-```bash
-sbatch deployment/clariden/train_m6_formal_xwam.sbatch
-```
+后续每个chunk都重新执行上面的隐藏`read`、`export WANDB_API_KEY`、`sbatch --export=ALL`和`unset WANDB_API_KEY`四步。仅执行裸`sbatch`会因缺少API key被脚本拒绝。
 
 每次重复提交都使用同一默认实验目录：
 

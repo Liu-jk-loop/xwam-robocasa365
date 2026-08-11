@@ -655,6 +655,7 @@ def build_m6_formal_chunk_report(
             and run["wandb"].get("mode") == "online",
             "wandb_persistent_run": bool(run["wandb"].get("run_id"))
             and run["wandb"].get("resume") == "allow",
+            "wandb_api_key_auth": run["wandb"].get("auth") == "api_key_env",
             "expected_wandb_run": bool(expected_wandb_run_id)
             and run["wandb"].get("run_id") == expected_wandb_run_id,
             "all_run_checks": all(run["checks"].values()),
@@ -714,6 +715,8 @@ def build_m6_formal_report(
                     and run["wandb"].get("mode") == "online",
                     "wandb_persistent_run": bool(run["wandb"].get("run_id"))
                     and run["wandb"].get("resume") == "allow",
+                    "wandb_api_key_auth": run["wandb"].get("auth")
+                    == "api_key_env",
                     "expected_wandb_run": run["wandb"].get("run_id")
                     == expected_wandb_run_id,
                 }

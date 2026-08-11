@@ -383,6 +383,12 @@ def main():
         ).lower()
         if wandb_mode not in {"online", "offline"}:
             raise ValueError(f"wandb_mode 只允许 online/offline，当前为 {wandb_mode}")
+        wandb_require_api_key = bool(config.get("wandb_require_api_key", False))
+        wandb_api_key_present = bool(os.environ.get("WANDB_API_KEY"))
+        if wandb_require_api_key and not wandb_api_key_present:
+            raise ValueError(
+                "wandb_require_api_key=true 时必须通过环境变量提供 WANDB_API_KEY"
+            )
         wandb_project = str(
             os.environ.get("WANDB_PROJECT")
             or config.get("wandb_project", "xwam-robocasa365")
@@ -416,6 +422,7 @@ def main():
             "run_id": str(wandb_run_id),
             "mode": wandb_mode,
             "resume": "allow",
+            "auth": "api_key_env" if wandb_api_key_present else "wandb_default",
             "save_dir": str(Path(wandb_save_dir).expanduser().resolve()),
         }
     if bool(config.get("enable_tensorboard", True)):

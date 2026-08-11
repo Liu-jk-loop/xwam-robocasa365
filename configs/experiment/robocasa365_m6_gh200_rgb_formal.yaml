@@ -26,6 +26,7 @@ wandb_entity: null
 wandb_name: robocasa365_m6_atomic_seen18_rgb_seed42
 wandb_group: robocasa365_m6_atomic_seen18
 wandb_mode: online
+wandb_require_api_key: true
 wandb_log_model: false
 enable_checkpointing: true
 save_interval: 1000
