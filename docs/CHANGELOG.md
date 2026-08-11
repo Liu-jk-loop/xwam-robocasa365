@@ -57,7 +57,7 @@
 
 ### Clariden正式训练前日志归档
 
-- 正式训练前保留全部历史工程证据，但把build、validation、overlay、单步、四卡恢复、M6数据和profile门禁等已知前缀统一移动到Store的`logs/xwam/debug/`；新增登录节点归档脚本只执行同文件系统`mv`，不删除文件、不匹配`m6-formal-*`，目标重名时拒绝覆盖。
+- 正式训练前保留全部历史工程证据，但把build、validation、overlay、单步、四卡恢复、M6数据和profile门禁等已知前缀统一移动到Store的`logs/xwam/debug/`；新增登录节点归档脚本只执行同文件系统`mv`，不删除文件、不匹配未来正式日志，目标重名时拒绝覆盖。已确认停在outer preflight且未训练的Job `3053803`以精确Job ID作为唯一`m6-formal`例外归档。
 - 正式训练默认门禁audit路径同步更新为`logs/xwam/debug/m6-gate-3053436-audit.json`，避免归档后outer preflight误报缺文件。正式作业自己的主日志、train log、failure report和audit继续写`logs/xwam/`根目录，便于监控。
 - 本地下载的既有M4/四卡/M6证据已统一放入忽略目录`log/debug/`；这些产物不进入Git。集群归档脚本的真实Store移动由用户执行，状态为`cluster-pending`；回滚代码不会自动移回已归档日志，可用普通`mv`从debug目录恢复。
 

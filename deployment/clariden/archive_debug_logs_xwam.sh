@@ -20,6 +20,7 @@ debug_patterns=(
   "train4-resume-*"
   "m6-data-*"
   "m6-gate-*"
+  "m6-formal-3053803*"
 )
 
 shopt -s nullglob

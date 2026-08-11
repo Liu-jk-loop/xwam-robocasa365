@@ -744,7 +744,7 @@ Job `3053436`已在commit `f4aad5a15f2df428d36639391763debe03280b68`上关闭默
 
 正式实验固定为Atomic-Seen同名18任务、`pretrain/atomic`、自然比例、RGB-only、seed 42、GBS128、ZeRO-1和5 epochs，总计16,390 optimizer steps。第一段必须从公开X-WAM pretrained权重重新初始化，不能复用step-4门禁checkpoint。
 
-正式训练前先把Store日志根目录中的build、环境、单步、恢复及M6门禁产物统一移动到`logs/xwam/debug/`。脚本只匹配已知debug前缀，不删除文件、不移动任何`m6-formal-*`，目标文件重名时会停止；Job `3053436`的门禁audit归档后，正式脚本默认从debug目录读取：
+正式训练前先把Store日志根目录中的build、环境、单步、恢复及M6门禁产物统一移动到`logs/xwam/debug/`。脚本只匹配已知debug前缀；唯一formal命名例外是已确认未进入训练的旧preflight失败Job `3053803`。它不删除文件、不移动其他`m6-formal-*`，目标文件重名时会停止；Job `3053436`的门禁audit归档后，正式脚本默认从debug目录读取：
 
 ```bash
 cd /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365

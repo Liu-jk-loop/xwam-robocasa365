@@ -242,6 +242,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             '"train4-resume-*"',
             '"m6-data-*"',
             '"m6-gate-*"',
+            '"m6-formal-3053803*"',
         ):
             self.assertIn(debug_prefix, script)
         self.assertNotIn('"m6-formal-*"', script)
@@ -260,6 +261,9 @@ class ClaridenDeploymentTest(unittest.TestCase):
             (log_root / "m6-formal-3.log").write_text(
                 "formal", encoding="utf-8"
             )
+            (log_root / "m6-formal-3053803-failure.txt").write_text(
+                "preflight failure", encoding="utf-8"
+            )
             result = subprocess.run(
                 ["bash", str(DEPLOY_ROOT / "archive_debug_logs_xwam.sh")],
                 cwd=REPO_ROOT,
@@ -272,8 +276,11 @@ class ClaridenDeploymentTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((log_root / "debug/build-1.log").is_file())
             self.assertTrue((log_root / "debug/m6-gate-2-audit.json").is_file())
+            self.assertTrue(
+                (log_root / "debug/m6-formal-3053803-failure.txt").is_file()
+            )
             self.assertTrue((log_root / "m6-formal-3.log").is_file())
-            self.assertIn("Archived 2 X-WAM debug log files", result.stdout)
+            self.assertIn("Archived 3 X-WAM debug log files", result.stdout)
 
         formal_script = (DEPLOY_ROOT / "train_m6_formal_xwam.sbatch").read_text(
             encoding="utf-8"
