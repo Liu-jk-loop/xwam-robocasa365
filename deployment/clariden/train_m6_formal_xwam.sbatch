@@ -30,7 +30,8 @@ CHUNK_STEPS=1000
 EXP_ROOT="$DEPLOY_CAPSCR/experiments/xwam"
 EXP_NAME="${XWAM_M6_FORMAL_NAME:-robocasa365_m6_atomic_seen18_rgb_seed42}"
 EXP_DIR="$EXP_ROOT/$EXP_NAME"
-CHECKPOINT_ROOT="$EXP_DIR/checkpoints"
+HOT_CHECKPOINT_ROOT="$DEPLOY_IOPS/xwam_run/$EXP_NAME/checkpoints"
+DURABLE_CHECKPOINT_ROOT="$DEPLOY_STORE/checkpoints/xwam/$EXP_NAME/checkpoints"
 RUN_DIR="$EXP_DIR/runs"
 WANDB_RUN_ID_FILE="$EXP_DIR/.wandb_run_id"
 WANDB_PROJECT="${WANDB_PROJECT:-xwam-robocasa365}"
@@ -39,7 +40,8 @@ WANDB_ROOT="$DEPLOY_IOPS/wandb/xwam/$EXP_NAME"
 WANDB_CACHE_DIR="$DEPLOY_IOPS/cache/wandb"
 PLAN_JSON="$RUN_DIR/m6-formal-${SLURM_JOB_ID}-plan.json"
 PLAN_ENV="$RUN_DIR/m6-formal-${SLURM_JOB_ID}-plan.env"
-QUARANTINE_ROOT="$EXP_DIR/incomplete-checkpoints/m6-formal-${SLURM_JOB_ID}"
+HOT_QUARANTINE_ROOT="$DEPLOY_IOPS/xwam_run/$EXP_NAME/incomplete-checkpoints/m6-formal-${SLURM_JOB_ID}"
+DURABLE_QUARANTINE_ROOT="$DEPLOY_STORE/checkpoints/xwam/$EXP_NAME/incomplete-checkpoints/m6-formal-${SLURM_JOB_ID}"
 RUN_ID="m6-formal-${SLURM_JOB_ID}"
 TRAIN_LOG="$DEPLOY_STORE/logs/xwam/m6-formal-${SLURM_JOB_ID}-train.log"
 CHUNK_AUDIT="$DEPLOY_STORE/logs/xwam/m6-formal-${SLURM_JOB_ID}-chunk-audit.json"
@@ -77,7 +79,13 @@ test -z "$(git status --porcelain)" || {
   git status --short >&2
   xwam_fail "Git worktree must be clean before M6 formal training"
 }
-mkdir -p "$EXP_ROOT" "$RUN_DIR" "$WANDB_ROOT" "$WANDB_CACHE_DIR"
+mkdir -p \
+  "$EXP_ROOT" \
+  "$RUN_DIR" \
+  "$WANDB_ROOT" \
+  "$WANDB_CACHE_DIR" \
+  "$HOT_CHECKPOINT_ROOT" \
+  "$DURABLE_CHECKPOINT_ROOT"
 exec 9>"$EXP_DIR/.formal-training.lock"
 flock -n 9 || {
   xwam_fail "Another formal job is already writing $EXP_DIR"
@@ -97,6 +105,8 @@ read -r WANDB_RUN_ID < "$WANDB_RUN_ID_FILE"
 echo "wandb_project=$WANDB_PROJECT"
 echo "wandb_entity=$WANDB_ENTITY"
 echo "wandb_run_id=$WANDB_RUN_ID"
+echo "rolling_checkpoints=$HOT_CHECKPOINT_ROOT (every 500 steps, max 5)"
+echo "durable_checkpoints=$DURABLE_CHECKPOINT_ROOT (every 3000 steps, unlimited)"
 echo "failure_report=$FAILURE_REPORT"
 
 XWAM_PHASE=planner_srun
@@ -105,10 +115,12 @@ srun --kill-on-bad-exit=1 --environment="$EDF" \
     REPO="$REPO" \
     RUNTIME_OVERLAY="$RUNTIME_OVERLAY" \
     WANDB_OVERLAY="$WANDB_OVERLAY" \
-    CHECKPOINT_ROOT="$CHECKPOINT_ROOT" \
+    HOT_CHECKPOINT_ROOT="$HOT_CHECKPOINT_ROOT" \
+    DURABLE_CHECKPOINT_ROOT="$DURABLE_CHECKPOINT_ROOT" \
     PLAN_JSON="$PLAN_JSON" \
     PLAN_ENV="$PLAN_ENV" \
-    QUARANTINE_ROOT="$QUARANTINE_ROOT" \
+    HOT_QUARANTINE_ROOT="$HOT_QUARANTINE_ROOT" \
+    DURABLE_QUARANTINE_ROOT="$DURABLE_QUARANTINE_ROOT" \
     TOTAL_STEPS="$TOTAL_STEPS" \
     CHUNK_STEPS="$CHUNK_STEPS" \
     XWAM_FAILURE_REPORT="$FAILURE_REPORT" \
@@ -122,12 +134,14 @@ xwam_install_err_trap
 cd "$REPO"
 export PYTHONPATH="$RUNTIME_OVERLAY${PYTHONPATH:+:$PYTHONPATH}"
 python scripts/plan_robocasa365_m6_formal_chunk.py \
-  --checkpoint-root "$CHECKPOINT_ROOT" \
+  --checkpoint-root "$HOT_CHECKPOINT_ROOT" \
+  --checkpoint-root "$DURABLE_CHECKPOINT_ROOT" \
   --total-steps "$TOTAL_STEPS" \
   --chunk-steps "$CHUNK_STEPS" \
   --output-json "$PLAN_JSON" \
   --output-env "$PLAN_ENV" \
-  --quarantine-incomplete-root "$QUARANTINE_ROOT"
+  --quarantine-incomplete-root "$HOT_QUARANTINE_ROOT" \
+  --quarantine-incomplete-root "$DURABLE_QUARANTINE_ROOT"
 '
 
 XWAM_PHASE=plan_validation
@@ -169,6 +183,8 @@ srun --kill-on-bad-exit=1 --environment="$EDF" \
     STATS="$STATS" \
     EXP_ROOT="$EXP_ROOT" \
     EXP_NAME="$EXP_NAME" \
+    HOT_CHECKPOINT_ROOT="$HOT_CHECKPOINT_ROOT" \
+    DURABLE_CHECKPOINT_ROOT="$DURABLE_CHECKPOINT_ROOT" \
     RUN_ID="$RUN_ID" \
     TARGET_STEP="$XWAM_PLAN_TARGET_STEP" \
     RESUME_CHECKPOINT="$XWAM_PLAN_RESUME_CHECKPOINT" \
@@ -243,6 +259,9 @@ TRAIN_ARGS=(
   "dataset.statistics_path=$STATS"
   "exp_root=$EXP_ROOT"
   "exp_name=$EXP_NAME"
+  "checkpoint_dir=$HOT_CHECKPOINT_ROOT"
+  "durable_checkpoint_dir=$DURABLE_CHECKPOINT_ROOT"
+  "final_checkpoint_dir=$DURABLE_CHECKPOINT_ROOT"
   "trainer_max_steps=$TARGET_STEP"
   "save_final_checkpoint=$SAVE_FINAL"
 )
@@ -272,6 +291,8 @@ AUDIT_ARGS=(
   --log "$TRAIN_LOG"
   --expected-step "$TARGET_STEP"
   --expected-wandb-run-id "$WANDB_RUN_ID"
+  --expected-rolling-checkpoint-root "$HOT_CHECKPOINT_ROOT"
+  --expected-durable-checkpoint-root "$DURABLE_CHECKPOINT_ROOT"
   --output "$CHUNK_AUDIT"
 )
 if [[ -n "$RESUME_CHECKPOINT" ]]; then
@@ -289,6 +310,8 @@ if [[ "$SAVE_FINAL" == true ]]; then
     --optimizer-dir "$OPTIMIZER_DIR" \
     --log "$TRAIN_LOG" \
     --expected-wandb-run-id "$WANDB_RUN_ID" \
+    --expected-rolling-checkpoint-root "$HOT_CHECKPOINT_ROOT" \
+    --expected-durable-checkpoint-root "$DURABLE_CHECKPOINT_ROOT" \
     --output "$FINAL_AUDIT"
 fi
 '

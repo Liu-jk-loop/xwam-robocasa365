@@ -56,8 +56,15 @@ from utils.xwam_checkpoint_loader import initialize_xwam_runner
 class ResourceAwareModelCheckpoint(ModelCheckpoint):
     """Persist memory evidence immediately before and after DeepSpeed saves."""
 
-    def __init__(self, *args, diagnostics_path: Path, **kwargs):
+    def __init__(
+        self,
+        *args,
+        diagnostics_path: Path,
+        checkpoint_tier: str = "primary",
+        **kwargs,
+    ):
         self.diagnostics_path = Path(diagnostics_path)
+        self.checkpoint_tier = str(checkpoint_tier)
         super().__init__(*args, **kwargs)
 
     def _record_checkpoint_event(self, event, trainer, filepath, error=None):
@@ -67,6 +74,7 @@ class ResourceAwareModelCheckpoint(ModelCheckpoint):
             "event": event,
             "filepath": str(filepath),
             "global_step": int(trainer.global_step),
+            "checkpoint_tier": self.checkpoint_tier,
             "error": error,
             "memory": collect_memory_snapshot(),
         }
@@ -74,7 +82,8 @@ class ResourceAwareModelCheckpoint(ModelCheckpoint):
         rss_bytes = payload["memory"]["process"].get("VmRSS")
         print(
             "Checkpoint resource event: "
-            f"event={event}, global_step={trainer.global_step}, "
+            f"event={event}, tier={self.checkpoint_tier}, "
+            f"global_step={trainer.global_step}, "
             f"rss_bytes={rss_bytes}, diagnostics={self.diagnostics_path}",
             flush=True,
         )
@@ -346,6 +355,7 @@ def main():
         LearningRateMonitor(logging_interval="step"),
     ]
     checkpoint_callback = None
+    durable_checkpoint_callback = None
     checkpoint_events_path = run_dir / f"{run_id}_checkpoint_events.jsonl"
     optimizer_audit_dir = run_dir / f"{run_id}_optimizer_state"
     if bool(config.get("audit_optimizer_state_dtype", False)):
@@ -356,9 +366,13 @@ def main():
             )
         )
     if bool(config.get("enable_checkpointing", True)):
+        checkpoint_dir = Path(
+            config.get("checkpoint_dir") or (exp_dir / "checkpoints")
+        ).expanduser()
         checkpoint_callback = ResourceAwareModelCheckpoint(
             diagnostics_path=checkpoint_events_path,
-            dirpath=exp_dir / "checkpoints",
+            checkpoint_tier="rolling",
+            dirpath=checkpoint_dir,
             save_top_k=int(config.get("save_top_k", -1)),
             save_last=resolve_save_last(config.get("save_last", True)),
             save_weights_only=False,
@@ -370,6 +384,54 @@ def main():
             1,
             checkpoint_callback,
         )
+        durable_checkpoint_dir_value = config.get("durable_checkpoint_dir")
+        if durable_checkpoint_dir_value:
+            durable_checkpoint_dir = Path(
+                str(durable_checkpoint_dir_value)
+            ).expanduser()
+            if durable_checkpoint_dir.resolve() == checkpoint_dir.resolve():
+                raise ValueError("滚动与永久checkpoint目录必须不同")
+            durable_checkpoint_callback = ResourceAwareModelCheckpoint(
+                diagnostics_path=checkpoint_events_path,
+                checkpoint_tier="durable",
+                dirpath=durable_checkpoint_dir,
+                save_top_k=int(config.get("durable_save_top_k", -1)),
+                save_last=resolve_save_last(
+                    config.get("durable_save_last", False)
+                ),
+                save_weights_only=False,
+                save_on_exception=False,
+                every_n_train_steps=int(config.durable_save_interval),
+                enable_version_counter=False,
+            )
+            callbacks.insert(2, durable_checkpoint_callback)
+        final_checkpoint_dir = Path(
+            config.get("final_checkpoint_dir")
+            or durable_checkpoint_dir_value
+            or checkpoint_dir
+        ).expanduser()
+        checkpoint_contract = {
+            "rolling": {
+                "directory": str(checkpoint_dir.resolve()),
+                "interval_steps": int(config.save_interval),
+                "save_top_k": int(config.get("save_top_k", -1)),
+                "save_last": config.get("save_last", True),
+            },
+            "durable": (
+                {
+                    "directory": str(durable_checkpoint_dir.resolve()),
+                    "interval_steps": int(config.durable_save_interval),
+                    "save_top_k": int(config.get("durable_save_top_k", -1)),
+                    "save_last": config.get("durable_save_last", False),
+                }
+                if durable_checkpoint_callback is not None
+                else None
+            ),
+            "final_directory": str(final_checkpoint_dir.resolve()),
+        }
+    else:
+        final_checkpoint_dir = exp_dir / "checkpoints"
+        checkpoint_contract = None
 
     tb_path = os.getenv("TENSORBOARD_LOG_PATH", None)
     loggers = [ConsoleLogger(max_steps=schedule["trainer_max_steps"])]
@@ -564,6 +626,7 @@ def main():
                     "allow_missing_frozen_resume_parameters": (
                         allow_missing_frozen_resume_parameters
                     ),
+                    "storage": checkpoint_contract,
                 },
                 "environment": {
                     "python": platform.python_version(),
@@ -665,7 +728,8 @@ def main():
         if bool(config.get("save_final_checkpoint", False)):
             final_checkpoint_path = str(
                 (
-                    exp_dir / "checkpoints" / f"final-step={trainer.global_step}.ckpt"
+                    final_checkpoint_dir
+                    / f"final-step={trainer.global_step}.ckpt"
                 ).resolve()
             )
             if trainer.is_global_zero:
@@ -675,6 +739,7 @@ def main():
                         "event": "final_checkpoint_save_start",
                         "filepath": final_checkpoint_path,
                         "global_step": int(trainer.global_step),
+                        "checkpoint_tier": "final_durable",
                         "memory": collect_memory_snapshot(),
                     },
                 )
@@ -688,6 +753,7 @@ def main():
                         "event": "final_checkpoint_save_complete",
                         "filepath": final_checkpoint_path,
                         "global_step": int(trainer.global_step),
+                        "checkpoint_tier": "final_durable",
                         "memory": collect_memory_snapshot(),
                     },
                 )

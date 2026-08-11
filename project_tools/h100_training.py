@@ -286,21 +286,32 @@ def _checkpoint_layout(path: str | Path) -> dict[str, Any]:
 
 
 def resolve_m6_formal_chunk(
-    checkpoint_root: str | Path,
+    checkpoint_root: str | Path | list[str | Path],
     *,
     total_steps: int,
     chunk_steps: int,
 ) -> dict[str, Any]:
     """Select the newest complete checkpoint and the next absolute step target."""
-    root = Path(checkpoint_root).expanduser().resolve()
+    root_values = (
+        [checkpoint_root]
+        if isinstance(checkpoint_root, (str, Path))
+        else list(checkpoint_root)
+    )
+    if not root_values:
+        raise ValueError("至少需要一个checkpoint root")
+    roots = [Path(value).expanduser().resolve() for value in root_values]
+    if len(set(roots)) != len(roots):
+        raise ValueError(f"checkpoint roots不能重复：{roots}")
     total = int(total_steps)
     chunk = int(chunk_steps)
     if total <= 0 or chunk <= 0:
         raise ValueError("total_steps/chunk_steps 必须为正整数")
     pattern = re.compile(r"^(?:epoch=\d+-step=|final-step=)(\d+)\.ckpt$")
-    complete: list[tuple[int, int, Path]] = []
+    complete: list[tuple[int, int, int, Path]] = []
     incomplete: list[dict[str, Any]] = []
-    if root.exists():
+    for root_index, root in enumerate(roots):
+        if not root.exists():
+            continue
         for candidate in sorted(root.iterdir()):
             match = pattern.fullmatch(candidate.name)
             if match is None or not candidate.is_dir():
@@ -313,18 +324,21 @@ def resolve_m6_formal_chunk(
             layout = _checkpoint_layout(candidate)
             if all(layout["checks"].values()):
                 final_priority = 1 if candidate.name.startswith("final-step=") else 0
-                complete.append((step, final_priority, candidate.resolve()))
+                complete.append(
+                    (step, final_priority, root_index, candidate.resolve())
+                )
             else:
                 incomplete.append(
                     {
                         "step": step,
                         "path": str(candidate.resolve()),
+                        "checkpoint_root": str(root),
                         "checks": layout["checks"],
                     }
                 )
     if complete:
-        completed_step, _, resume_path = max(
-            complete, key=lambda item: (item[0], item[1], str(item[2]))
+        completed_step, _, _, resume_path = max(
+            complete, key=lambda item: (item[0], item[1], item[2], str(item[3]))
         )
         resume_checkpoint = str(resume_path)
     else:
@@ -340,7 +354,8 @@ def resolve_m6_formal_chunk(
                 f"无法推进正式训练：completed={completed_step}, target={target_step}"
             )
     return {
-        "checkpoint_root": str(root),
+        "checkpoint_root": str(roots[0]),
+        "checkpoint_roots": [str(root) for root in roots],
         "total_steps": total,
         "chunk_steps": chunk,
         "completed_step": completed_step,
@@ -354,17 +369,47 @@ def resolve_m6_formal_chunk(
 
 
 def quarantine_m6_incomplete_checkpoints(
-    plan: dict[str, Any], quarantine_root: str | Path
+    plan: dict[str, Any],
+    quarantine_root: str | Path | list[str | Path],
 ) -> dict[str, Any]:
     """Move incomplete checkpoint directories aside without deleting evidence."""
     updated = dict(plan)
     records = list(plan.get("incomplete_checkpoints") or [])
     quarantined: list[dict[str, Any]] = []
     if records:
-        root = Path(quarantine_root).expanduser().resolve()
-        root.mkdir(parents=True, exist_ok=False)
+        checkpoint_roots = list(
+            plan.get("checkpoint_roots") or [plan["checkpoint_root"]]
+        )
+        quarantine_values = (
+            [quarantine_root]
+            if isinstance(quarantine_root, (str, Path))
+            else list(quarantine_root)
+        )
+        if len(checkpoint_roots) != len(quarantine_values):
+            raise ValueError(
+                "checkpoint roots与quarantine roots数量必须一致："
+                f"{len(checkpoint_roots)} != {len(quarantine_values)}"
+            )
+        quarantine_by_checkpoint_root = {
+            str(Path(checkpoint).expanduser().resolve()): Path(quarantine)
+            .expanduser()
+            .resolve()
+            for checkpoint, quarantine in zip(
+                checkpoint_roots, quarantine_values, strict=True
+            )
+        }
+        created_roots: set[Path] = set()
         for record in records:
             source = Path(str(record["path"])).expanduser().resolve()
+            source_root = str(
+                Path(record.get("checkpoint_root") or plan["checkpoint_root"])
+                .expanduser()
+                .resolve()
+            )
+            root = quarantine_by_checkpoint_root[source_root]
+            if root not in created_roots:
+                root.mkdir(parents=True, exist_ok=False)
+                created_roots.add(root)
             destination = root / source.name
             if not source.is_dir():
                 raise ValueError(f"待隔离的不完整checkpoint不存在：{source}")
@@ -480,6 +525,7 @@ def _run_contract(
     git = metadata.get("git") or {}
     sampler = (metadata.get("dataset") or {}).get("sampler_provenance") or {}
     wandb = (metadata.get("tracking") or {}).get("wandb") or {}
+    checkpoint_storage = (metadata.get("checkpoint") or {}).get("storage") or {}
     complete_steps = {
         int(event.get("global_step", -1))
         for event in events
@@ -499,6 +545,19 @@ def _run_contract(
         if completed_checkpoint_paths
         else ""
     )
+    completed_checkpoint_events = [
+        {
+            "event": event.get("event"),
+            "filepath": str(event.get("filepath")),
+            "checkpoint_tier": event.get("checkpoint_tier"),
+            "global_step": int(event.get("global_step", -1)),
+        }
+        for event in events
+        if event.get("event")
+        in {"checkpoint_save_complete", "final_checkpoint_save_complete"}
+        and int(event.get("global_step", -1)) == int(expected_step)
+        and event.get("filepath")
+    ]
     checkpoint = _checkpoint_layout(completed_checkpoint) if completed_checkpoint else None
     resume_value = result.get("resume_checkpoint")
     checks = {
@@ -547,6 +606,8 @@ def _run_contract(
         "metrics": metrics,
         "checkpoint": checkpoint,
         "wandb": wandb,
+        "checkpoint_storage": checkpoint_storage,
+        "completed_checkpoint_events": completed_checkpoint_events,
     }
 
 
@@ -621,6 +682,8 @@ def build_m6_formal_chunk_report(
     expected_step: int,
     expected_resume_checkpoint: str | None,
     expected_wandb_run_id: str,
+    expected_rolling_checkpoint_root: str,
+    expected_durable_checkpoint_root: str,
 ) -> dict[str, Any]:
     """Audit one normally completed restartable formal-training chunk."""
     errors: list[str] = []
@@ -647,6 +710,38 @@ def build_m6_formal_chunk_report(
             else None
         )
         schedule_total = int(run["schedule"].get("num_training_steps", -1))
+        rolling_storage = run["checkpoint_storage"].get("rolling") or {}
+        durable_storage = run["checkpoint_storage"].get("durable") or {}
+        expected_rolling_root = str(
+            Path(expected_rolling_checkpoint_root).expanduser().resolve()
+        )
+        expected_durable_root = str(
+            Path(expected_durable_checkpoint_root).expanduser().resolve()
+        )
+        rolling_checkpoint_written = any(
+            event.get("checkpoint_tier") == "rolling"
+            and Path(event["filepath"])
+            .expanduser()
+            .resolve()
+            .is_relative_to(Path(expected_rolling_root))
+            for event in run["completed_checkpoint_events"]
+        )
+        durable_checkpoint_written = any(
+            event.get("checkpoint_tier") == "durable"
+            and Path(event["filepath"])
+            .expanduser()
+            .resolve()
+            .is_relative_to(Path(expected_durable_root))
+            for event in run["completed_checkpoint_events"]
+        )
+        final_durable_written = any(
+            event.get("checkpoint_tier") == "final_durable"
+            and Path(event["filepath"])
+            .expanduser()
+            .resolve()
+            .is_relative_to(Path(expected_durable_root))
+            for event in run["completed_checkpoint_events"]
+        )
         checks = {
             "positive_chunk_target": expected > 0,
             "within_formal_schedule": expected <= schedule_total,
@@ -656,6 +751,22 @@ def build_m6_formal_chunk_report(
             "wandb_persistent_run": bool(run["wandb"].get("run_id"))
             and run["wandb"].get("resume") == "allow",
             "wandb_api_key_auth": run["wandb"].get("auth") == "api_key_env",
+            "rolling_checkpoint_policy": rolling_storage.get("directory")
+            == expected_rolling_root
+            and int(rolling_storage.get("interval_steps", -1)) == 500
+            and int(rolling_storage.get("save_top_k", -1)) == 5,
+            "durable_checkpoint_policy": durable_storage.get("directory")
+            == expected_durable_root
+            and int(durable_storage.get("interval_steps", -1)) == 3000
+            and int(durable_storage.get("save_top_k", 0)) == -1
+            and run["checkpoint_storage"].get("final_directory")
+            == expected_durable_root,
+            "rolling_checkpoint_written": expected == schedule_total
+            or rolling_checkpoint_written,
+            "durable_checkpoint_written_when_due": expected % 3000 != 0
+            or durable_checkpoint_written,
+            "final_checkpoint_written_to_durable": expected != schedule_total
+            or final_durable_written,
             "expected_wandb_run": bool(expected_wandb_run_id)
             and run["wandb"].get("run_id") == expected_wandb_run_id,
             "all_run_checks": all(run["checks"].values()),
@@ -687,6 +798,8 @@ def build_m6_formal_report(
     optimizer_dir: str,
     log_path: str,
     expected_wandb_run_id: str | None = None,
+    expected_rolling_checkpoint_root: str | None = None,
+    expected_durable_checkpoint_root: str | None = None,
 ) -> dict[str, Any]:
     errors: list[str] = []
     try:
@@ -719,6 +832,32 @@ def build_m6_formal_report(
                     == "api_key_env",
                     "expected_wandb_run": run["wandb"].get("run_id")
                     == expected_wandb_run_id,
+                }
+            )
+        if (
+            expected_rolling_checkpoint_root is not None
+            and expected_durable_checkpoint_root is not None
+        ):
+            rolling_storage = run["checkpoint_storage"].get("rolling") or {}
+            durable_storage = run["checkpoint_storage"].get("durable") or {}
+            expected_rolling_root = str(
+                Path(expected_rolling_checkpoint_root).expanduser().resolve()
+            )
+            expected_durable_root = str(
+                Path(expected_durable_checkpoint_root).expanduser().resolve()
+            )
+            checks.update(
+                {
+                    "rolling_checkpoint_policy": rolling_storage.get("directory")
+                    == expected_rolling_root
+                    and int(rolling_storage.get("interval_steps", -1)) == 500
+                    and int(rolling_storage.get("save_top_k", -1)) == 5,
+                    "durable_checkpoint_policy": durable_storage.get("directory")
+                    == expected_durable_root
+                    and int(durable_storage.get("interval_steps", -1)) == 3000
+                    and int(durable_storage.get("save_top_k", 0)) == -1
+                    and run["checkpoint_storage"].get("final_directory")
+                    == expected_durable_root,
                 }
             )
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:

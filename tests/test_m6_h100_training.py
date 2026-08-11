@@ -43,7 +43,7 @@ def _write_gate_run(
     commit: str,
 ) -> dict[str, str]:
     run_root = root / name
-    checkpoint = run_root / f"step={global_step}.ckpt"
+    checkpoint = run_root / "hot" / f"step={global_step}.ckpt"
     state_root = checkpoint / "checkpoint"
     state_root.mkdir(parents=True)
     (state_root / "mp_rank_00_model_states.pt").write_bytes(b"model")
@@ -86,6 +86,21 @@ def _write_gate_run(
                 "auth": "api_key_env",
             }
         },
+        "checkpoint": {
+            "storage": {
+                "rolling": {
+                    "directory": str((run_root / "hot").resolve()),
+                    "interval_steps": 500,
+                    "save_top_k": 5,
+                },
+                "durable": {
+                    "directory": str((run_root / "durable").resolve()),
+                    "interval_steps": 3000,
+                    "save_top_k": -1,
+                },
+                "final_directory": str((run_root / "durable").resolve()),
+            }
+        },
     }
     result = {
         "result": "pass",
@@ -106,6 +121,7 @@ def _write_gate_run(
                 "event": "checkpoint_save_complete",
                 "global_step": global_step,
                 "filepath": str(checkpoint),
+                "checkpoint_tier": "rolling",
             }
         )
         + "\n",
@@ -203,6 +219,12 @@ class M6H100TrainingTest(unittest.TestCase):
                 expected_step=1000,
                 expected_resume_checkpoint=None,
                 expected_wandb_run_id="persistent-run-id",
+                expected_rolling_checkpoint_root=str(
+                    Path(artifacts["metadata_path"]).parent / "hot"
+                ),
+                expected_durable_checkpoint_root=str(
+                    Path(artifacts["metadata_path"]).parent / "durable"
+                ),
             )
             self.assertTrue(report["ok"], report)
             self.assertTrue(report["checks"]["within_formal_schedule"])
@@ -212,9 +234,66 @@ class M6H100TrainingTest(unittest.TestCase):
                 expected_step=1000,
                 expected_resume_checkpoint=None,
                 expected_wandb_run_id="different-run-id",
+                expected_rolling_checkpoint_root=str(
+                    Path(artifacts["metadata_path"]).parent / "hot"
+                ),
+                expected_durable_checkpoint_root=str(
+                    Path(artifacts["metadata_path"]).parent / "durable"
+                ),
             )
             self.assertFalse(mismatch["ok"])
             self.assertFalse(mismatch["checks"]["expected_wandb_run"])
+
+    def test_formal_chunk_planner_selects_latest_across_hot_and_durable_roots(
+        self,
+    ) -> None:
+        def write_complete(root: Path, step: int) -> Path:
+            state = root / f"epoch=1-step={step}.ckpt" / "checkpoint"
+            state.mkdir(parents=True)
+            (state / "mp_rank_00_model_states.pt").write_bytes(b"model")
+            for rank in range(4):
+                (
+                    state
+                    / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt"
+                ).write_bytes(b"optimizer")
+            return state.parent.resolve()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            hot = root / "iops" / "checkpoints"
+            durable = root / "store" / "checkpoints"
+            write_complete(durable, 3000)
+            hot_3500 = write_complete(hot, 3500)
+            incomplete = hot / "epoch=1-step=4000.ckpt" / "checkpoint"
+            incomplete.mkdir(parents=True)
+            (incomplete / "mp_rank_00_model_states.pt").write_bytes(b"model")
+
+            plan = resolve_m6_formal_chunk(
+                [hot, durable], total_steps=16390, chunk_steps=1000
+            )
+            self.assertEqual(plan["completed_step"], 3500)
+            self.assertEqual(plan["target_step"], 4000)
+            self.assertEqual(plan["resume_checkpoint"], str(hot_3500))
+            self.assertEqual(
+                plan["checkpoint_roots"],
+                [str(hot.resolve()), str(durable.resolve())],
+            )
+
+            hot_quarantine = root / "iops" / "incomplete" / "job"
+            durable_quarantine = root / "store" / "incomplete" / "job"
+            quarantined = quarantine_m6_incomplete_checkpoints(
+                plan, [hot_quarantine, durable_quarantine]
+            )
+            self.assertEqual(len(quarantined["quarantined_checkpoints"]), 1)
+            self.assertTrue(
+                (hot_quarantine / "epoch=1-step=4000.ckpt").is_dir()
+            )
+
+            durable_3500 = write_complete(durable, 3500)
+            same_step = resolve_m6_formal_chunk(
+                [hot, durable], total_steps=16390, chunk_steps=1000
+            )
+            self.assertEqual(same_step["resume_checkpoint"], str(durable_3500))
 
     def test_gh200_formal_gate_requires_exact_full_checkpoint_resume(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -371,7 +450,10 @@ class M6H100TrainingTest(unittest.TestCase):
         self.assertIn("trainer_max_steps: 2", gate)
         self.assertIn("save_interval: 2", gate)
         self.assertIn("trainer_max_steps: null", formal)
-        self.assertIn("save_interval: 1000", formal)
+        self.assertIn("save_interval: 500", formal)
+        self.assertIn("save_top_k: 5", formal)
+        self.assertIn("durable_save_interval: 3000", formal)
+        self.assertIn("durable_save_top_k: -1", formal)
         self.assertIn("save_final_checkpoint: true", formal)
         self.assertIn("enable_wandb: true", formal)
         self.assertIn("wandb_mode: online", formal)

@@ -56,6 +56,7 @@
 - 新增Clariden正式分段作业：固定同一seed42实验目录，每个12小时作业自动选择最新完整checkpoint并把绝对global step推进1,000；不完整checkpoint可恢复地隔离，文件锁防止并发写入。每段独立机器审计，最终step 16,390额外执行formal final audit。本地无Torch/Clariden，该正式作业的首段实跑为`cluster-pending`。
 - 正式分段作业已接入`wandb==0.23.1`：当前SQSH通过独立、固定hash、原子发布的IOPS overlay补充依赖；固定实验目录持久化一个W&B run ID，所有chunk以online/`resume=allow`写入同一run，并由chunk/final audit核验。认证按用户要求只接受每次提交环境中的`WANDB_API_KEY`，不回退到默认账号；metadata只记录无敏感信息的`auth=api_key_env`。overlay离线probe、API-key在线验证和首个chunk仍为`cluster-pending`。
 - W&B overlay与正式作业现为每个Job生成独立failure report，并在外层及EDF子阶段安装统一`ERR` trap；以后任何非零退出都必须给出phase/exit code/line/command及主日志、训练日志路径，且不会记录API key。当前用户遇到的旧Job产生于该改动之前，仍需用其Job ID和原主日志回溯；新错误报告机制的真实Clariden行为为`cluster-pending`。
+- 正式checkpoint改为双层：IOPS `xwam_run/<实验名>`每500步滚动保留5个，Store `checkpoints/xwam/<实验名>`每3,000步永久保留且最终step也落Store。planner/audit已支持跨两层选择、同step Store优先和各盘原子隔离；真实双callback保存、淘汰和恢复为`cluster-pending`。
 
 ## 已确认资源
 

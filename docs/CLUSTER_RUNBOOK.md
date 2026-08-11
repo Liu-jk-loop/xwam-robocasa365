@@ -821,13 +821,17 @@ failure report包含`phase`、`exit_code`、`line`、失败命令以及主/训�
 
 后续每个chunk都重新执行上面的隐藏`read`、`export WANDB_API_KEY`、`sbatch --export=ALL`和`unset WANDB_API_KEY`四步。仅执行裸`sbatch`会因缺少API key被脚本拒绝。
 
-每次重复提交都使用同一默认实验目录：
+每次重复提交都使用同一实验身份，但checkpoint分为两个新目录：
 
 ```text
-/capstor/scratch/cscs/zjingchen/terry_nys/experiments/xwam/robocasa365_m6_atomic_seen18_rgb_seed42
+滚动层（IOPS，每500步，最多5个）：
+/iopsstor/scratch/cscs/zjingchen/terry_nys/xwam_run/robocasa365_m6_atomic_seen18_rgb_seed42/checkpoints
+
+永久层（Store，每3000步，不限数量，另含final）：
+/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/checkpoints/xwam/robocasa365_m6_atomic_seen18_rgb_seed42/checkpoints
 ```
 
-planner只会选择同目录中包含非空model state和rank 0～3四个optimizer shard的最新checkpoint。如果作业被调度中断，直接重新提交同一脚本；未写完的checkpoint会先原子移到`$EXP_DIR/incomplete-checkpoints/m6-formal-<JOB_ID>/`保留证据，然后从上一个完整点重跑当前chunk。脚本使用共享文件锁直接拒绝第二个并发作业；仍不要同时提交两个写入该实验目录的作业。
+planner同时扫描两层，只选择包含非空model state和rank 0～3四个optimizer shard的最新checkpoint；如果同一步在两层都存在，优先Store副本。如果作业被调度中断，直接重新提交同一脚本；未写完的checkpoint会在原文件系统内移到相邻`incomplete-checkpoints/m6-formal-<JOB_ID>/`保留证据，然后从上一个完整点重跑。脚本使用共享文件锁直接拒绝第二个并发作业；仍不要同时提交两个写入该实验的作业。
 
 每个Job的主日志、训练日志和chunk audit位于：
 
@@ -844,7 +848,7 @@ planner只会选择同目录中包含非空model state和rank 0～3四个optimiz
 [PASS] X-WAM Clariden M6 formal 5-epoch training completed at step 16390
 ```
 
-只有final audit为`ok=true/result=pass`才视为正式训练完成。中间checkpoint保留最新两个并维护`last.ckpt`；不要手工移动、删除或修改运行中的checkpoint目录。
+只有final audit为`ok=true/result=pass`才视为正式训练完成。IOPS中间checkpoint只保留最近5个并维护`last.ckpt`；Store的3,000/6,000/…/15,000及final-step=16,390均不受max=5限制。不要手工移动、删除或修改运行中的checkpoint目录。
 
 ## M6：4×H100 RGB-only训练（兼容路径）
 

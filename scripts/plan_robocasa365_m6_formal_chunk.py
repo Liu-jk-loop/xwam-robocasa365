@@ -51,12 +51,14 @@ def _write_env_atomic(path: Path, plan: dict) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--checkpoint-root", required=True)
+    parser.add_argument("--checkpoint-root", action="append", required=True)
     parser.add_argument("--total-steps", type=int, default=16390)
     parser.add_argument("--chunk-steps", type=int, default=1000)
     parser.add_argument("--output-json", required=True)
     parser.add_argument("--output-env", required=True)
-    parser.add_argument("--quarantine-incomplete-root", required=True)
+    parser.add_argument(
+        "--quarantine-incomplete-root", action="append", required=True
+    )
     args = parser.parse_args()
     plan = resolve_m6_formal_chunk(
         args.checkpoint_root,

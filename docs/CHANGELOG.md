@@ -38,6 +38,14 @@
 - 修复W&B overlay及正式sbatch只有`set -Eeuo pipefail`却没有统一错误上下文的问题。新增可复用的Clariden `ERR` trap，覆盖overlay下载/临时probe/发布、外层preflight/planner/training srun和EDF内planner、W&B preflight、训练、产物检查、chunk/final audit阶段；失败时主日志明确输出phase、exit code、line、command和报告路径，并分别原子写入`wandb-overlay-<JOB_ID>-failure.txt`或`m6-formal-<JOB_ID>-failure.txt`。内层根因报告先写后，外层`srun`失败不覆盖它；命令在日志和报告前都会移除API key并截断，测试同时验证非零退出、阶段定位和密钥不泄漏。
 - 本地通过dependency-light测试、Python编译、JSON及shell语法后才发布；aarch64 wheel安装、现有SQSH直接依赖兼容、在线认证和首个W&B正式chunk均为`cluster-pending`。回滚本次commit会关闭正式配置中的W&B并移除overlay/审计接入，不会删除远端W&B run、IOPS overlay、Capstor checkpoint或Store日志；外部产物清理需单独确认。
 
+### Clariden正式训练双层checkpoint存储
+
+- 按用户要求，滚动checkpoint迁移到新建的`/iopsstor/scratch/cscs/zjingchen/terry_nys/xwam_run/robocasa365_m6_atomic_seen18_rgb_seed42/checkpoints`：每500 optimizer steps保存一次完整DeepSpeed状态，`save_top_k=5`并保留`last.ckpt`链接，限制IOPS容量。
+- 新建永久目录`/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/checkpoints/xwam/robocasa365_m6_atomic_seen18_rgb_seed42/checkpoints`：独立callback每3,000步保存，`save_top_k=-1/save_last=false`，不做数量删除；不整除3,000的最终step 16,390也明确保存到这里。
+- checkpoint事件新增`rolling/durable/final_durable`tier，metadata冻结两层路径、频率和保留数。chunk/final audit不仅要求IOPS为500/5、Store为3000/unlimited且final目录等于Store，还在每个chunk终点核验实际rolling保存、3,000倍数处的durable保存及最终Store保存事件，防止命令行或callback异常静默改变策略。
+- chunk planner扩展为同时扫描IOPS和Store，选择global step最大的完整model+四rank optimizer checkpoint；同step优先后声明的Store副本。两层不完整checkpoint分别原子移入同文件系统的`incomplete-checkpoints/m6-formal-<JOB_ID>`，不执行可能因`EXDEV`失败的跨盘rename。
+- 本地验证覆盖双root选择、IOPS较新点恢复、同step Store优先、分盘隔离、配置/Slurm/审计wiring；真实Lightning双callback、500/3000重合step、滚动删除与跨Job恢复仍为`cluster-pending`。回滚本次commit恢复单目录1,000步保存，不会删除任何已生成的IOPS或Store checkpoint。
+
 ## 2026-08-10 — Clariden 4×GH200 step 2→4 checkpoint/resume 门禁
 
 - 在单卡单步门禁关闭后新增独立的 Clariden 四卡调试层与两阶段实验层；不直接套用M6 H100正式配置。门禁固定CloseFridge前8个clip、4×micro-batch 1、GBS 4、BF16 compute、ZeRO-2 FP32 CPUAdam offload和四步scheduler。
