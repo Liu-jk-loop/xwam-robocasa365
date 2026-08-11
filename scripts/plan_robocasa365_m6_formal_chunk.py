@@ -54,20 +54,18 @@ def main() -> int:
     parser.add_argument("--checkpoint-root", action="append", required=True)
     parser.add_argument("--total-steps", type=int, default=16390)
     parser.add_argument("--chunk-steps", type=int, default=1000)
+    parser.add_argument("--expected-world-size", type=int, default=4)
     parser.add_argument("--output-json", required=True)
     parser.add_argument("--output-env", required=True)
-    parser.add_argument(
-        "--quarantine-incomplete-root", action="append", required=True
-    )
+    parser.add_argument("--quarantine-incomplete-root", action="append", required=True)
     args = parser.parse_args()
     plan = resolve_m6_formal_chunk(
         args.checkpoint_root,
         total_steps=args.total_steps,
         chunk_steps=args.chunk_steps,
+        expected_world_size=args.expected_world_size,
     )
-    plan = quarantine_m6_incomplete_checkpoints(
-        plan, args.quarantine_incomplete_root
-    )
+    plan = quarantine_m6_incomplete_checkpoints(plan, args.quarantine_incomplete_root)
     json_path = write_json_atomic(args.output_json, plan)
     env_path = _write_env_atomic(Path(args.output_env), plan)
     print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))

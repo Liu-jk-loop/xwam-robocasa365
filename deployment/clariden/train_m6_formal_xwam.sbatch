@@ -25,6 +25,11 @@ MANIFEST="$DEPLOY_STORE/manifests/xwam/m6/robocasa365_m6_atomic_seen18_manifest.
 STATS="$DEPLOY_STORE/manifests/xwam/m6/robocasa365_m6_atomic_seen18_global_stats.json"
 PREFLIGHT="$DEPLOY_STORE/manifests/xwam/m6/robocasa365_m6_gh200_preflight.json"
 GATE_AUDIT="${XWAM_M6_GATE_AUDIT:-$DEPLOY_STORE/logs/xwam/debug/m6-gate-3053436-audit.json}"
+FORMAL_NUM_NODES="${XWAM_M6_NUM_NODES:-1}"
+FORMAL_DEVICES_PER_NODE="${XWAM_M6_DEVICES_PER_NODE:-4}"
+FORMAL_WORLD_SIZE="$((FORMAL_NUM_NODES * FORMAL_DEVICES_PER_NODE))"
+HARDWARE_CONFIG="${XWAM_M6_HARDWARE_CONFIG:-configs/hardware/gh200x4_96gb_gbs128.yaml}"
+LOG_STEM="${XWAM_M6_LOG_STEM:-m6-formal}"
 
 TOTAL_STEPS=16390
 # Do not stop at an artificial intermediate step boundary.  The 12-hour Slurm
@@ -46,12 +51,12 @@ PLAN_JSON="$RUN_DIR/m6-formal-${SLURM_JOB_ID}-plan.json"
 PLAN_ENV="$RUN_DIR/m6-formal-${SLURM_JOB_ID}-plan.env"
 HOT_QUARANTINE_ROOT="$DEPLOY_IOPS/xwam_run/$EXP_NAME/incomplete-checkpoints/m6-formal-${SLURM_JOB_ID}"
 DURABLE_QUARANTINE_ROOT="$DEPLOY_STORE/checkpoints/xwam/$EXP_NAME/incomplete-checkpoints/m6-formal-${SLURM_JOB_ID}"
-RUN_ID="m6-formal-${SLURM_JOB_ID}"
-TRAIN_LOG="$DEPLOY_STORE/logs/xwam/m6-formal-${SLURM_JOB_ID}-train.log"
-CHUNK_AUDIT="$DEPLOY_STORE/logs/xwam/m6-formal-${SLURM_JOB_ID}-chunk-audit.json"
-FINAL_AUDIT="$DEPLOY_STORE/logs/xwam/m6-formal-${SLURM_JOB_ID}-final-audit.json"
-MAIN_LOG="$DEPLOY_STORE/logs/xwam/m6-formal-${SLURM_JOB_ID}.log"
-FAILURE_REPORT="$DEPLOY_STORE/logs/xwam/m6-formal-${SLURM_JOB_ID}-failure.txt"
+RUN_ID="${LOG_STEM}-${SLURM_JOB_ID}"
+TRAIN_LOG="$DEPLOY_STORE/logs/xwam/${LOG_STEM}-${SLURM_JOB_ID}-train.log"
+CHUNK_AUDIT="$DEPLOY_STORE/logs/xwam/${LOG_STEM}-${SLURM_JOB_ID}-chunk-audit.json"
+FINAL_AUDIT="$DEPLOY_STORE/logs/xwam/${LOG_STEM}-${SLURM_JOB_ID}-final-audit.json"
+MAIN_LOG="$DEPLOY_STORE/logs/xwam/${LOG_STEM}-${SLURM_JOB_ID}.log"
+FAILURE_REPORT="$DEPLOY_STORE/logs/xwam/${LOG_STEM}-${SLURM_JOB_ID}-failure.txt"
 
 export XWAM_FAILURE_REPORT="$FAILURE_REPORT"
 export XWAM_MAIN_LOG="$MAIN_LOG"
@@ -62,6 +67,15 @@ source "$REPO/deployment/clariden/error_trap.sh"
 xwam_install_err_trap
 
 cd "$REPO"
+[[ "$FORMAL_NUM_NODES" =~ ^[12]$ ]] || {
+  xwam_fail "XWAM_M6_NUM_NODES must be 1 or 2"
+}
+[[ "$FORMAL_DEVICES_PER_NODE" == 4 ]] || {
+  xwam_fail "X-WAM Clariden formal training requires 4 GPUs per node"
+}
+[[ "${SLURM_NNODES:-0}" == "$FORMAL_NUM_NODES" ]] || {
+  xwam_fail "Slurm allocation node count does not match XWAM_M6_NUM_NODES"
+}
 test -s "$EDF"
 test -d "$RUNTIME_OVERLAY"
 test -d "$WANDB_OVERLAY"
@@ -109,12 +123,14 @@ read -r WANDB_RUN_ID < "$WANDB_RUN_ID_FILE"
 echo "wandb_project=$WANDB_PROJECT"
 echo "wandb_entity=$WANDB_ENTITY"
 echo "wandb_run_id=$WANDB_RUN_ID"
+echo "formal_topology=${FORMAL_NUM_NODES}x${FORMAL_DEVICES_PER_NODE} world_size=$FORMAL_WORLD_SIZE"
+echo "hardware_config=$HARDWARE_CONFIG"
 echo "rolling_checkpoints=$HOT_CHECKPOINT_ROOT (every 500 steps, max 5)"
 echo "durable_checkpoints=$DURABLE_CHECKPOINT_ROOT (every 3000 steps, unlimited)"
 echo "failure_report=$FAILURE_REPORT"
 
 XWAM_PHASE=planner_srun
-srun --kill-on-bad-exit=1 --environment="$EDF" \
+srun --nodes=1 --ntasks=1 --kill-on-bad-exit=1 --environment="$EDF" \
   env \
     REPO="$REPO" \
     RUNTIME_OVERLAY="$RUNTIME_OVERLAY" \
@@ -127,6 +143,7 @@ srun --kill-on-bad-exit=1 --environment="$EDF" \
     DURABLE_QUARANTINE_ROOT="$DURABLE_QUARANTINE_ROOT" \
     TOTAL_STEPS="$TOTAL_STEPS" \
     CHUNK_STEPS="$CHUNK_STEPS" \
+    FORMAL_WORLD_SIZE="$FORMAL_WORLD_SIZE" \
     XWAM_FAILURE_REPORT="$FAILURE_REPORT" \
     XWAM_MAIN_LOG="$MAIN_LOG" \
     XWAM_TRAIN_LOG="$TRAIN_LOG" \
@@ -142,6 +159,7 @@ python scripts/plan_robocasa365_m6_formal_chunk.py \
   --checkpoint-root "$DURABLE_CHECKPOINT_ROOT" \
   --total-steps "$TOTAL_STEPS" \
   --chunk-steps "$CHUNK_STEPS" \
+  --expected-world-size "$FORMAL_WORLD_SIZE" \
   --output-json "$PLAN_JSON" \
   --output-env "$PLAN_ENV" \
   --quarantine-incomplete-root "$HOT_QUARANTINE_ROOT" \
@@ -176,7 +194,14 @@ EVENTS="$RUN_DIR/${RUN_ID}_checkpoint_events.jsonl"
 OPTIMIZER_DIR="$RUN_DIR/${RUN_ID}_optimizer_state"
 
 XWAM_PHASE=training_srun
-srun --kill-on-bad-exit=1 --environment="$EDF" \
+MASTER_ADDR="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | sed -n '1p')"
+MASTER_PORT="$((20000 + SLURM_JOB_ID % 20000))"
+test -n "$MASTER_ADDR"
+srun --nodes="$FORMAL_NUM_NODES" \
+  --ntasks="$FORMAL_NUM_NODES" \
+  --ntasks-per-node=1 \
+  --kill-on-bad-exit=1 \
+  --environment="$EDF" \
   env \
     REPO="$REPO" \
     RUNTIME_OVERLAY="$RUNTIME_OVERLAY" \
@@ -207,11 +232,28 @@ srun --kill-on-bad-exit=1 --environment="$EDF" \
     WANDB_CACHE_DIR="$WANDB_CACHE_DIR" \
     WANDB_MODE=online \
     WANDB_RESUME=allow \
+    FORMAL_NUM_NODES="$FORMAL_NUM_NODES" \
+    FORMAL_DEVICES_PER_NODE="$FORMAL_DEVICES_PER_NODE" \
+    FORMAL_WORLD_SIZE="$FORMAL_WORLD_SIZE" \
+    HARDWARE_CONFIG="$HARDWARE_CONFIG" \
+    MASTER_ADDR="$MASTER_ADDR" \
+    MASTER_PORT="$MASTER_PORT" \
     XWAM_FAILURE_REPORT="$FAILURE_REPORT" \
     XWAM_MAIN_LOG="$MAIN_LOG" \
     XWAM_TRAIN_LOG="$TRAIN_LOG" \
   bash -lc '
 set -Eeuo pipefail
+NODE_RANK="${SLURM_NODEID:?SLURM_NODEID is required}"
+NODE_TRAIN_LOG="$TRAIN_LOG"
+NODE_FAILURE_REPORT="$XWAM_FAILURE_REPORT"
+if [[ "$FORMAL_NUM_NODES" -gt 1 && "$NODE_RANK" != 0 ]]; then
+  NODE_TRAIN_LOG="${TRAIN_LOG%.log}-node${NODE_RANK}.log"
+fi
+if [[ "$FORMAL_NUM_NODES" -gt 1 ]]; then
+  NODE_FAILURE_REPORT="${XWAM_FAILURE_REPORT%.txt}-node${NODE_RANK}.txt"
+fi
+export XWAM_FAILURE_REPORT="$NODE_FAILURE_REPORT"
+export XWAM_TRAIN_LOG="$NODE_TRAIN_LOG"
 export XWAM_PHASE=training_shell_setup
 source "$REPO/deployment/clariden/error_trap.sh"
 xwam_install_err_trap
@@ -227,8 +269,9 @@ unset SLURM_NTASKS SLURM_NTASKS_PER_NODE SLURM_PROCID SLURM_LOCALID SLURM_NODEID
 export XWAM_RUN_ID="$RUN_ID"
 export PYTHONPATH="$WANDB_OVERLAY:$RUNTIME_OVERLAY${PYTHONPATH:+:$PYTHONPATH}"
 
-XWAM_PHASE=wandb_preflight
-python - <<"PY"
+if [[ "$NODE_RANK" == 0 ]]; then
+  XWAM_PHASE=wandb_preflight
+  python - <<"PY"
 import importlib.metadata
 import os
 from pathlib import Path
@@ -250,12 +293,13 @@ print("wandb project:", os.environ["WANDB_PROJECT"])
 print("wandb run id:", os.environ["WANDB_RUN_ID"])
 print("wandb authentication: api_key_env pass")
 PY
+fi
 
 TRAIN_ARGS=(
-  python scripts/train_sft.py
+  scripts/train_sft.py
   model_config=configs/model/wan22_5b_robocasa365_atomic.yaml
   data_config=configs/data/robocasa365_m6_atomic_seen18.yaml
-  hardware_config=configs/hardware/gh200x4_96gb_gbs128.yaml
+  "hardware_config=$HARDWARE_CONFIG"
   experiment_config=configs/experiment/robocasa365_m6_gh200_rgb_formal.yaml
   "wan_checkpoint_dir=$WAN_DIR"
   "pretrained_checkpoint=$PRETRAINED"
@@ -278,9 +322,49 @@ git rev-parse HEAD
 test -z "$(git status --porcelain)"
 nvidia-smi
 free -h
-"${TRAIN_ARGS[@]}" 2>&1 | tee "$TRAIN_LOG"
+if [[ "$FORMAL_NUM_NODES" == 1 ]]; then
+  python "${TRAIN_ARGS[@]}" 2>&1 | tee "$NODE_TRAIN_LOG"
+else
+  python -m torch.distributed.run \
+    --nnodes "$FORMAL_NUM_NODES" \
+    --nproc-per-node "$FORMAL_DEVICES_PER_NODE" \
+    --node-rank "$NODE_RANK" \
+    --master-addr "$MASTER_ADDR" \
+    --master-port "$MASTER_PORT" \
+    "${TRAIN_ARGS[@]}" 2>&1 | tee "$NODE_TRAIN_LOG"
+fi
+'
 
-XWAM_PHASE=training_artifact_validation
+XWAM_PHASE=audit_srun
+srun --nodes=1 --ntasks=1 --kill-on-bad-exit=1 --environment="$EDF" \
+  env \
+    REPO="$REPO" \
+    RUNTIME_OVERLAY="$RUNTIME_OVERLAY" \
+    WANDB_OVERLAY="$WANDB_OVERLAY" \
+    METADATA="$METADATA" \
+    RESULT="$RESULT" \
+    EVENTS="$EVENTS" \
+    OPTIMIZER_DIR="$OPTIMIZER_DIR" \
+    TRAIN_LOG="$TRAIN_LOG" \
+    TARGET_STEP="$XWAM_PLAN_TARGET_STEP" \
+    RESUME_CHECKPOINT="$XWAM_PLAN_RESUME_CHECKPOINT" \
+    WANDB_RUN_ID="$WANDB_RUN_ID" \
+    HOT_CHECKPOINT_ROOT="$HOT_CHECKPOINT_ROOT" \
+    DURABLE_CHECKPOINT_ROOT="$DURABLE_CHECKPOINT_ROOT" \
+    CHUNK_AUDIT="$CHUNK_AUDIT" \
+    FINAL_AUDIT="$FINAL_AUDIT" \
+    SAVE_FINAL="$SAVE_FINAL" \
+    FORMAL_WORLD_SIZE="$FORMAL_WORLD_SIZE" \
+    XWAM_FAILURE_REPORT="$FAILURE_REPORT" \
+    XWAM_MAIN_LOG="$MAIN_LOG" \
+    XWAM_TRAIN_LOG="$TRAIN_LOG" \
+  bash -lc '
+set -Eeuo pipefail
+export XWAM_PHASE=training_artifact_validation
+source "$REPO/deployment/clariden/error_trap.sh"
+xwam_install_err_trap
+cd "$REPO"
+export PYTHONPATH="$WANDB_OVERLAY:$RUNTIME_OVERLAY${PYTHONPATH:+:$PYTHONPATH}"
 test -s "$METADATA"
 test -s "$RESULT"
 test -s "$EVENTS"
@@ -297,6 +381,7 @@ AUDIT_ARGS=(
   --expected-wandb-run-id "$WANDB_RUN_ID"
   --expected-rolling-checkpoint-root "$HOT_CHECKPOINT_ROOT"
   --expected-durable-checkpoint-root "$DURABLE_CHECKPOINT_ROOT"
+  --expected-world-size "$FORMAL_WORLD_SIZE"
   --output "$CHUNK_AUDIT"
 )
 if [[ -n "$RESUME_CHECKPOINT" ]]; then
@@ -316,6 +401,7 @@ if [[ "$SAVE_FINAL" == true ]]; then
     --expected-wandb-run-id "$WANDB_RUN_ID" \
     --expected-rolling-checkpoint-root "$HOT_CHECKPOINT_ROOT" \
     --expected-durable-checkpoint-root "$DURABLE_CHECKPOINT_ROOT" \
+    --expected-world-size "$FORMAL_WORLD_SIZE" \
     --output "$FINAL_AUDIT"
 fi
 '

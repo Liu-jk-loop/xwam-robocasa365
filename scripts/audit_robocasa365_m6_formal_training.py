@@ -25,6 +25,7 @@ def main() -> int:
     parser.add_argument("--expected-wandb-run-id")
     parser.add_argument("--expected-rolling-checkpoint-root")
     parser.add_argument("--expected-durable-checkpoint-root")
+    parser.add_argument("--expected-world-size", type=int, default=4)
     parser.add_argument(
         "--output",
         default="logs/cluster/robocasa365_m6_formal_audit.json",
@@ -39,6 +40,7 @@ def main() -> int:
         expected_wandb_run_id=args.expected_wandb_run_id,
         expected_rolling_checkpoint_root=args.expected_rolling_checkpoint_root,
         expected_durable_checkpoint_root=args.expected_durable_checkpoint_root,
+        expected_world_size=args.expected_world_size,
     )
     output = write_json_atomic(args.output, report)
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))

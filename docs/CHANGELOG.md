@@ -117,6 +117,13 @@
 - `train_m6_formal_xwam.sbatch`现内置`#SBATCH --export=ALL`，运行手册的命令行不再重复该选项。API key仍通过隐藏`read`后在当前shell中`export`，不会把明文写入命令、脚本、Git或日志；提交后立即`unset`，容器内登录和缺失key门禁保持不变。
 - 本地Slurm语法和dependency-light合同测试通过；真实Clariden环境继承与W&B登录为`cluster-pending`。回滚本次commit会重新要求调用者在每条提交命令显式添加`--export=ALL`，不影响checkpoint、W&B run或训练数据。
 
+### Clariden 2节点8卡独立正式训练入口
+
+- 新增`train_m6_formal_xwam_8gpu.sbatch`，固定2节点×4张GH200、单卡batch 16、累积1、GBS128、ZeRO-1、BF16和full gradient checkpointing。8卡实验使用独立实验名、W&B run ID、Capstor实验目录、IOPS滚动checkpoint和Store永久checkpoint，从公开pretrained权重的step 0开始，不读取或转换现有4卡checkpoint。
+- 正式训练合同、运行时门禁、chunk planner和chunk/final audit从写死4 rank改为读取显式`formal_world_size/formal_num_nodes/formal_devices_per_node`。4卡入口仍要求1节点/4 rank；8卡入口要求2节点/8 rank，checkpoint恢复必须包含rank 0～7全部ZeRO-1 optimizer shard，optimizer dtype审计也必须收齐8份rank报告。
+- 共享正式脚本在单节点继续沿用原Lightning本地启动；2节点allocation改为每节点一个EDF launcher，再由`torch.distributed.run`各启动4个rank，并用首节点hostname和Job派生端口建立rendezvous。rank 0保留主训练日志，第二节点写独立`-node1.log`；任一节点失败同时保留node级failure report，随后由外层failure report记录失败阶段。
+- 本地已通过4/8-rank planner、checkpoint、optimizer audit、拓扑/配置合同、Slurm静态合同、Python测试、shell语法和diff检查。真实Clariden跨节点NCCL/rendezvous、8卡首步、step-500八分片保存和12小时恢复均为`cluster-pending`；不能从静态验证宣称吞吐已翻倍。回滚本次commit只移除8卡入口及通用rank参数，不删除现有4卡/8卡外部实验、checkpoint、W&B run或日志。
+
 ## 2026-08-10 — Clariden 4×GH200 step 2→4 checkpoint/resume 门禁
 
 - 在单卡单步门禁关闭后新增独立的 Clariden 四卡调试层与两阶段实验层；不直接套用M6 H100正式配置。门禁固定CloseFridge前8个clip、4×micro-batch 1、GBS 4、BF16 compute、ZeRO-2 FP32 CPUAdam offload和四步scheduler。

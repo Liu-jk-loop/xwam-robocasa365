@@ -175,8 +175,7 @@ class OptimizerStateDtypeAudit(Callback):
 
 def _formal_guard_enabled(config):
     return bool(
-        config.get("m6_formal_guard", False)
-        or config.get("h100_formal_guard", False)
+        config.get("m6_formal_guard", False) or config.get("h100_formal_guard", False)
     )
 
 
@@ -185,6 +184,9 @@ def _validate_formal_runtime(config, topology):
         return None
     expected_accelerator = str(config.get("formal_accelerator", "H100")).upper()
     minimum_memory_gib = float(config.get("formal_minimum_memory_gib", 75.0))
+    expected_world_size = int(config.get("formal_world_size", 4))
+    expected_num_nodes = int(config.get("formal_num_nodes", 1))
+    expected_devices_per_node = int(config.get("formal_devices_per_node", 4))
     names = [
         torch.cuda.get_device_name(index) for index in range(torch.cuda.device_count())
     ]
@@ -193,12 +195,12 @@ def _validate_formal_runtime(config, topology):
         for index in range(torch.cuda.device_count())
     ]
     checks = {
-        "visible_gpu_count": len(names) == 4,
-        "world_size": int(topology["world_size"]) == 4,
-        "single_node": int(topology["num_nodes"]) == 1,
-        "accelerator_names": len(names) == 4
+        "visible_gpu_count": len(names) == expected_devices_per_node,
+        "world_size": int(topology["world_size"]) == expected_world_size,
+        "num_nodes": int(topology["num_nodes"]) == expected_num_nodes,
+        "accelerator_names": len(names) == expected_devices_per_node
         and all(expected_accelerator in name.upper() for name in names),
-        "minimum_memory": len(memory_gib) == 4
+        "minimum_memory": len(memory_gib) == expected_devices_per_node
         and all(value >= minimum_memory_gib for value in memory_gib),
     }
     failed = [name for name, passed in checks.items() if not passed]
@@ -212,6 +214,9 @@ def _validate_formal_runtime(config, topology):
         "checks": checks,
         "accelerator": expected_accelerator,
         "minimum_memory_gib": minimum_memory_gib,
+        "expected_world_size": expected_world_size,
+        "expected_num_nodes": expected_num_nodes,
+        "expected_devices_per_node": expected_devices_per_node,
         "gpu_names": names,
         "memory_gib": memory_gib,
     }
@@ -402,9 +407,7 @@ def main():
                 checkpoint_tier="durable",
                 dirpath=durable_checkpoint_dir,
                 save_top_k=durable_save_top_k,
-                save_last=resolve_save_last(
-                    config.get("durable_save_last", False)
-                ),
+                save_last=resolve_save_last(config.get("durable_save_last", False)),
                 save_weights_only=False,
                 save_on_exception=False,
                 every_n_train_steps=int(config.durable_save_interval),
@@ -744,8 +747,7 @@ def main():
         if bool(config.get("save_final_checkpoint", False)):
             final_checkpoint_path = str(
                 (
-                    final_checkpoint_dir
-                    / f"final-step={trainer.global_step}.ckpt"
+                    final_checkpoint_dir / f"final-step={trainer.global_step}.ckpt"
                 ).resolve()
             )
             if trainer.is_global_zero:

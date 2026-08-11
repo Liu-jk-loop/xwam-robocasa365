@@ -1,8 +1,8 @@
-# Clariden M6首选：对齐FastWAM的单卡batch 16，4张GH200累积2次，GBS=128。
+# Clariden 2节点正式训练：每节点4张GH200，单卡batch 16，无梯度累积，GBS=128。
 precision: bf16-mixed
 devices: 4
 batch_size_per_gpu: 16
-accumulate_grad_batches: 2
+accumulate_grad_batches: 1
 global_batch_size: 128
 num_workers_per_gpu: 4
 prefetch_factor: 2
@@ -10,7 +10,7 @@ use_gradient_checkpointing: true
 enable_segment_timing: true
 segment_timing_interval_steps: 20
 
-# 正式profile使用ZeRO-1 GPU AdamW/FP32 state和完整checkpoint，不继承debug CPU offload。
+# 保持与4卡正式训练一致的ZeRO-1 GPU AdamW/FP32 state和完整checkpoint。
 formal_zero_stage: 1
 deepspeed_stage: 1
 deepspeed_offload_optimizer: false
@@ -24,8 +24,8 @@ deepspeed_exclude_frozen_parameters: false
 m6_formal_guard: true
 formal_accelerator: GH200
 formal_minimum_memory_gib: 90
-formal_world_size: 4
-formal_num_nodes: 1
+formal_world_size: 8
+formal_num_nodes: 2
 formal_devices_per_node: 4
 audit_optimizer_state_dtype: true
 allow_distributed_generator_state: true

@@ -41,22 +41,24 @@ def _write_gate_run(
     global_step: int,
     resume_checkpoint: str | None,
     commit: str,
+    world_size: int = 4,
 ) -> dict[str, str]:
     run_root = root / name
     checkpoint = run_root / "hot" / f"step={global_step}.ckpt"
     state_root = checkpoint / "checkpoint"
     state_root.mkdir(parents=True)
     (state_root / "mp_rank_00_model_states.pt").write_bytes(b"model")
-    for rank in range(4):
-        (state_root / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt").write_bytes(
-            b"optimizer"
-        )
+    for rank in range(world_size):
+        (
+            state_root / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt"
+        ).write_bytes(b"optimizer")
     metadata = {
         "run_id": name,
         "git": {"commit": commit, "dirty": False, "status": []},
         "formal_contract": {
             "accelerator": "GH200",
             "zero_stage": 1,
+            "world_size": world_size,
             "checks": {"contract": True},
         },
         "formal_runtime": {
@@ -131,11 +133,12 @@ def _write_gate_run(
         encoding="utf-8",
     )
     optimizer_dir.mkdir()
-    for rank in range(4):
+    for rank in range(world_size):
         (optimizer_dir / f"optimizer_state_rank_{rank:03d}.json").write_text(
             json.dumps(
                 {
                     "global_rank": rank,
+                    "world_size": world_size,
                     "result": "pass",
                     "fp32_only": True,
                     "floating_state_tensors": 2,
@@ -170,27 +173,20 @@ class M6H100TrainingTest(unittest.TestCase):
             (complete / "mp_rank_00_model_states.pt").write_bytes(b"model")
             for rank in range(4):
                 (
-                    complete
-                    / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt"
+                    complete / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt"
                 ).write_bytes(b"optimizer")
             (incomplete / "mp_rank_00_model_states.pt").write_bytes(b"model")
 
-            plan = resolve_m6_formal_chunk(
-                root, total_steps=16390, chunk_steps=1000
-            )
+            plan = resolve_m6_formal_chunk(root, total_steps=16390, chunk_steps=1000)
             self.assertEqual(plan["completed_step"], 1000)
             self.assertEqual(plan["target_step"], 2000)
-            self.assertEqual(
-                plan["resume_checkpoint"], str(complete.parent.resolve())
-            )
+            self.assertEqual(plan["resume_checkpoint"], str(complete.parent.resolve()))
             self.assertFalse(plan["final_chunk"])
             self.assertEqual(len(plan["incomplete_checkpoints"]), 1)
             quarantine = Path(tmp) / "quarantine"
             quarantined = quarantine_m6_incomplete_checkpoints(plan, quarantine)
             self.assertFalse(incomplete.parent.exists())
-            self.assertTrue(
-                (quarantine / "epoch=0-step=2000.ckpt").is_dir()
-            )
+            self.assertTrue((quarantine / "epoch=0-step=2000.ckpt").is_dir())
             self.assertEqual(len(quarantined["quarantined_checkpoints"]), 1)
 
             final = root / "final-step=16390.ckpt" / "checkpoint"
@@ -198,14 +194,50 @@ class M6H100TrainingTest(unittest.TestCase):
             (final / "mp_rank_00_model_states.pt").write_bytes(b"model")
             for rank in range(4):
                 (
-                    final
-                    / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt"
+                    final / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt"
                 ).write_bytes(b"optimizer")
             finished = resolve_m6_formal_chunk(
                 root, total_steps=16390, chunk_steps=1000
             )
             self.assertTrue(finished["already_complete"])
             self.assertEqual(finished["target_step"], 16390)
+
+    def test_eight_gpu_planner_requires_all_eight_zero1_shards(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "checkpoints"
+            complete = root / "epoch=0-step=500.ckpt" / "checkpoint"
+            incomplete = root / "epoch=0-step=1000.ckpt" / "checkpoint"
+            complete.mkdir(parents=True)
+            incomplete.mkdir(parents=True)
+            for state in (complete, incomplete):
+                (state / "mp_rank_00_model_states.pt").write_bytes(b"model")
+            for rank in range(8):
+                (
+                    complete / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt"
+                ).write_bytes(b"optimizer")
+            for rank in range(7):
+                (
+                    incomplete / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt"
+                ).write_bytes(b"optimizer")
+
+            plan = resolve_m6_formal_chunk(
+                root,
+                total_steps=16390,
+                chunk_steps=16390,
+                expected_world_size=8,
+            )
+            self.assertEqual(plan["completed_step"], 500)
+            self.assertEqual(plan["resume_checkpoint"], str(complete.parent.resolve()))
+            self.assertEqual(plan["expected_world_size"], 8)
+            self.assertEqual(len(plan["incomplete_checkpoints"]), 1)
+
+            with self.assertRaisesRegex(ValueError, "expected_world_size"):
+                resolve_m6_formal_chunk(
+                    root,
+                    total_steps=16390,
+                    chunk_steps=16390,
+                    expected_world_size=0,
+                )
 
     def test_restartable_formal_chunk_has_the_full_run_contract(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -247,6 +279,36 @@ class M6H100TrainingTest(unittest.TestCase):
             self.assertFalse(mismatch["ok"])
             self.assertFalse(mismatch["checks"]["expected_wandb_run"])
 
+    def test_eight_gpu_formal_chunk_audits_all_ranks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifacts = _write_gate_run(
+                Path(tmp),
+                name="formal-chunk-8gpu",
+                global_step=500,
+                resume_checkpoint=None,
+                commit="8" * 40,
+                world_size=8,
+            )
+            artifacts.pop("checkpoint")
+            report = build_m6_formal_chunk_report(
+                **artifacts,
+                expected_step=500,
+                expected_resume_checkpoint=None,
+                expected_wandb_run_id="persistent-run-id",
+                expected_rolling_checkpoint_root=str(
+                    Path(artifacts["metadata_path"]).parent / "hot"
+                ),
+                expected_durable_checkpoint_root=str(
+                    Path(artifacts["metadata_path"]).parent / "durable"
+                ),
+                expected_world_size=8,
+            )
+            self.assertTrue(report["ok"], report)
+            self.assertEqual(
+                report["run"]["checkpoint"]["optimizer_ranks"], list(range(8))
+            )
+            self.assertEqual(len(report["run"]["optimizer"]["reports"]), 8)
+
     def test_formal_chunk_planner_selects_latest_across_hot_and_durable_roots(
         self,
     ) -> None:
@@ -256,8 +318,7 @@ class M6H100TrainingTest(unittest.TestCase):
             (state / "mp_rank_00_model_states.pt").write_bytes(b"model")
             for rank in range(4):
                 (
-                    state
-                    / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt"
+                    state / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt"
                 ).write_bytes(b"optimizer")
             return state.parent.resolve()
 
@@ -288,9 +349,7 @@ class M6H100TrainingTest(unittest.TestCase):
                 plan, [hot_quarantine, durable_quarantine]
             )
             self.assertEqual(len(quarantined["quarantined_checkpoints"]), 1)
-            self.assertTrue(
-                (hot_quarantine / "epoch=1-step=4000.ckpt").is_dir()
-            )
+            self.assertTrue((hot_quarantine / "epoch=1-step=4000.ckpt").is_dir())
 
             durable_3500 = write_complete(durable, 3500)
             same_step = resolve_m6_formal_chunk(
@@ -424,12 +483,8 @@ class M6H100TrainingTest(unittest.TestCase):
         balanced = (
             root / "configs/hardware/gh200x4_96gb_gbs128_balanced.yaml"
         ).read_text()
-        fallback = (
-            root / "configs/hardware/gh200x4_96gb_gbs128_safe.yaml"
-        ).read_text()
-        gate = (
-            root / "configs/experiment/robocasa365_m6_gh200_gate.yaml"
-        ).read_text()
+        fallback = (root / "configs/hardware/gh200x4_96gb_gbs128_safe.yaml").read_text()
+        gate = (root / "configs/experiment/robocasa365_m6_gh200_gate.yaml").read_text()
         formal = (
             root / "configs/experiment/robocasa365_m6_gh200_rgb_formal.yaml"
         ).read_text()
@@ -498,6 +553,42 @@ class M6H100TrainingTest(unittest.TestCase):
         self.assertEqual(contract["accelerator"], "GH200")
         self.assertEqual(contract["zero_stage"], 1)
         self.assertTrue(all(contract["checks"].values()))
+
+        eight_gpu_contract = validate_m6_formal_training_contract(
+            {
+                "formal_accelerator": "GH200",
+                "formal_minimum_memory_gib": 90,
+                "formal_world_size": 8,
+                "formal_num_nodes": 2,
+                "formal_devices_per_node": 4,
+                "batch_size_per_gpu": 16,
+                "accumulate_grad_batches": 1,
+                "global_batch_size": 128,
+                "precision": "bf16-mixed",
+                "formal_zero_stage": 1,
+                "deepspeed_stage": 1,
+                "deepspeed_offload_optimizer": False,
+                "deepspeed_fp32_optimizer_states": True,
+                "deepspeed_overlap_comm": True,
+                "deepspeed_exclude_frozen_parameters": False,
+                "use_depth": False,
+                "depth_loss_weight": 0.0,
+                "num_train_epochs": 5,
+                "dataset": {"expected_sampling": "natural_proportional"},
+                "train_subset_size": None,
+                "train_shuffle": True,
+                "num_workers_per_gpu": 4,
+                "use_gradient_checkpointing": True,
+                "cache_frozen_text_embeddings": True,
+                "max_cached_text_embeddings": 128,
+                "enable_segment_timing": True,
+                "segment_timing_interval_steps": 20,
+            },
+            world_size=8,
+        )
+        self.assertEqual(eight_gpu_contract["world_size"], 8)
+        self.assertEqual(eight_gpu_contract["num_nodes"], 2)
+        self.assertTrue(all(eight_gpu_contract["checks"].values()))
 
         with self.assertRaisesRegex(ValueError, "formal_zero1"):
             validate_m6_formal_training_contract(

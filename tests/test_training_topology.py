@@ -40,19 +40,13 @@ class TrainingTopologyTest(unittest.TestCase):
         self.assertIn("deepspeed_fp32_optimizer_states: true", smoke_config)
 
     def test_cpu_adam_keeps_fp32_default_and_allows_explicit_debug_bf16(self) -> None:
+        self.assertEqual(resolve_cpu_adam_options({}), {"fp32_optimizer_states": True})
         self.assertEqual(
-            resolve_cpu_adam_options({}), {"fp32_optimizer_states": True}
-        )
-        self.assertEqual(
-            resolve_cpu_adam_options(
-                {"deepspeed_fp32_optimizer_states": False}
-            ),
+            resolve_cpu_adam_options({"deepspeed_fp32_optimizer_states": False}),
             {"fp32_optimizer_states": False},
         )
         with self.assertRaisesRegex(ValueError, "必须是布尔值"):
-            resolve_cpu_adam_options(
-                {"deepspeed_fp32_optimizer_states": "false"}
-            )
+            resolve_cpu_adam_options({"deepspeed_fp32_optimizer_states": "false"})
 
     def test_legacy_deepspeed_defaults_are_unchanged(self) -> None:
         options = resolve_deepspeed_options({})
@@ -92,7 +86,9 @@ class TrainingTopologyTest(unittest.TestCase):
 
     def test_m2_config_and_entrypoint_wire_optimizer_offload(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
-        config = (repo_root / "configs/model/wan22_5b_robocasa365_atomic_m2.yaml").read_text()
+        config = (
+            repo_root / "configs/model/wan22_5b_robocasa365_atomic_m2.yaml"
+        ).read_text()
         train_entrypoint = (repo_root / "scripts/train_sft.py").read_text()
         self.assertIn("deepspeed_offload_optimizer: true", config)
         self.assertIn("deepspeed_bucket_size: 100000000", config)
@@ -101,7 +97,9 @@ class TrainingTopologyTest(unittest.TestCase):
 
     def test_m2_smoke_disables_optional_tensorboard_logger(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
-        config = (repo_root / "configs/model/wan22_5b_robocasa365_atomic_m2.yaml").read_text()
+        config = (
+            repo_root / "configs/model/wan22_5b_robocasa365_atomic_m2.yaml"
+        ).read_text()
         train_entrypoint = (repo_root / "scripts/train_sft.py").read_text()
         self.assertIn("enable_tensorboard: false", config)
         self.assertIn('config.get("enable_tensorboard", True)', train_entrypoint)
@@ -120,6 +118,14 @@ class TrainingTopologyTest(unittest.TestCase):
         self.assertEqual(topology["trainer_devices"], "auto")
         self.assertEqual(topology["devices_per_node"], 4)
         self.assertEqual(topology["num_nodes"], 1)
+
+    def test_torchrun_world_size_resolves_two_four_gpu_nodes(self) -> None:
+        topology = resolve_training_topology(
+            visible_devices=4, requested_devices=4, world_size=8
+        )
+        self.assertEqual(topology["devices_per_node"], 4)
+        self.assertEqual(topology["world_size"], 8)
+        self.assertEqual(topology["num_nodes"], 2)
 
     def test_rejects_more_devices_than_visible(self) -> None:
         with self.assertRaisesRegex(ValueError, "GPU 配置无效"):

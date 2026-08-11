@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：Clariden 迁移——独立 X-WAM aarch64/GH200 policy 容器部署
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划，Job `3053436`已关闭4×GH200 `mb16/ZeRO-1` 正式profile门禁；正式训练已有可恢复checkpoint。关闭DiT gradient checkpointing的直接重试被用户确认为CUDA OOM，现恢复已验证的BS16/累积2/checkpointing配置继续正式训练
+- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划，Job `3053436`已关闭4×GH200 `mb16/ZeRO-1` 正式profile门禁；现有4卡实验保留。新增独立2节点×4卡、BS16/累积1/GBS128/ZeRO-1入口，按用户决定从公开pretrained的step 0开始，真实跨节点运行仍为`cluster-pending`
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
-| M6 Atomic 正式训练与评测 | 已恢复BS16/累积2/full checkpointing；取消每1,000步主动退出 | 每500步滚动、每3,000步永久保存；12小时超时恢复为`cluster-pending` | 每次从最新完整checkpoint持续训练，直到某个Job正常到达16,390步并完成final audit |
+| M6 Atomic 正式训练与评测 | 保留4卡BS16/累积2实验；新增独立8卡BS16/累积1实验 | 8卡跨节点启动、八分片保存/恢复为`cluster-pending` | 8卡从step 0运行；每500步滚动、每3,000步永久保存，最终完成16,390步final audit |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
 ## Clariden 部署状态
@@ -68,6 +68,7 @@
 - 无gradient checkpointing的直接正式重试被用户确认为CUDA OOM；反馈未附Job ID、完整日志或commit输出，因此只记录结果，不补造显存峰值和provenance。用户选择恢复已验证的BS16/累积2/full checkpointing原配置，不再比较BS8/累积4/no-checkpointing；现有完整checkpoint保持可恢复。
 - 根据实测约0.131 step/s，原每1,000步主动退出只使用约2.1小时，已不再符合12小时allocation。按用户接受最多重跑500步的取舍，正式planner目标改为始终指向最终step 16,390；12小时超时后重新提交同一脚本，从最新完整滚动/永久checkpoint恢复。中间超时Job不要求chunk audit PASS，最终正常到达16,390的Job仍执行完整final audit。
 - 正式sbatch内置`#SBATCH --export=ALL`，不再依赖每次提交命令手工补该选项；隐藏读取并`export`的W&B API key随提交环境继承，脚本仍在preflight阻止缺失key，提交后立即`unset`的安全流程不变。
+- 新增独立8卡正式路径：`train_m6_formal_xwam_8gpu.sbatch`申请2节点、每节点4张GH200，以torchrun建立8-rank world；硬件层为`8×batch16×accum1=GBS128`、ZeRO-1和full gradient checkpointing。实验名固定为`robocasa365_m6_atomic_seen18_rgb_seed42_8gpu`，不会扫描或复用4卡实验checkpoint；后续同一8卡脚本的12小时重提只恢复自己的rank 0～7完整checkpoint。真实跨节点NCCL和首个八分片checkpoint为`cluster-pending`。
 
 ## 已确认资源
 

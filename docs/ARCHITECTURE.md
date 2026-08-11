@@ -144,10 +144,10 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 
 ### M6 正式 accelerator 合同
 
-- M6数据/sampler/scheduler/GBS/FP32 optimizer/full-checkpoint合同与GPU型号解耦；配置必须显式声明`formal_accelerator`、`formal_zero_stage`和最低显存。GH200与保留的H100正式profile都严格固定ZeRO-1；Clariden另要求4张GH200且每张至少90 GiB，防止命令行将正式训练静默改回ZeRO-2。
+- M6数据/sampler/scheduler/GBS/FP32 optimizer/full-checkpoint合同与GPU型号解耦；配置必须显式声明`formal_accelerator`、`formal_zero_stage`、`formal_world_size`、节点数、每节点设备数和最低显存。GH200与保留的H100正式profile都严格固定ZeRO-1；Clariden每节点要求4张至少90 GiB的GH200，4卡profile固定1节点/4 rank，8卡profile固定2节点/8 rank。
 - Clariden的GBS128候选梯度为默认`4×micro-batch 16×accumulation 2`、balanced `4×8×4`和safe `4×4×8`。三者均使用BF16 model compute、ZeRO-1 GPU AdamW、实际FP32 optimizer state、通信overlap和完整checkpoint，不继承debug的CPU offload或冻结参数排除。默认值来自同为3相机/9视频帧的FastWAM Clariden设置，但X-WAM的更长文本上下文和实现差异仍必须由真实step 2→4门禁验证。
-- 正式profile必须先以完整18任务manifest/global stats和16,390-step scheduler运行到step 2，保存完整model/四rank optimizer shard，再从精确checkpoint恢复到step 4。联合审计要求相同clean commit、accelerator、manifest与scheduler，有限RGB-only loss、四rankFP32 state、完整checkpoint和精确resume来源。
-- Clariden正式5-epoch训练使用固定实验目录和绝对global-step目标，每个12小时Slurm作业正常推进1,000步后退出。完整DeepSpeed checkpoint采用双层存储：IOPS的`xwam_run/<实验名>/checkpoints`每500步保存并滚动保留最近5个；Store的`checkpoints/xwam/<实验名>/checkpoints`每3,000步永久保存且不限数量，step 16,390的final也写入该Store目录。文件锁禁止并发写入；planner跨两层选择最新完整model+四rank optimizer checkpoint，同step优先Store副本，未完整目录在各自文件系统内原子隔离，避免跨文件系统移动。
+- 4卡正式profile先以完整18任务manifest/global stats和16,390-step scheduler运行到step 2，保存完整model/四rank optimizer shard，再从精确checkpoint恢复到step 4。8卡扩展实验按用户决定从公开pretrained重新开始，不转换4卡ZeRO checkpoint；其后只允许恢复包含rank 0～7八个optimizer shard的本实验checkpoint。
+- Clariden正式5-epoch训练使用固定实验目录和绝对global-step目标，trainer始终指向step 16,390，由12小时Slurm上限决定何时重提。完整DeepSpeed checkpoint采用双层存储：IOPS的`xwam_run/<实验名>/checkpoints`每500步保存并滚动保留最近5个；Store的`checkpoints/xwam/<实验名>/checkpoints`每3,000步永久保存且不限数量，step 16,390的final也写入该Store目录。文件锁禁止并发写入；planner按该实验声明的world size跨两层选择最新完整model+全部rank optimizer checkpoint，同step优先Store副本，未完整目录在各自文件系统内原子隔离。
 - 正式Clariden分段训练的W&B身份属于完整实验而非单个Slurm Job：固定实验目录原子持久化一个run ID，所有chunk以online模式和`resume=allow`写入同一曲线。每个训练调用仍保留独立本地run ID和metadata用于checkpoint/audit provenance；机器审计要求metadata中的W&B ID等于持久化ID。认证只接受提交环境中的`WANDB_API_KEY`且metadata仅记录`auth=api_key_env`，不读取默认账号作为回退，也不把key写入配置、源码和日志。
 
 ### M6 H100 RGB-only 正式训练合同

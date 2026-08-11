@@ -868,6 +868,58 @@ planner同时扫描两层，只选择包含非空model state和rank 0～3四个o
 
 只有final audit为`ok=true/result=pass`才视为正式训练完成。IOPS中间checkpoint只保留最近5个并维护`last.ckpt`；Store的3,000/6,000/…/15,000及final-step=16,390均不受max=5限制。不要手工移动、删除或修改运行中的checkpoint目录。
 
+### 2节点×4卡扩展实验（从step 0开始）
+
+8卡实验不转换、复制或恢复上述4卡实验的ZeRO checkpoint。它使用独立实验名`robocasa365_m6_atomic_seen18_rgb_seed42_8gpu`，固定`8×单卡batch 16×累积1=GBS128`、ZeRO-1、BF16和full gradient checkpointing；首次提交从公开pretrained权重的step 0开始。4卡实验目录、W&B run和checkpoint保持不动。
+
+先更新到干净commit，再使用与4卡相同的API-key安全流程提交：
+
+```bash
+cd /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+git rev-parse HEAD
+git status --short
+
+read -rsp 'W&B API key: ' WANDB_API_KEY
+printf '\n'
+export WANDB_API_KEY
+export WANDB_PROJECT='xwam-robocasa365'
+# WANDB_ENTITY可留空；只有要写入指定team时才export。
+
+EJOB=$(sbatch --parsable \
+  deployment/clariden/train_m6_formal_xwam_8gpu.sbatch | cut -d';' -f1)
+echo "$EJOB"
+unset WANDB_API_KEY
+```
+
+该sbatch申请2节点，每节点运行一个EDF launcher，再由`torch.distributed.run`启动4个local rank。首节点负责主日志、W&B和公共metadata；第二节点训练输出写入独立node日志。正式checkpoint只有同时包含rank 0～7八个optimizer shard才算完整，planner不会把4-rank checkpoint当作可恢复点。
+
+8卡独立存储位置：
+
+```text
+实验与W&B身份：
+/capstor/scratch/cscs/zjingchen/terry_nys/experiments/xwam/robocasa365_m6_atomic_seen18_rgb_seed42_8gpu
+
+滚动层（IOPS，每500步，最多5个）：
+/iopsstor/scratch/cscs/zjingchen/terry_nys/xwam_run/robocasa365_m6_atomic_seen18_rgb_seed42_8gpu/checkpoints
+
+永久层（Store，每3000步，不限数量，另含final）：
+/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/checkpoints/xwam/robocasa365_m6_atomic_seen18_rgb_seed42_8gpu/checkpoints
+```
+
+日志与错误报告：
+
+```text
+主日志：    .../logs/xwam/m6-formal-8gpu-<JOB_ID>.log
+rank0训练： .../logs/xwam/m6-formal-8gpu-<JOB_ID>-train.log
+第二节点：  .../logs/xwam/m6-formal-8gpu-<JOB_ID>-train-node1.log
+外层错误：  .../logs/xwam/m6-formal-8gpu-<JOB_ID>-failure.txt
+节点错误：  .../logs/xwam/m6-formal-8gpu-<JOB_ID>-failure-node0.txt / -node1.txt
+chunk审计： .../logs/xwam/m6-formal-8gpu-<JOB_ID>-chunk-audit.json
+```
+
+12小时先到时，等待旧Job完全退出，再原样重提这个8卡sbatch；它只扫描自己的8-rank checkpoint，最多重跑500步。不得用4卡脚本恢复8卡实验，也不得同时运行两个8卡Job写同一目录。真实Clariden跨节点NCCL、首步吞吐和八分片保存尚需以本次Job日志确认。
+
 ## M6：4×H100 RGB-only训练（兼容路径）
 
 本阶段只使用 Atomic-Seen 同名18任务的 `pretrain/atomic` 数据，不读取 composite，也不启用depth。模型前向保持BF16 mixed precision；正式profile同样固定ZeRO-1和FP32 optimizer state，并关闭A800调试所用的CPU offload和冻结参数排除。

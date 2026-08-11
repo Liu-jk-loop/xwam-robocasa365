@@ -83,18 +83,14 @@ class ClaridenDeploymentTest(unittest.TestCase):
             full_retry["checkpoint_optimizer_shard_prefix"],
             "bf16_zero_pp_rank_",
         )
-        multigpu_pass = contract["cluster_evidence"][
-            "multigpu_checkpoint_resume_pass"
-        ]
+        multigpu_pass = contract["cluster_evidence"]["multigpu_checkpoint_resume_pass"]
         self.assertEqual(multigpu_pass["job_id"], 3053264)
         self.assertEqual(
             multigpu_pass["source_commit"],
             "a2787ded5106f5178c21010d8378a0d2070e7f88",
         )
         self.assertTrue(multigpu_pass["audit_ok"])
-        m6_preflight = contract["cluster_evidence"][
-            "m6_atomic_seen18_preflight_pass"
-        ]
+        m6_preflight = contract["cluster_evidence"]["m6_atomic_seen18_preflight_pass"]
         self.assertEqual(m6_preflight["job_id"], 3053322)
         self.assertEqual(m6_preflight["task_count"], 18)
         self.assertEqual(m6_preflight["total_valid_clips"], 419706)
@@ -103,9 +99,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             contract["cluster_evidence"]["wandb_runtime_overlay_result"],
             "pass",
         )
-        self.assertIsNone(
-            contract["cluster_evidence"]["wandb_runtime_overlay_job_id"]
-        )
+        self.assertIsNone(contract["cluster_evidence"]["wandb_runtime_overlay_job_id"])
         self.assertEqual(
             contract["cluster_evidence"]["wandb_runtime_overlay_validation_job_id"],
             3054130,
@@ -115,9 +109,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertEqual(formal_failure["global_step"], 0)
         self.assertEqual(formal_failure["wandb_api_key_auth"], "pass")
         self.assertFalse(formal_failure["wandb_entity_explicit"])
-        entity_failure = contract["cluster_evidence"][
-            "wandb_entity_preflight_failure"
-        ]
+        entity_failure = contract["cluster_evidence"]["wandb_entity_preflight_failure"]
         self.assertEqual(entity_failure["job_id"], 3054165)
         self.assertEqual(entity_failure["phase"], "outer_preflight")
         self.assertEqual(entity_failure["global_step"], 0)
@@ -152,7 +144,10 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertNotIn("pip install robocasa", containerfile.lower())
         self.assertLess(
             containerfile.index('checkout "${FLASH_ATTN_SHA}"'),
-            containerfile.index("submodule update --init --recursive", containerfile.index("flash-attention")),
+            containerfile.index(
+                "submodule update --init --recursive",
+                containerfile.index("flash-attention"),
+            ),
         )
 
     def test_requirements_preserve_validated_xwam_versions(self) -> None:
@@ -234,9 +229,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
 
-        build_script = (DEPLOY_ROOT / "build_xwam.sbatch").read_text(
-            encoding="utf-8"
-        )
+        build_script = (DEPLOY_ROOT / "build_xwam.sbatch").read_text(encoding="utf-8")
         self.assertIn("unsquashfs -s", build_script)
         self.assertIn("ENROOT_STATUS", build_script)
 
@@ -264,12 +257,8 @@ class ClaridenDeploymentTest(unittest.TestCase):
             log_root = deploy_store / "logs/xwam"
             log_root.mkdir(parents=True)
             (log_root / "build-1.log").write_text("build", encoding="utf-8")
-            (log_root / "m6-gate-2-audit.json").write_text(
-                "gate", encoding="utf-8"
-            )
-            (log_root / "m6-formal-3.log").write_text(
-                "formal", encoding="utf-8"
-            )
+            (log_root / "m6-gate-2-audit.json").write_text("gate", encoding="utf-8")
+            (log_root / "m6-formal-3.log").write_text("formal", encoding="utf-8")
             (log_root / "m6-formal-3053803-failure.txt").write_text(
                 "preflight failure", encoding="utf-8"
             )
@@ -315,8 +304,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
                 [
                     "bash",
                     "-c",
-                    'set -Eeuo pipefail; source "$1"; '
-                    "xwam_install_err_trap; false",
+                    'set -Eeuo pipefail; source "$1"; xwam_install_err_trap; false',
                     "bash",
                     str(helper),
                 ],
@@ -335,15 +323,13 @@ class ClaridenDeploymentTest(unittest.TestCase):
             self.assertNotIn("must-not-appear", payload + result.stderr)
 
     def test_clariden_train_smoke_is_one_gpu_one_step_without_checkpoint(self) -> None:
-        hardware = (
-            REPO_ROOT / "configs/hardware/gh200_96gb_debug.yaml"
-        ).read_text(encoding="utf-8")
+        hardware = (REPO_ROOT / "configs/hardware/gh200_96gb_debug.yaml").read_text(
+            encoding="utf-8"
+        )
         experiment = (
             REPO_ROOT / "configs/experiment/robocasa365_clariden_single_step.yaml"
         ).read_text(encoding="utf-8")
-        script = (DEPLOY_ROOT / "smoke_train_xwam.sbatch").read_text(
-            encoding="utf-8"
-        )
+        script = (DEPLOY_ROOT / "smoke_train_xwam.sbatch").read_text(encoding="utf-8")
         for expected in (
             "devices: 1",
             "batch_size_per_gpu: 1",
@@ -452,8 +438,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             REPO_ROOT / "configs/hardware/gh200x4_96gb_resume_debug.yaml"
         ).read_text(encoding="utf-8")
         experiment = (
-            REPO_ROOT
-            / "configs/experiment/robocasa365_clariden_4gpu_resume_gate.yaml"
+            REPO_ROOT / "configs/experiment/robocasa365_clariden_4gpu_resume_gate.yaml"
         ).read_text(encoding="utf-8")
         script = (DEPLOY_ROOT / "smoke_train_resume_xwam.sbatch").read_text(
             encoding="utf-8"
@@ -480,7 +465,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
         for expected in (
             "#SBATCH --gpus-per-node=4",
             'SOURCE_JOB_ID="${XWAM_INITIAL_JOB_ID:-$SLURM_JOB_ID}"',
-            'REUSE_INITIAL=true',
+            "REUSE_INITIAL=true",
             "trainer_max_steps=4",
             "resume_checkpoint='$CHECKPOINT'",
             "unset SLURM_NTASKS",
@@ -495,7 +480,9 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertNotIn('CHECKPOINT="$(python - "$INITIAL_RESULT"', script)
         self.assertNotIn("payload['result']", script)
 
-    def test_clariden_m6_data_preflight_is_atomic_only_and_machine_audited(self) -> None:
+    def test_clariden_m6_data_preflight_is_atomic_only_and_machine_audited(
+        self,
+    ) -> None:
         script = (DEPLOY_ROOT / "prepare_m6_data_xwam.sbatch").read_text(
             encoding="utf-8"
         )
@@ -514,9 +501,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertNotIn("/composite", script)
 
     def test_clariden_m6_formal_profile_gate_is_four_gpu_and_audited(self) -> None:
-        script = (DEPLOY_ROOT / "smoke_m6_gate_xwam.sbatch").read_text(
-            encoding="utf-8"
-        )
+        script = (DEPLOY_ROOT / "smoke_m6_gate_xwam.sbatch").read_text(encoding="utf-8")
         for expected in (
             "#SBATCH --gpus-per-node=4",
             "gh200x4_96gb_gbs128.yaml",
@@ -559,15 +544,15 @@ class ClaridenDeploymentTest(unittest.TestCase):
             '"final_checkpoint_dir=$DURABLE_CHECKPOINT_ROOT"',
             '--expected-rolling-checkpoint-root "$HOT_CHECKPOINT_ROOT"',
             '--expected-durable-checkpoint-root "$DURABLE_CHECKPOINT_ROOT"',
-            'flock -n 9',
+            "flock -n 9",
             "audit_robocasa365_m6_formal_chunk.py",
             "audit_robocasa365_m6_formal_training.py",
             "error_trap.sh",
             "xwam_install_err_trap",
-            'XWAM_PHASE=wandb_preflight',
-            'XWAM_PHASE=training',
-            'XWAM_PHASE=chunk_audit',
-            'FAILURE_REPORT="$DEPLOY_STORE/logs/xwam/m6-formal-${SLURM_JOB_ID}-failure.txt"',
+            "XWAM_PHASE=wandb_preflight",
+            "XWAM_PHASE=training",
+            "XWAM_PHASE=chunk_audit",
+            'FAILURE_REPORT="$DEPLOY_STORE/logs/xwam/${LOG_STEM}-${SLURM_JOB_ID}-failure.txt"',
             'WANDB_OVERLAY="$DEPLOY_IOPS/python/xwam-wandb-0.23.1"',
             'WANDB_RUN_ID_FILE="$EXP_DIR/.wandb_run_id"',
             "WANDB_MODE=online",
@@ -577,15 +562,60 @@ class ClaridenDeploymentTest(unittest.TestCase):
             'assert os.environ.get("WANDB_API_KEY")',
             "wandb.login(verify=True)",
             '--expected-wandb-run-id "$WANDB_RUN_ID"',
-            'resume_checkpoint=$RESUME_CHECKPOINT',
+            "resume_checkpoint=$RESUME_CHECKPOINT",
             'test -z "$(git status --porcelain)"',
             "[PASS] X-WAM Clariden M6 formal chunk completed",
             "[PASS] X-WAM Clariden M6 formal 5-epoch training completed",
         ):
             self.assertIn(expected, script)
         self.assertNotIn("CHUNK_STEPS=1000", script)
-        self.assertNotIn("hardware_config=configs/hardware/gh200x4_96gb_gbs128_safe.yaml", script)
+        self.assertNotIn(
+            "hardware_config=configs/hardware/gh200x4_96gb_gbs128_safe.yaml", script
+        )
         self.assertNotIn("deepspeed_stage=2", script)
+
+    def test_clariden_m6_eight_gpu_training_is_a_separate_two_node_run(self) -> None:
+        wrapper = (DEPLOY_ROOT / "train_m6_formal_xwam_8gpu.sbatch").read_text(
+            encoding="utf-8"
+        )
+        shared = (DEPLOY_ROOT / "train_m6_formal_xwam.sbatch").read_text(
+            encoding="utf-8"
+        )
+        hardware = (REPO_ROOT / "configs/hardware/gh200x8_96gb_gbs128.yaml").read_text(
+            encoding="utf-8"
+        )
+        for expected in (
+            "#SBATCH --nodes=2",
+            "#SBATCH --ntasks-per-node=1",
+            "#SBATCH --gpus-per-node=4",
+            "#SBATCH --export=ALL",
+            "XWAM_M6_NUM_NODES=2",
+            "gh200x8_96gb_gbs128.yaml",
+            "robocasa365_m6_atomic_seen18_rgb_seed42_8gpu",
+        ):
+            self.assertIn(expected, wrapper)
+        for expected in (
+            'srun --nodes="$FORMAL_NUM_NODES"',
+            "--ntasks-per-node=1",
+            "python -m torch.distributed.run",
+            '--nnodes "$FORMAL_NUM_NODES"',
+            '--nproc-per-node "$FORMAL_DEVICES_PER_NODE"',
+            '--node-rank "$NODE_RANK"',
+            '--master-addr "$MASTER_ADDR"',
+            '--expected-world-size "$FORMAL_WORLD_SIZE"',
+        ):
+            self.assertIn(expected, shared)
+        for expected in (
+            "devices: 4",
+            "batch_size_per_gpu: 16",
+            "accumulate_grad_batches: 1",
+            "global_batch_size: 128",
+            "deepspeed_stage: 1",
+            "formal_world_size: 8",
+            "formal_num_nodes: 2",
+            "formal_devices_per_node: 4",
+        ):
+            self.assertIn(expected, hardware)
 
 
 if __name__ == "__main__":
