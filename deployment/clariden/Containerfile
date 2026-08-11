@@ -112,6 +112,7 @@ import numpy
 import nvtx
 import pyarrow
 import safetensors
+import sentry_sdk
 import torch
 import transformers
 import wandb
@@ -134,6 +135,7 @@ print("pyarrow:", pyarrow.__version__)
 print("accelerate:", accelerate.__version__)
 print("safetensors:", safetensors.__version__)
 print("wandb:", wandb.__version__)
+print("sentry-sdk:", importlib.metadata.version("sentry-sdk"))
 
 assert platform.machine() == "aarch64"
 assert sys.version_info[:2] == (3, 10)
@@ -144,6 +146,7 @@ assert safetensors.__version__ == "0.8.0"
 assert flash_attn.__version__ == "2.8.3"
 assert importlib.metadata.version("nvtx") == "0.2.15"
 assert importlib.metadata.version("wandb") == "0.23.1"
+assert importlib.metadata.version("sentry-sdk") == "2.58.0"
 assert callable(nvtx.get_domain)
 nvtx_domain = nvtx.get_domain("xwam-clariden-deepspeed-probe")
 nvtx_domain.push_range(message="probe", category=None)

@@ -26,6 +26,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertEqual(contract["packages"]["safetensors"], "0.8.0")
         self.assertEqual(contract["packages"]["nvtx"], "0.2.15")
         self.assertEqual(contract["packages"]["wandb"], "0.23.1")
+        self.assertEqual(contract["packages"]["sentry_sdk"], "2.58.0")
         self.assertTrue(contract["simulator_contract"]["separate_container"])
         for gate in (
             "container_build",
@@ -95,6 +96,19 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertEqual(m6_preflight["task_count"], 18)
         self.assertEqual(m6_preflight["total_valid_clips"], 419706)
         self.assertEqual(m6_preflight["num_training_steps"], 16390)
+        self.assertEqual(
+            contract["cluster_evidence"]["wandb_runtime_overlay_result"],
+            "retry-pending",
+        )
+        self.assertEqual(
+            contract["cluster_evidence"]["wandb_runtime_overlay_job_id"],
+            3053810,
+        )
+        wandb_failure = contract["cluster_evidence"][
+            "wandb_runtime_overlay_failure"
+        ]
+        self.assertEqual(wandb_failure["phase"], "wandb_overlay_staging_probe")
+        self.assertFalse(wandb_failure["published"])
 
     def test_containerfile_pins_arm64_critical_builds(self) -> None:
         containerfile = (DEPLOY_ROOT / "Containerfile").read_text(encoding="utf-8")
@@ -113,6 +127,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             'assert safetensors.__version__ == "0.8.0"',
             'assert importlib.metadata.version("nvtx") == "0.2.15"',
             'assert importlib.metadata.version("wandb") == "0.23.1"',
+            'assert importlib.metadata.version("sentry-sdk") == "2.58.0"',
             "assert callable(nvtx.get_domain)",
             'nvtx_domain.push_range(message="probe", category=None)',
         ):
@@ -142,6 +157,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "deepspeed==0.19.4",
             "nvtx==0.2.15",
             "wandb==0.23.1",
+            "sentry-sdk==2.58.0",
             "pyarrow==16.1.0",
         ):
             self.assertIn(expected, requirements)
@@ -153,6 +169,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "safetensors==0.8.0",
             "nvtx==0.2.15",
             "wandb==0.23.1",
+            "sentry-sdk==2.58.0",
         ):
             self.assertIn(expected, constraints)
 
@@ -298,8 +315,13 @@ class ClaridenDeploymentTest(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("wandb==0.23.1", requirements)
+        self.assertIn("sentry-sdk==2.58.0", requirements)
         self.assertIn(
             "sha256:6cc984cf85feb2f8ee0451d76bc9fb7f39da94956bb8183e30d26284cf203b65",
+            requirements,
+        )
+        self.assertIn(
+            "sha256:688d1c704ddecf382ea3326f21a67453d4caa95592d722b7c780a36a9d23109e",
             requirements,
         )
         for expected in (
@@ -308,6 +330,11 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "mktemp -d",
             'mv "$STAGING" "$OVERLAY"',
             'importlib.metadata.version("wandb") == "0.23.1"',
+            'importlib.metadata.version("sentry-sdk") == "2.58.0"',
+            "validate_declared_dependencies",
+            'for distribution in ("wandb", "sentry-sdk")',
+            "wandb_module.is_relative_to(overlay)",
+            "sentry_module.is_relative_to(overlay)",
             'mode="offline"',
             'run.log({"probe": 1.0}, step=0)',
             "xwam_wandb_overlay.txt",
@@ -317,6 +344,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "wandb_overlay_install",
             "wandb_overlay_staging_probe",
             "wandb_overlay_final_probe",
+            "sentry_sdk=%s",
             'FAILURE_REPORT="$DEPLOY_STORE/logs/xwam/wandb-overlay-${SLURM_JOB_ID}-failure.txt"',
         ):
             self.assertIn(expected, script)

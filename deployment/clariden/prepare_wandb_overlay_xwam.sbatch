@@ -60,12 +60,38 @@ import importlib.metadata
 import os
 from pathlib import Path
 
+import sentry_sdk
 import wandb
+from packaging.requirements import Requirement
 
 overlay = Path(os.environ["OVERLAY"]).resolve()
-module = Path(wandb.__file__).resolve()
-assert module.is_relative_to(overlay), (module, overlay)
+wandb_module = Path(wandb.__file__).resolve()
+sentry_module = Path(sentry_sdk.__file__).resolve()
+assert wandb_module.is_relative_to(overlay), (wandb_module, overlay)
+assert sentry_module.is_relative_to(overlay), (sentry_module, overlay)
 assert importlib.metadata.version("wandb") == "0.23.1"
+assert importlib.metadata.version("sentry-sdk") == "2.58.0"
+
+def validate_declared_dependencies(distribution):
+    resolved = {}
+    for raw_requirement in importlib.metadata.requires(distribution) or ():
+        requirement = Requirement(raw_requirement)
+        if requirement.marker is not None and not requirement.marker.evaluate():
+            continue
+        installed = importlib.metadata.version(requirement.name)
+        assert requirement.specifier.contains(installed, prereleases=True), (
+            distribution,
+            raw_requirement,
+            installed,
+        )
+        resolved[requirement.name] = installed
+    return resolved
+
+
+declared_dependencies = {
+    distribution: validate_declared_dependencies(distribution)
+    for distribution in ("wandb", "sentry-sdk")
+}
 run = wandb.init(
     project="xwam-overlay-probe",
     id="xwam-overlay-probe",
@@ -76,8 +102,9 @@ run = wandb.init(
 assert run is not None
 run.log({"probe": 1.0}, step=0)
 run.finish()
-print("wandb version:", importlib.metadata.version("wandb"))
-print("wandb module:", module)
+print("wandb declared dependency versions:", declared_dependencies)
+print("wandb module:", wandb_module)
+print("sentry-sdk module:", sentry_module)
 print("wandb offline probe: pass")
 PY
   rm -rf "$PROBE_DIR"
@@ -120,6 +147,7 @@ trap 'rm -f "$MANIFEST_TMP"' EXIT
 {
   printf 'overlay=%s\n' "$OVERLAY"
   printf 'wandb=%s\n' '0.23.1'
+  printf 'sentry_sdk=%s\n' '2.58.0'
   printf 'requirements_sha256=%s\n' "$(sha256sum "$REQUIREMENTS" | cut -d ' ' -f 1)"
   printf 'source_commit=%s\n' "$(git -C "$XWAM_REPO" rev-parse HEAD)"
   printf 'job_id=%s\n' "${SLURM_JOB_ID:-unknown}"

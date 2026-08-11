@@ -744,7 +744,7 @@ Job `3053436`已在commit `f4aad5a15f2df428d36639391763debe03280b68`上关闭默
 
 正式实验固定为Atomic-Seen同名18任务、`pretrain/atomic`、自然比例、RGB-only、seed 42、GBS128、ZeRO-1和5 epochs，总计16,390 optimizer steps。第一段必须从公开X-WAM pretrained权重重新初始化，不能复用step-4门禁checkpoint。
 
-当前SQSH尚未冻结W&B版本。首次正式训练前，只需运行一次固定hash的W&B overlay作业；它在计算节点下载`wandb==0.23.1`，完成offline init/log/finish后才原子发布：
+当前SQSH尚未冻结W&B版本。首次正式训练前，只需运行一次固定hash的W&B overlay作业；它在计算节点下载`wandb==0.23.1`及其缺失的`sentry-sdk==2.58.0`，验证全部直接依赖并完成offline init/log/finish后才原子发布。Job `3053810`在临时目录probe时发现旧清单漏装`sentry-sdk`，未发布该临时overlay；更新代码后直接重提同一作业即可，无需手工清理：
 
 ```bash
 cd /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365

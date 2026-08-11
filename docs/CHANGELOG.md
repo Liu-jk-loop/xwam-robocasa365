@@ -38,6 +38,13 @@
 - 修复W&B overlay及正式sbatch只有`set -Eeuo pipefail`却没有统一错误上下文的问题。新增可复用的Clariden `ERR` trap，覆盖overlay下载/临时probe/发布、外层preflight/planner/training srun和EDF内planner、W&B preflight、训练、产物检查、chunk/final audit阶段；失败时主日志明确输出phase、exit code、line、command和报告路径，并分别原子写入`wandb-overlay-<JOB_ID>-failure.txt`或`m6-formal-<JOB_ID>-failure.txt`。内层根因报告先写后，外层`srun`失败不覆盖它；命令在日志和报告前都会移除API key并截断，测试同时验证非零退出、阶段定位和密钥不泄漏。
 - 本地通过dependency-light测试、Python编译、JSON及shell语法后才发布；aarch64 wheel安装、现有SQSH直接依赖兼容、在线认证和首个W&B正式chunk均为`cluster-pending`。回滚本次commit会关闭正式配置中的W&B并移除overlay/审计接入，不会删除远端W&B run、IOPS overlay、Capstor checkpoint或Store日志；外部产物清理需单独确认。
 
+### Clariden W&B overlay补齐Sentry依赖
+
+- Job `3053810`成功下载`wandb==0.23.1`，但在原子发布前的临时目录offline probe中因`ModuleNotFoundError: sentry_sdk`退出；阶段化failure report准确记录`wandb_overlay_staging_probe`。训练未启动，最终IOPS overlay未发布，临时目录由EXIT trap清理。
+- 根因是overlay使用`--no-deps`保证当前SQSH不被解析器改写，但首版哈希清单只列了W&B本体。现固定FastWAM同环境版本`sentry-sdk==2.58.0`及官方PyPI wheel SHA256；未来镜像requirements、constraints、环境manifest和image import门禁同步冻结该版本。
+- 发布前probe现在要求W&B和Sentry模块都来自临时overlay，并根据两者的wheel metadata逐项验证当前环境满足全部声明依赖及版本范围，再真实执行offline init/log/finish。依赖缺失仍会阻塞原子发布，不会污染正式overlay。
+- 本地只验证固定哈希、shell/Python/JSON、dependency-light测试和文档合同；aarch64安装及offline probe重试仍为`cluster-pending`。回滚本次commit会恢复缺少Sentry的旧清单，不会删除集群overlay、日志、checkpoint或W&B run。
+
 ### Clariden正式训练双层checkpoint存储
 
 - 按用户要求，滚动checkpoint迁移到新建的`/iopsstor/scratch/cscs/zjingchen/terry_nys/xwam_run/robocasa365_m6_atomic_seen18_rgb_seed42/checkpoints`：每500 optimizer steps保存一次完整DeepSpeed状态，`save_top_k=5`并保留`last.ckpt`链接，限制IOPS容量。
