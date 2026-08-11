@@ -175,10 +175,12 @@ def validate_m6_formal_training_contract(
         == "natural_proportional",
         "full_dataset": get("train_subset_size") is None,
         "shuffle_enabled": bool(get("train_shuffle")),
-        "gh200_eight_loader_workers": accelerator != "GH200"
-        or int(get("num_workers_per_gpu", -1)) == 8,
+        "gh200_memory_safe_loader_workers": accelerator != "GH200"
+        or int(get("num_workers_per_gpu", -1)) == 2,
         "gh200_frozen_text_cache": accelerator != "GH200"
         or bool(get("cache_frozen_text_embeddings", False)),
+        "gh200_bounded_text_cache": accelerator != "GH200"
+        or int(get("max_cached_text_embeddings", 0)) == 128,
         "gh200_segment_timing": accelerator != "GH200"
         or (
             bool(get("enable_segment_timing", False))
@@ -200,6 +202,7 @@ def validate_m6_formal_training_contract(
         "cache_frozen_text_embeddings": bool(
             get("cache_frozen_text_embeddings", False)
         ),
+        "max_cached_text_embeddings": int(get("max_cached_text_embeddings", 0)),
         "enable_segment_timing": bool(get("enable_segment_timing", False)),
         "segment_timing_interval_steps": int(
             get("segment_timing_interval_steps", 0)

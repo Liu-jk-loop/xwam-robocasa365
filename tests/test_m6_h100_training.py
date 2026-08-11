@@ -444,7 +444,7 @@ class M6H100TrainingTest(unittest.TestCase):
             self.assertIn("m6_formal_guard: true", config)
             self.assertIn("formal_accelerator: GH200", config)
             self.assertIn("formal_minimum_memory_gib: 90", config)
-            self.assertIn("num_workers_per_gpu: 8", config)
+            self.assertIn("num_workers_per_gpu: 2", config)
             self.assertIn("enable_segment_timing: true", config)
             self.assertIn("segment_timing_interval_steps: 20", config)
         self.assertIn("batch_size_per_gpu: 16", preferred)
@@ -485,8 +485,9 @@ class M6H100TrainingTest(unittest.TestCase):
                 "dataset": {"expected_sampling": "natural_proportional"},
                 "train_subset_size": None,
                 "train_shuffle": True,
-                "num_workers_per_gpu": 8,
+                "num_workers_per_gpu": 2,
                 "cache_frozen_text_embeddings": True,
+                "max_cached_text_embeddings": 128,
                 "enable_segment_timing": True,
                 "segment_timing_interval_steps": 20,
             },
@@ -517,8 +518,9 @@ class M6H100TrainingTest(unittest.TestCase):
                     "dataset": {"expected_sampling": "natural_proportional"},
                     "train_subset_size": None,
                     "train_shuffle": True,
-                    "num_workers_per_gpu": 8,
+                    "num_workers_per_gpu": 2,
                     "cache_frozen_text_embeddings": True,
+                    "max_cached_text_embeddings": 128,
                     "enable_segment_timing": True,
                     "segment_timing_interval_steps": 20,
                 },

@@ -2,7 +2,7 @@ import os
 import logging
 import imageio.v2 as imageio
 import time
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 
 import torch
@@ -32,10 +32,18 @@ class XWAMRunner(L.LightningModule):
         self._restored_generator_state = None
         self._allow_missing_frozen_resume_parameters = False
         self._excluded_frozen_resume_report = None
-        self._text_embedding_cache = {}
+        self._text_embedding_cache = OrderedDict()
+        self._text_embedding_cache_max_entries = int(
+            getattr(config, "max_cached_text_embeddings", 128)
+        )
+        if self._text_embedding_cache_max_entries < int(config.batch_size_per_gpu):
+            raise ValueError(
+                "max_cached_text_embeddings must be at least batch_size_per_gpu"
+            )
         self._text_cache_requests = 0
         self._text_cache_hits = 0
         self._text_cache_computations = 0
+        self._text_cache_evictions = 0
 
         self._segment_timing_enabled = bool(
             getattr(config, "enable_segment_timing", False)
@@ -175,7 +183,11 @@ class XWAMRunner(L.LightningModule):
             "timing/batch_total_ms_per_microbatch": per_batch("batch_total"),
             "timing/t5_cache_hit_rate": self._text_cache_hits / requests,
             "timing/t5_cache_entries": float(len(self._text_embedding_cache)),
+            "timing/t5_cache_max_entries": float(
+                self._text_embedding_cache_max_entries
+            ),
             "timing/t5_cache_computations": float(self._text_cache_computations),
+            "timing/t5_cache_evictions": float(self._text_cache_evictions),
         }
         self.log_dict(
             metrics,
@@ -264,6 +276,7 @@ class XWAMRunner(L.LightningModule):
         for key in keys:
             if key in self._text_embedding_cache:
                 self._text_cache_hits += 1
+                self._text_embedding_cache.move_to_end(key)
             elif key not in seen_missing:
                 missing.append(key)
                 seen_missing.add(key)
@@ -273,6 +286,13 @@ class XWAMRunner(L.LightningModule):
                 computed = self.text_encoder(missing)
             for key, embedding in zip(missing, computed, strict=True):
                 self._text_embedding_cache[key] = embedding.detach()
+                self._text_embedding_cache.move_to_end(key)
+                while (
+                    len(self._text_embedding_cache)
+                    > self._text_embedding_cache_max_entries
+                ):
+                    self._text_embedding_cache.popitem(last=False)
+                    self._text_cache_evictions += 1
             self._text_cache_computations += len(missing)
 
         return torch.stack([self._text_embedding_cache[key] for key in keys], dim=0)

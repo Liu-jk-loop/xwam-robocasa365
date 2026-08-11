@@ -64,7 +64,8 @@
     "multigpu_checkpoint_resume": "pass",
     "m6_atomic_seen18_preflight": "pass",
     "m6_gh200_formal_profile_gate": "cluster-pending",
-    "wandb_runtime_overlay": "pass"
+    "wandb_runtime_overlay": "pass",
+    "m6_formal_training": "retry-pending"
   },
   "cluster_evidence": {
     "source_commit": "6594d898a87145101afe5f8a45fa6ba907b2b3c3",
@@ -190,6 +191,26 @@
       "phase": "outer_preflight",
       "global_step": 0,
       "error": "WANDB_ENTITY was incorrectly required even though API-key authentication had already passed"
+    },
+    "m6_formal_throughput_retry_oom": {
+      "job_id": 3055021,
+      "source_commit": null,
+      "resume_checkpoint_global_step": 500,
+      "last_observed_global_step": 539,
+      "slurm_step": "3055021.1",
+      "slurm_state": "OUT_OF_MEMORY",
+      "exit_code": "0:125",
+      "elapsed": "00:33:27",
+      "requested_host_memory_gib": 450,
+      "max_rss_gib": 397.06,
+      "max_vm_size_gib": 3475.37,
+      "failure_report_present": false,
+      "failure_report_note": "The cgroup SIGKILL bypassed Python and shell error traps",
+      "loader_workers_per_gpu": 8,
+      "total_loader_workers": 32,
+      "corrective_profile_workers_per_gpu": 2,
+      "corrective_text_cache_max_entries_per_rank": 128,
+      "result": "fail"
     }
   }
 }

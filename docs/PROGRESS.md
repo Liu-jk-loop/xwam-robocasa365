@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：Clariden 迁移——独立 X-WAM aarch64/GH200 policy 容器部署
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划，Job `3053436`已关闭4×GH200 `mb16/ZeRO-1` 正式profile门禁；W&B/API-key和checkpoint问题已修复，用户回报正式训练达到step 500并正常保存，但预计总耗时约40小时；T5缓存、8 workers和分段计时已完成本地实现，等待从step 500恢复后的GH200吞吐证据
+- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划，Job `3053436`已关闭4×GH200 `mb16/ZeRO-1` 正式profile门禁；正式训练已有可恢复的step-500 checkpoint。吞吐重试Job `3055021`在step 539后因主机内存OOM退出（MaxRSS 397.06G），现已恢复2 workers/GPU并将T5缓存限制为128项，等待集群复测
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
-| M6 Atomic 正式训练与评测 | 正式训练已到step 500且滚动保存正常，吞吐优化待验证 | T5缓存/8 workers/分段计时为`cluster-pending` | 从step 500恢复并确认20-step timing，再完成16,390-step训练与final audit |
+| M6 Atomic 正式训练与评测 | step-500滚动checkpoint有效；Job `3055021`确认主机OOM，内存安全修复待验证 | 2 workers/GPU、有界T5缓存和保留的分段计时为`cluster-pending` | 从step 500恢复，监控主机RSS和20-step timing，再完成16,390-step训练与final audit |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
 ## Clariden 部署状态
@@ -62,7 +62,8 @@
 - 正式训练前日志合同已拆分：历史build/smoke/overlay/恢复/M6门禁统一归档到Store `logs/xwam/debug/`，未来`m6-formal-*`继续留在根目录。归档不删除文件且保留Job `3053436` audit供正式preflight读取；集群归档执行为`cluster-pending`。
 - Job `3054130`在commit `3258f8f`通过W&B overlay来源/版本、API-key认证（账号`liuwsh25`）、4×GH200资源和step 0→1000 planner，但Lightning 2.6.5在模型构造前拒绝`save_top_k=5/monitor=None`；global step为0且无checkpoint。滚动callback现固定`monitor=step/mode=max`并纳入audit。Job `3054165`随后因错误地强制非空entity在outer preflight退出；该限制已移除，API key仍必填、entity恢复可选。真实callback构造和首个500步保存为`cluster-pending`。
 - 用户后续回报正式训练已运行到step 500且IOPS滚动checkpoint正常，但未提供本轮Job ID、commit及完整日志，因此只记录为用户反馈，不补造provenance。按当前ETA约40小时完成5 epoch，明显慢于FastWAM约14小时；静态对比确认X-WAM三独立视角token更多、全层gradient checkpointing且训练中在线运行冻结T5，不能只比较5B/6B可训练参数。
-- 当前实现已为冻结T5增加每rank lazy embedding cache（18任务prompt加空字符串预期19项），GH200三档正式profile统一提升到每卡8个loader worker，并每20 optimizer step记录data/T5/VAE/DiT forward/backward/optimizer分段耗时到console和W&B。缓存不进入checkpoint且保持512-token embedding语义，允许继续恢复现有step-500状态；真实cache命中率、阶段瓶颈和新ETA为`cluster-pending`。
+- 冻结T5的lazy embedding cache和每20 optimizer step的data/T5/VAE/DiT forward/backward/optimizer分段计时已在Job `3055021`生效；step 539时data wait约44.9 ms、T5约21.7 ms，主要计算仍在VAE/DiT/backward。该Job的训练step随后被Slurm确认为主机`OUT_OF_MEMORY`（MaxRSS 397.06G），SIGKILL绕过错误trap，因此没有failure report。
+- GH200三档正式profile已从8恢复为2 workers/GPU；episode级多样prompt缓存改为每rank最多128项的LRU，并记录淘汰计数。现有step-500 checkpoint不含该运行时缓存，可以继续严格恢复；修复后的RSS、吞吐和chunk完成状态为`cluster-pending`。
 
 ## 已确认资源
 

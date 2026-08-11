@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import unittest
+from collections import OrderedDict
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -46,7 +47,7 @@ class TrainingPerformanceContractTest(unittest.TestCase):
         source = runner_path.read_text(encoding="utf-8")
         ast.parse(source, filename=str(runner_path))
 
-        self.assertIn("self._text_embedding_cache = {}", source)
+        self.assertIn("self._text_embedding_cache = OrderedDict()", source)
         self.assertIn("def _encode_text_embeddings(self, texts):", source)
         self.assertIn("computed = self.text_encoder(missing)", source)
         self.assertIn("embedding.detach()", source)
@@ -61,6 +62,7 @@ class TrainingPerformanceContractTest(unittest.TestCase):
             REPO_ROOT / "configs/model/wan22_5b_robocasa365_atomic.yaml"
         ).read_text(encoding="utf-8")
         self.assertIn("cache_frozen_text_embeddings: true", model_config)
+        self.assertIn("max_cached_text_embeddings: 128", model_config)
 
     def test_frozen_t5_cache_computes_each_unique_prompt_once(self) -> None:
         method = self._load_text_cache_method()
@@ -77,10 +79,12 @@ class TrainingPerformanceContractTest(unittest.TestCase):
         state = SimpleNamespace(
             config=SimpleNamespace(cache_frozen_text_embeddings=True),
             text_encoder=encoder,
-            _text_embedding_cache={},
+            _text_embedding_cache=OrderedDict(),
+            _text_embedding_cache_max_entries=2,
             _text_cache_requests=0,
             _text_cache_hits=0,
             _text_cache_computations=0,
+            _text_cache_evictions=0,
         )
         first = method(state, ["task-a", "task-a", "task-b"])
         second = method(state, ["task-b", ""])
@@ -95,13 +99,16 @@ class TrainingPerformanceContractTest(unittest.TestCase):
         )
         self.assertEqual(second, ["embedding:task-b", "embedding:"])
         self.assertEqual(state._text_cache_computations, 3)
-        self.assertEqual(set(state._text_embedding_cache), {"task-a", "task-b", ""})
+        self.assertEqual(set(state._text_embedding_cache), {"task-b", ""})
+        self.assertEqual(state._text_cache_evictions, 1)
 
-    def test_gh200_formal_profile_uses_eight_workers_and_segment_timing(self) -> None:
+    def test_gh200_formal_profile_uses_memory_safe_workers_and_segment_timing(
+        self,
+    ) -> None:
         hardware = (
             REPO_ROOT / "configs/hardware/gh200x4_96gb_gbs128.yaml"
         ).read_text(encoding="utf-8")
-        self.assertIn("num_workers_per_gpu: 8", hardware)
+        self.assertIn("num_workers_per_gpu: 2", hardware)
         self.assertIn("enable_segment_timing: true", hardware)
         self.assertIn("segment_timing_interval_steps: 20", hardware)
 
@@ -117,6 +124,7 @@ class TrainingPerformanceContractTest(unittest.TestCase):
             "optimizer_ms_per_step",
             "batch_total_ms_per_microbatch",
             "t5_cache_hit_rate",
+            "t5_cache_evictions",
         ):
             self.assertIn(f'"timing/{metric}"', runner)
         self.assertIn("torch.cuda.Event(enable_timing=True)", runner)

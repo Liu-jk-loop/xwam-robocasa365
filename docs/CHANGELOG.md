@@ -76,6 +76,14 @@
 - 新增低开销CUDA Event分段计时：每20个optimizer step同步并向console/W&B写入data wait、T5、VAE、DiT forward、backward、optimizer和整micro-batch毫秒数，以及T5 cache hit rate/entry/computation计数。正常step不调用CUDA synchronize；20-step边界的一次同步属于测量开销。optimizer区间从Lightning的`on_before_optimizer_step`到batch end，包含该更新后的极少量框架收尾。
 - 本地通过AST/配置性能合同测试、M6/Clariden既有dependency-light测试、Python编译、Ruff和diff检查。真实GH200 cache entries是否收敛到19、各阶段耗时、8-worker I/O稳定性及新吞吐均为`cluster-pending`；不能从本地静态检查宣称40小时已缩短。回滚本次commit会恢复在线T5、2 workers并移除计时，不会删除现有IOPS/Store checkpoint、W&B run或日志。
 
+### Clariden吞吐重试的主机OOM修复
+
+- Job `3055021`从既有step-500完整checkpoint成功恢复并至少运行到step 539；用户未单独提供该Job的Git SHA，因此不补造source commit。分段计时在step 539记录data wait约44.9 ms、T5约21.7 ms、VAE约1102.8 ms、DiT forward约1087.5 ms、backward约1251.4 ms、optimizer约56.0 ms和micro-batch总计约3665.9 ms，证明冻结T5缓存已生效，DataLoader等待不是当时的主要耗时。
+- Slurm accounting确认训练step `3055021.1`为`OUT_OF_MEMORY`、`ExitCode=0:125`、`MaxRSS=397.06G`、`MaxVMSize=3475.37G`，作业请求主机内存450G；外层Job随后显示`CANCELLED+`。该step被cgroup以SIGKILL终止，进程无法执行Python异常处理或shell `ERR` trap，因此没有failure report是预期行为，不表示作业没有失败。
+- 该重试把每卡loader worker从2提高到8，四rank合计32个worker；每个worker会维护独立Parquet/video cache。结合旧2-worker配置已稳定达到step 500、8-worker运行的397.06G RSS以及data wait仅约45 ms，本次将GH200三档正式profile恢复为每卡2个worker，保留GBS128、ZeRO-1、prefetch和分段计时不变。
+- 真实数据prompt来自episode语言变体，并非固定18个任务名。冻结T5缓存改为每rank最多128项的LRU；命中项刷新顺序，超过上限时逐项淘汰并记录`timing/t5_cache_evictions`，同时正式合同固定该上限。按BF16 `[512,4096]`估算，128项embedding payload约512 MiB/rank，不随训练步数无限增长；缓存仍不进入checkpoint，step-500训练状态可以原样恢复。
+- 本地针对性测试、Python编译和diff检查通过；2-worker/有界缓存从step 500恢复后的主机RSS、吞吐及完整chunk仍为`cluster-pending`。回滚本次修复会重新启用8 workers和无界缓存，存在复现主机OOM的风险；不会修改或删除现有checkpoint、W&B run、日志或Slurm记录。
+
 ## 2026-08-10 — Clariden 4×GH200 step 2→4 checkpoint/resume 门禁
 
 - 在单卡单步门禁关闭后新增独立的 Clariden 四卡调试层与两阶段实验层；不直接套用M6 H100正式配置。门禁固定CloseFridge前8个clip、4×micro-batch 1、GBS 4、BF16 compute、ZeRO-2 FP32 CPUAdam offload和四步scheduler。
