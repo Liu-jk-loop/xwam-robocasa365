@@ -98,6 +98,21 @@
       "source_commit": "d7a62d4817723e93061c050ea45d5bbd24e176dc",
       "result": "fail",
       "reason": "Nested shell quoting removed Python string quotes in the in-container initial-result parser; resumed training did not start"
+    },
+    "multigpu_full_retry": {
+      "job_id": 3047744,
+      "source_commit": "ac1552b4d85a9d133e5c383da449d84665524fd0",
+      "initial_result": "pass",
+      "initial_global_step": 2,
+      "resumed_result": "pass",
+      "resumed_global_step": 4,
+      "resume_source_exact": true,
+      "audit_result": "fail",
+      "audit_failed_checks": [
+        "clean_git",
+        "checkpoint_layout"
+      ],
+      "evidence_note": "The run restored to step 4 on 4x GH200 with finite RGB-only metrics and four passing FP32 optimizer dtype reports, but the repository was dirty due to a local sbatch edit and the audit found no optimizer shard files under either checkpoint"
     }
   }
 }

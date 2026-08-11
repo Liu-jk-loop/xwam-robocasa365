@@ -47,6 +47,7 @@
 - Job `3046423` 在commit `1b5f350e5e889f12716d380fe00827e784541eab`完成4×GH200 initial阶段：四rank topology与FP32 optimizer state audit通过，step 0/1 loss有限且depth loss为0，step 2 checkpoint保存完成，result为pass；每rank峰值显存allocated/reserved为30.677/33.039 GiB。
 - Job `3046423` 的外层Slurm脚本随后因宿主机没有`python`而在解析checkpoint时退出，resume阶段未运行，因此两个日志不能解释为两阶段均通过。脚本已将解析与最终审计移入EDF，并支持设置`XWAM_INITIAL_JOB_ID=3046423`复用现有initial checkpoint；复用审计只接受新旧commit间的编排/审计/测试/文档白名单差异，训练相关文件变化会阻塞。step 2→4严格恢复与最终联合审计仍为`cluster-pending`。
 - 复用重试Job `3047286`在容器内解析阶段因嵌套shell引号删除Python字符串引号而触发`SyntaxError`，尚未启动resumed模型或训练。解析逻辑已移到独立CLI并增加有效/失败result测试；继续复用Job `3046423`，step 2→4状态保持`cluster-pending`。
+- Job `3047744`在commit `ac1552b4d85a9d133e5c383da449d84665524fd0`完成4×GH200 step 2保存和step 2→4恢复，两阶段result、四rank FP32 optimizer实态、有限RGB-only loss及恢复源一致性均通过；但联合audit为fail。未关闭项是运行时sbatch文件dirty，以及两个checkpoint中审计器均未发现四个optimizer shard；需先核对服务器真实文件布局并在干净worktree复验，不能仅凭Lightning的“Restored all states”开始正式训练。
 
 ## 已确认资源
 

@@ -54,6 +54,11 @@ class ClaridenDeploymentTest(unittest.TestCase):
             contract["cluster_evidence"]["multigpu_resume_retry_failure"]["job_id"],
             3047286,
         )
+        full_retry = contract["cluster_evidence"]["multigpu_full_retry"]
+        self.assertEqual(full_retry["job_id"], 3047744)
+        self.assertEqual(full_retry["initial_result"], "pass")
+        self.assertEqual(full_retry["resumed_result"], "pass")
+        self.assertEqual(full_retry["audit_result"], "fail")
 
     def test_containerfile_pins_arm64_critical_builds(self) -> None:
         containerfile = (DEPLOY_ROOT / "Containerfile").read_text(encoding="utf-8")
