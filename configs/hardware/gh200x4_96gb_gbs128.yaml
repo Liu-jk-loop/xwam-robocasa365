@@ -4,9 +4,11 @@ devices: 4
 batch_size_per_gpu: 16
 accumulate_grad_batches: 2
 global_batch_size: 128
-num_workers_per_gpu: 2
+num_workers_per_gpu: 8
 prefetch_factor: 2
 use_gradient_checkpointing: true
+enable_segment_timing: true
+segment_timing_interval_steps: 20
 
 # 正式profile使用ZeRO-1 GPU AdamW/FP32 state和完整checkpoint，不继承debug CPU offload。
 formal_zero_stage: 1

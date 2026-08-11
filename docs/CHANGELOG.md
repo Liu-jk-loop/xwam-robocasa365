@@ -68,6 +68,14 @@
 - 本轮API key成功认证为`liuwsh25`，提交环境的`WANDB_ENTITY`为空；这不影响API-key身份验证，只表示W&B使用该账号的默认entity。首版修复误将entity设为必填，导致Job `3054165`在outer preflight退出。现恢复为可选覆盖项，正式作业只强制API key，audit记录entity但不要求非空。已创建的`.wandb_run_id`没有训练曲线或checkpoint，重试会安全复用，不应删除。
 - 本地通过dependency-light测试、Python/shell/JSON、Ruff和文档门禁；Lightning 2.6.5 callback真实构造、500/1000步保存及5点淘汰仍为`cluster-pending`。回滚会恢复无monitor及可为空entity的旧行为，不会删除持久run ID、W&B项目、日志或checkpoint。
 
+### Clariden正式训练首轮吞吐优化与分段计时
+
+- 用户回报正式训练已能持续运行且step 500滚动checkpoint正常保存，但按当前吞吐完成5 epoch预计约40小时；FastWAM同类实验约14小时。静态核对确认X-WAM每个micro-batch在线执行冻结的5.7B T5，并在batch内任一样本触发CFG text dropout时再次为整批计算空文本；FastWAM则读取预计算文本embedding。两边可训练参数量不能代表这部分额外计算。
+- `XWAMRunner`新增按完整prompt字符串键控的冻结T5输出缓存。每个rank只为首次出现的任务prompt和空字符串运行T5，后续直接堆叠已`detach`的同device embedding；缓存是普通运行时属性，不注册buffer、不写入checkpoint，也不改变512-token上下文、T5权重或训练目标，因此现有step-500 checkpoint仍可恢复。缓存采用lazy填充，Atomic-Seen 18稳定后预期最多19项；重启chunk会重新预热。
+- Clariden GH200三档正式profile的`num_workers_per_gpu`从2提升到8，保持`prefetch_factor=2`、GBS128和ZeRO-1不变。正式合同现在要求GH200 resolved config同时包含8 workers、T5缓存和正数计时间隔，防止命令行覆盖后无声退回旧吞吐路径。
+- 新增低开销CUDA Event分段计时：每20个optimizer step同步并向console/W&B写入data wait、T5、VAE、DiT forward、backward、optimizer和整micro-batch毫秒数，以及T5 cache hit rate/entry/computation计数。正常step不调用CUDA synchronize；20-step边界的一次同步属于测量开销。optimizer区间从Lightning的`on_before_optimizer_step`到batch end，包含该更新后的极少量框架收尾。
+- 本地通过AST/配置性能合同测试、M6/Clariden既有dependency-light测试、Python编译、Ruff和diff检查。真实GH200 cache entries是否收敛到19、各阶段耗时、8-worker I/O稳定性及新吞吐均为`cluster-pending`；不能从本地静态检查宣称40小时已缩短。回滚本次commit会恢复在线T5、2 workers并移除计时，不会删除现有IOPS/Store checkpoint、W&B run或日志。
+
 ## 2026-08-10 — Clariden 4×GH200 step 2→4 checkpoint/resume 门禁
 
 - 在单卡单步门禁关闭后新增独立的 Clariden 四卡调试层与两阶段实验层；不直接套用M6 H100正式配置。门禁固定CloseFridge前8个clip、4×micro-batch 1、GBS 4、BF16 compute、ZeRO-2 FP32 CPUAdam offload和四步scheduler。

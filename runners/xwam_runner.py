@@ -1,6 +1,9 @@
 import os
 import logging
 import imageio.v2 as imageio
+import time
+from collections import defaultdict
+from contextlib import contextmanager
 
 import torch
 import torch.nn.functional as F
@@ -29,6 +32,26 @@ class XWAMRunner(L.LightningModule):
         self._restored_generator_state = None
         self._allow_missing_frozen_resume_parameters = False
         self._excluded_frozen_resume_report = None
+        self._text_embedding_cache = {}
+        self._text_cache_requests = 0
+        self._text_cache_hits = 0
+        self._text_cache_computations = 0
+
+        self._segment_timing_enabled = bool(
+            getattr(config, "enable_segment_timing", False)
+        )
+        self._segment_timing_interval_steps = int(
+            getattr(config, "segment_timing_interval_steps", 20)
+        )
+        if self._segment_timing_enabled and self._segment_timing_interval_steps <= 0:
+            raise ValueError("segment_timing_interval_steps must be positive")
+        self._timing_current = None
+        self._timing_pending = []
+        self._timing_window_ms = defaultdict(float)
+        self._timing_window_calls = defaultdict(int)
+        self._timing_window_batches = 0
+        self._timing_last_batch_end_wall = None
+        self._timing_last_logged_step = 0
 
         # TODO: remove hard-coded views and modalities
         self.num_views = 3
@@ -72,6 +95,184 @@ class XWAMRunner(L.LightningModule):
             self.model.gradient_checkpointing = True
 
         self.model.train()
+
+    @contextmanager
+    def _cuda_timing_segment(self, name):
+        if (
+            not self._segment_timing_enabled
+            or self._timing_current is None
+            or not torch.cuda.is_available()
+        ):
+            yield
+            return
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        try:
+            yield
+        finally:
+            end.record()
+            self._timing_current["events"].setdefault(name, []).append(
+                (start, end)
+            )
+
+    def _start_cuda_timing_segment(self, name):
+        if (
+            not self._segment_timing_enabled
+            or self._timing_current is None
+            or not torch.cuda.is_available()
+        ):
+            return
+        if name in self._timing_current["open_events"]:
+            raise RuntimeError(f"timing segment already open: {name}")
+        start = torch.cuda.Event(enable_timing=True)
+        start.record()
+        self._timing_current["open_events"][name] = start
+
+    def _end_cuda_timing_segment(self, name):
+        if (
+            not self._segment_timing_enabled
+            or self._timing_current is None
+            or not torch.cuda.is_available()
+        ):
+            return
+        start = self._timing_current["open_events"].pop(name, None)
+        if start is None:
+            return
+        end = torch.cuda.Event(enable_timing=True)
+        end.record()
+        self._timing_current["events"].setdefault(name, []).append((start, end))
+
+    def _drain_timing_records(self):
+        for record in self._timing_pending:
+            self._timing_window_batches += 1
+            self._timing_window_ms["data_wait"] += record["data_wait_ms"]
+            self._timing_window_calls["data_wait"] += 1
+            for name, event_pairs in record["events"].items():
+                self._timing_window_ms[name] += sum(
+                    start.elapsed_time(end) for start, end in event_pairs
+                )
+                self._timing_window_calls[name] += len(event_pairs)
+        self._timing_pending.clear()
+
+    def _log_segment_timing(self, step):
+        batches = max(self._timing_window_batches, 1)
+
+        def per_batch(name):
+            return self._timing_window_ms[name] / batches
+
+        optimizer_calls = max(self._timing_window_calls["optimizer"], 1)
+        requests = max(self._text_cache_requests, 1)
+        metrics = {
+            "timing/data_wait_ms_per_microbatch": per_batch("data_wait"),
+            "timing/t5_ms_per_microbatch": per_batch("t5"),
+            "timing/vae_ms_per_microbatch": per_batch("vae"),
+            "timing/dit_forward_ms_per_microbatch": per_batch("dit_forward"),
+            "timing/backward_ms_per_microbatch": per_batch("backward"),
+            "timing/optimizer_ms_per_step": (
+                self._timing_window_ms["optimizer"] / optimizer_calls
+            ),
+            "timing/batch_total_ms_per_microbatch": per_batch("batch_total"),
+            "timing/t5_cache_hit_rate": self._text_cache_hits / requests,
+            "timing/t5_cache_entries": float(len(self._text_embedding_cache)),
+            "timing/t5_cache_computations": float(self._text_cache_computations),
+        }
+        self.log_dict(
+            metrics,
+            on_step=True,
+            on_epoch=False,
+            prog_bar=False,
+            logger=True,
+            sync_dist=True,
+            batch_size=int(self.config.batch_size_per_gpu),
+        )
+        if self.global_rank == 0:
+            printable = " ".join(
+                f"{name.removeprefix('timing/')}={value:.3f}"
+                for name, value in metrics.items()
+            )
+            logging.info(f"[TIMING] step={step} {printable}")
+        self._timing_window_ms.clear()
+        self._timing_window_calls.clear()
+        self._timing_window_batches = 0
+        self._timing_last_logged_step = int(step)
+
+    def _maybe_log_segment_timing(self, step):
+        if (
+            step <= 0
+            or step % self._segment_timing_interval_steps != 0
+            or step == self._timing_last_logged_step
+        ):
+            return
+        torch.cuda.synchronize(self.device)
+        self._drain_timing_records()
+        self._log_segment_timing(step)
+
+    def on_train_batch_start(self, batch, batch_idx):
+        if not self._segment_timing_enabled:
+            return
+        now = time.perf_counter()
+        data_wait_ms = 0.0
+        if self._timing_last_batch_end_wall is not None:
+            data_wait_ms = (now - self._timing_last_batch_end_wall) * 1000.0
+
+        step = int(self.global_step)
+        self._maybe_log_segment_timing(step)
+
+        self._timing_current = {
+            "data_wait_ms": data_wait_ms,
+            "events": {},
+            "open_events": {},
+        }
+        self._start_cuda_timing_segment("batch_total")
+
+    def on_before_backward(self, loss):
+        self._start_cuda_timing_segment("backward")
+
+    def on_after_backward(self):
+        self._end_cuda_timing_segment("backward")
+
+    def on_before_optimizer_step(self, optimizer):
+        self._start_cuda_timing_segment("optimizer")
+
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        if not self._segment_timing_enabled or self._timing_current is None:
+            return
+        self._end_cuda_timing_segment("optimizer")
+        self._end_cuda_timing_segment("batch_total")
+        if self._timing_current["open_events"]:
+            raise RuntimeError(
+                "unclosed timing segments: "
+                f"{sorted(self._timing_current['open_events'])}"
+            )
+        self._timing_pending.append(self._timing_current)
+        self._timing_current = None
+        self._maybe_log_segment_timing(int(self.global_step))
+        self._timing_last_batch_end_wall = time.perf_counter()
+
+    def _encode_text_embeddings(self, texts):
+        keys = [str(text) for text in texts]
+        if not bool(getattr(self.config, "cache_frozen_text_embeddings", True)):
+            return self.text_encoder(keys)
+
+        self._text_cache_requests += len(keys)
+        missing = []
+        seen_missing = set()
+        for key in keys:
+            if key in self._text_embedding_cache:
+                self._text_cache_hits += 1
+            elif key not in seen_missing:
+                missing.append(key)
+                seen_missing.add(key)
+
+        if missing:
+            with torch.no_grad():
+                computed = self.text_encoder(missing)
+            for key, embedding in zip(missing, computed, strict=True):
+                self._text_embedding_cache[key] = embedding.detach()
+            self._text_cache_computations += len(missing)
+
+        return torch.stack([self._text_embedding_cache[key] for key in keys], dim=0)
 
     def enable_excluded_frozen_resume_loading(self):
         """Permit only frozen parameters omitted by a low-memory DeepSpeed save."""
@@ -224,7 +425,8 @@ class XWAMRunner(L.LightningModule):
                 < text_dropout_prob
             )
             if drop_mask.any():
-                null_context = self.text_encoder([""] * B)
+                with self._cuda_timing_segment("t5"):
+                    null_context = self._encode_text_embeddings([""] * B)
                 context_embeddings = torch.where(
                     drop_mask.view(B, 1, 1), null_context, context_embeddings
                 )
@@ -385,18 +587,19 @@ class XWAMRunner(L.LightningModule):
             * (1 - proprio_mask).view(B, gt_proprios.shape[1])
             * self.config.flow_matching_num_train_timesteps
         )
-        vt_latents_pred, vt_actions_pred, vt_proprios_pred, depth_latents_pred = (
-            self.model(
-                xt_latents,
-                latent_timesteps,
-                context_embeddings,
-                actions=xt_actions,
-                t_actions=action_timesteps,
-                proprios=xt_proprios,
-                t_proprios=proprio_timesteps,
-                run_depth=self.run_depth,
+        with self._cuda_timing_segment("dit_forward"):
+            vt_latents_pred, vt_actions_pred, vt_proprios_pred, depth_latents_pred = (
+                self.model(
+                    xt_latents,
+                    latent_timesteps,
+                    context_embeddings,
+                    actions=xt_actions,
+                    t_actions=action_timesteps,
+                    proprios=xt_proprios,
+                    t_proprios=proprio_timesteps,
+                    run_depth=self.run_depth,
+                )
             )
-        )
 
         # 4. compute loss
         video_mask = (1 - latent_mask).float().expand_as(vt_latents)
@@ -897,7 +1100,8 @@ class XWAMRunner(L.LightningModule):
 
     def _prepare_condition(self, batch):
         # context embeddings: [B, L, C]
-        context_embeddings = self.text_encoder(batch["prompt"])
+        with self._cuda_timing_segment("t5"):
+            context_embeddings = self._encode_text_embeddings(batch["prompt"])
 
         # rgbd: [B, C, MV, T, H, W]
         B = batch["video"].shape[0]
@@ -905,13 +1109,15 @@ class XWAMRunner(L.LightningModule):
         if self.config.use_depth and self.run_depth and "depths" in batch:
             gt_depth = rearrange(batch["depths"], "b v t c h w -> (b v) c t h w")
             gt_video = torch.cat([gt_rgb, gt_depth], dim=0)
-            gt_latents = self.vae.encode(gt_video)
+            with self._cuda_timing_segment("vae"):
+                gt_latents = self.vae.encode(gt_video)
             gt_latents = rearrange(
                 gt_latents, "(m b v) c t h w -> m b c t v h w", b=B, v=self.num_views
             )
             return context_embeddings, gt_latents[0], gt_latents[1]
 
-        gt_latents = self.vae.encode(gt_rgb)
+        with self._cuda_timing_segment("vae"):
+            gt_latents = self.vae.encode(gt_rgb)
         gt_latents = rearrange(
             gt_latents, "(b v) c t h w -> b c t v h w", b=B, v=self.num_views
         )

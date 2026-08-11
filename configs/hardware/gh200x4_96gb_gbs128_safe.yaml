@@ -4,9 +4,11 @@ devices: 4
 batch_size_per_gpu: 4
 accumulate_grad_batches: 8
 global_batch_size: 128
-num_workers_per_gpu: 2
+num_workers_per_gpu: 8
 prefetch_factor: 2
 use_gradient_checkpointing: true
+enable_segment_timing: true
+segment_timing_interval_steps: 20
 
 formal_zero_stage: 1
 deepspeed_stage: 1
