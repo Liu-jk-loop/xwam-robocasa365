@@ -111,6 +111,12 @@
 - 中间超时Job预期不会完成chunk audit或正常W&B finish；checkpoint之后的尾部W&B记录可能与恢复后实际参数轨迹不一致，且最多浪费500步计算。模型、optimizer、scheduler和保存的随机状态从完整checkpoint恢复；写到一半的checkpoint继续由planner隔离。
 - 最终某个Job正常达到step 16,390后仍执行chunk/final audit并要求PASS。本地验证只覆盖planner/Slurm/文档合同，真实12小时超时、下一Job跨超时恢复和最终审计为`cluster-pending`。回滚本次commit会恢复每1,000步正常退出，不删除任何外部checkpoint、W&B run或日志。
 
+### Clariden正式sbatch默认继承提交环境
+
+- 正式作业原本只在运行手册的提交命令中写`--export=ALL`，脚本自身没有对应SBATCH指令；功能等价，但调用者直接使用裸`sbatch`时容易漏传已经导出的`WANDB_API_KEY`并在preflight退出。
+- `train_m6_formal_xwam.sbatch`现内置`#SBATCH --export=ALL`，运行手册的命令行不再重复该选项。API key仍通过隐藏`read`后在当前shell中`export`，不会把明文写入命令、脚本、Git或日志；提交后立即`unset`，容器内登录和缺失key门禁保持不变。
+- 本地Slurm语法和dependency-light合同测试通过；真实Clariden环境继承与W&B登录为`cluster-pending`。回滚本次commit会重新要求调用者在每条提交命令显式添加`--export=ALL`，不影响checkpoint、W&B run或训练数据。
+
 ## 2026-08-10 — Clariden 4×GH200 step 2→4 checkpoint/resume 门禁
 
 - 在单卡单步门禁关闭后新增独立的 Clariden 四卡调试层与两阶段实验层；不直接套用M6 H100正式配置。门禁固定CloseFridge前8个clip、4×micro-batch 1、GBS 4、BF16 compute、ZeRO-2 FP32 CPUAdam offload和四步scheduler。

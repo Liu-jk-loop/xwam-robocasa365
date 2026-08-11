@@ -545,6 +545,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
         for expected in (
             "#SBATCH --gpus-per-node=4",
             "#SBATCH --time=12:00:00",
+            "#SBATCH --export=ALL",
             "TOTAL_STEPS=16390",
             'CHUNK_STEPS="$TOTAL_STEPS"',
             'HOT_CHECKPOINT_ROOT="$DEPLOY_IOPS/xwam_run/$EXP_NAME/checkpoints"',

@@ -8,6 +8,7 @@
 #SBATCH --time=12:00:00
 #SBATCH --job-name=xwam_m6_formal
 #SBATCH --output=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/m6-formal-%j.log
+#SBATCH --export=ALL
 
 set -Eeuo pipefail
 

@@ -802,7 +802,7 @@ git pull --ff-only origin dev/atomic-robocasa365
 git rev-parse HEAD
 git status --short
 
-FJOB=$(sbatch --parsable --export=ALL \
+FJOB=$(sbatch --parsable \
   deployment/clariden/train_m6_formal_xwam.sbatch | cut -d';' -f1)
 echo "$FJOB"
 unset WANDB_API_KEY
@@ -837,7 +837,7 @@ Job `3054130`已创建run ID `xwam-m6-a18-seed42-20260811T074558Z-3054130`，但
 [PASS] X-WAM Clariden M6 formal chunk completed at step 16390
 ```
 
-后续每个12小时作业都重新执行上面的隐藏`read`、`export WANDB_API_KEY`、`sbatch --export=ALL`和`unset WANDB_API_KEY`四步。仅执行裸`sbatch`会因缺少API key被脚本拒绝。
+正式sbatch已内置`#SBATCH --export=ALL`。后续每个12小时作业都重新执行上面的隐藏`read`、`export WANDB_API_KEY`、`sbatch`和`unset WANDB_API_KEY`四步；只要提交shell中的key已经`export`，不再依赖调用者记住命令行`--export=ALL`。脚本仍会在key缺失时于preflight明确失败。
 
 每次重复提交都使用同一实验身份，但checkpoint分为两个新目录：
 

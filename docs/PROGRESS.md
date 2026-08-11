@@ -67,6 +67,7 @@
 - 4-worker重试在step 539/559稳定速度约0.133/0.131 step/s；data wait约22 ms、稳定T5约22 ms，而VAE、DiT forward和backward分别约1.16/1.15/1.25秒，说明loader/T5不是剩余瓶颈。按用户决定不再运行独立性能门禁，GH200三档正式profile直接关闭全部DiT block的gradient checkpointing并从最新完整checkpoint继续；训练目标、文本长度512、GBS128和ZeRO-1不变，显存及吞吐待正式Job反馈。
 - 无gradient checkpointing的直接正式重试被用户确认为CUDA OOM；反馈未附Job ID、完整日志或commit输出，因此只记录结果，不补造显存峰值和provenance。用户选择恢复已验证的BS16/累积2/full checkpointing原配置，不再比较BS8/累积4/no-checkpointing；现有完整checkpoint保持可恢复。
 - 根据实测约0.131 step/s，原每1,000步主动退出只使用约2.1小时，已不再符合12小时allocation。按用户接受最多重跑500步的取舍，正式planner目标改为始终指向最终step 16,390；12小时超时后重新提交同一脚本，从最新完整滚动/永久checkpoint恢复。中间超时Job不要求chunk audit PASS，最终正常到达16,390的Job仍执行完整final audit。
+- 正式sbatch内置`#SBATCH --export=ALL`，不再依赖每次提交命令手工补该选项；隐藏读取并`export`的W&B API key随提交环境继承，脚本仍在preflight阻止缺失key，提交后立即`unset`的安全流程不变。
 
 ## 已确认资源
 
