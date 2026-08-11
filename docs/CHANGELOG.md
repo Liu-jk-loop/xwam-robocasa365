@@ -84,6 +84,12 @@
 - 真实数据prompt来自episode语言变体，并非固定18个任务名。冻结T5缓存改为每rank最多128项的LRU；命中项刷新顺序，超过上限时逐项淘汰并记录`timing/t5_cache_evictions`，同时正式合同固定该上限。按BF16 `[512,4096]`估算，128项embedding payload约512 MiB/rank，不随训练步数无限增长；缓存仍不进入checkpoint，step-500训练状态可以原样恢复。
 - 本地针对性测试、Python编译和diff检查通过；2-worker/有界缓存从step 500恢复后的主机RSS、吞吐及完整chunk仍为`cluster-pending`。回滚本次修复会重新启用8 workers和无界缓存，存在复现主机OOM的风险；不会修改或删除现有checkpoint、W&B run、日志或Slurm记录。
 
+### Clariden 4-worker折中试验
+
+- 按用户要求，将GH200首选、balanced和safe三档正式profile从2调整为4 workers/GPU，即四rank合计16个worker；GBS128、ZeRO-1、`prefetch_factor=2`、128项T5 LRU和分段计时均不变。正式配置门禁同步要求4 workers，避免resolved config与试验记录不一致。
+- 该选择位于已稳定达到step 500的2-worker配置与触发397.06G MaxRSS OOM的8-worker配置之间，但worker内存不保证严格线性，不能据此宣称安全或更快。集群复测必须同时观察训练step的`MaxRSS/AveRSS`和20-step data wait；若RSS持续增长或接近作业内存上限，应取消作业并回退2 workers。
+- 本地静态验证完成后发布；4-worker从step 500恢复的主机内存、吞吐及step-1000 checkpoint为`cluster-pending`。回滚本次commit只会把GH200三档恢复为2 workers，不修改checkpoint、W&B run、缓存上限或外部日志。
+
 ## 2026-08-10 — Clariden 4×GH200 step 2→4 checkpoint/resume 门禁
 
 - 在单卡单步门禁关闭后新增独立的 Clariden 四卡调试层与两阶段实验层；不直接套用M6 H100正式配置。门禁固定CloseFridge前8个clip、4×micro-batch 1、GBS 4、BF16 compute、ZeRO-2 FP32 CPUAdam offload和四步scheduler。

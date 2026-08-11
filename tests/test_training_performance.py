@@ -108,7 +108,7 @@ class TrainingPerformanceContractTest(unittest.TestCase):
         hardware = (
             REPO_ROOT / "configs/hardware/gh200x4_96gb_gbs128.yaml"
         ).read_text(encoding="utf-8")
-        self.assertIn("num_workers_per_gpu: 2", hardware)
+        self.assertIn("num_workers_per_gpu: 4", hardware)
         self.assertIn("enable_segment_timing: true", hardware)
         self.assertIn("segment_timing_interval_steps: 20", hardware)
 

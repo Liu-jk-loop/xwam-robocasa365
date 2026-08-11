@@ -176,7 +176,7 @@ def validate_m6_formal_training_contract(
         "full_dataset": get("train_subset_size") is None,
         "shuffle_enabled": bool(get("train_shuffle")),
         "gh200_memory_safe_loader_workers": accelerator != "GH200"
-        or int(get("num_workers_per_gpu", -1)) == 2,
+        or int(get("num_workers_per_gpu", -1)) == 4,
         "gh200_frozen_text_cache": accelerator != "GH200"
         or bool(get("cache_frozen_text_embeddings", False)),
         "gh200_bounded_text_cache": accelerator != "GH200"
