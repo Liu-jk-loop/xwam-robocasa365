@@ -144,8 +144,8 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 
 ### M6 正式 accelerator 合同
 
-- M6数据/sampler/scheduler/GBS/ZeRO/FP32 optimizer/full-checkpoint合同与GPU型号解耦；配置必须显式声明`formal_accelerator`和最低显存。既有H100配置默认解析为H100，新Clariden配置严格要求4张GH200且每张至少90 GiB。
-- Clariden首选profile为`4×micro-batch 4×accumulation 8=GBS 128`，safe profile为`4×2×16=128`。两者均使用BF16 model compute、ZeRO-2 GPU AdamW、实际FP32 optimizer state、通信overlap和完整checkpoint，不继承debug的CPU offload或冻结参数排除。
+- M6数据/sampler/scheduler/GBS/FP32 optimizer/full-checkpoint合同与GPU型号解耦；配置必须显式声明`formal_accelerator`、`formal_zero_stage`和最低显存。GH200与保留的H100正式profile都严格固定ZeRO-1；Clariden另要求4张GH200且每张至少90 GiB，防止命令行将正式训练静默改回ZeRO-2。
+- Clariden的GBS128候选梯度为默认`4×micro-batch 16×accumulation 2`、balanced `4×8×4`和safe `4×4×8`。三者均使用BF16 model compute、ZeRO-1 GPU AdamW、实际FP32 optimizer state、通信overlap和完整checkpoint，不继承debug的CPU offload或冻结参数排除。默认值来自同为3相机/9视频帧的FastWAM Clariden设置，但X-WAM的更长文本上下文和实现差异仍必须由真实step 2→4门禁验证。
 - 正式profile必须先以完整18任务manifest/global stats和16,390-step scheduler运行到step 2，保存完整model/四rank optimizer shard，再从精确checkpoint恢复到step 4。联合审计要求相同clean commit、accelerator、manifest与scheduler，有限RGB-only loss、四rankFP32 state、完整checkpoint和精确resume来源。
 
 ### M6 H100 RGB-only 正式训练合同
@@ -154,7 +154,7 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - 正式采样使用 `natural_proportional`，不再沿用 M3 的三任务等量过采样。18任务共用一份与 manifest SHA-256 绑定的跨任务 q01/q99/min/max；每个任务仍单独验证16D state、12D action与 modality schema。
 - `EpochAlignedDistributedSampler` 每个 epoch 先按 `seed+epoch` 全局打乱，只丢弃不足一个 GBS=128 的尾部，再等长切分给4个rank。`steps_per_epoch=floor(total_valid_clips/128)`，总步数固定为 `5*steps_per_epoch`，从而让配置中的5 epoch与实际 optimizer update一致。
 - 首选 H100 profile 为 `4 GPU × micro-batch 4 × accumulation 8 = GBS 128`；显存回退仅改为 `4×2×16`，不改变全局 batch、epoch、LR计划或数据清单。正式配置强制单节点4张至少75 GiB且名称为H100的GPU。
-- 模型前向保留 `bf16-mixed`。A800 120 GiB工程让步不进入正式训练：ZeRO-2 optimizer不offload、AdamW state要求实际为FP32、通信overlap开启、checkpoint不排除冻结参数。每个rank在首个update后单独写出实际 optimizer-state dtype 审计。
+- 模型前向保留 `bf16-mixed`。A800 120 GiB工程让步不进入正式训练：正式profile使用ZeRO-1、optimizer不offload、AdamW state要求实际为FP32、通信overlap开启、checkpoint不排除冻结参数。每个rank在首个update后单独写出实际 optimizer-state dtype 审计。
 - H100门禁使用完整正式scheduler和数据，仅把本次上限设为step 2，保存后从同一checkpoint恢复到step 4；机器审计联合验证四rank FP32 state、H100拓扑、有限loss、RGB-only depth loss为0、保存完成及resume来源。门禁通过后正式训练必须从公开 X-WAM pretrained权重新建实验，不能接着门禁checkpoint训练。
 - 公共 metadata/result/checkpoint事件只由rank 0写入；四个rank共享父进程生成的run ID。正式结束额外保存一个明确的 `final-step=*.ckpt`，审计要求global step等于自动计算的5-epoch总步数。
 

@@ -24,6 +24,7 @@ PREFLIGHT="$DEPLOY_STORE/manifests/xwam/m6/robocasa365_m6_gh200_preflight.json"
 HARDWARE_CONFIG="${XWAM_M6_HARDWARE_CONFIG:-configs/hardware/gh200x4_96gb_gbs128.yaml}"
 case "$HARDWARE_CONFIG" in
   configs/hardware/gh200x4_96gb_gbs128.yaml | \
+    configs/hardware/gh200x4_96gb_gbs128_balanced.yaml | \
     configs/hardware/gh200x4_96gb_gbs128_safe.yaml) ;;
   *)
     echo "[FAIL] Unsupported XWAM_M6_HARDWARE_CONFIG=$HARDWARE_CONFIG" >&2

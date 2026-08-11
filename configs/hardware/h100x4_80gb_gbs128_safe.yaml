@@ -8,7 +8,8 @@ num_workers_per_gpu: 2
 prefetch_factor: 2
 use_gradient_checkpointing: true
 
-deepspeed_stage: 2
+formal_zero_stage: 1
+deepspeed_stage: 1
 deepspeed_offload_optimizer: false
 deepspeed_offload_optimizer_device: cpu
 deepspeed_pin_memory: false

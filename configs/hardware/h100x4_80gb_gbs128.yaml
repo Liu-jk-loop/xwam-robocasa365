@@ -8,8 +8,9 @@ num_workers_per_gpu: 2
 prefetch_factor: 2
 use_gradient_checkpointing: true
 
-# 正式H100恢复GPU optimizer与通信；不继承A800 120GiB低内存设置。
-deepspeed_stage: 2
+# 正式H100使用ZeRO-1 GPU optimizer与通信；不继承A800 120GiB低内存设置。
+formal_zero_stage: 1
+deepspeed_stage: 1
 deepspeed_offload_optimizer: false
 deepspeed_offload_optimizer_device: cpu
 deepspeed_pin_memory: false

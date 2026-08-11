@@ -1,14 +1,13 @@
-# Clariden M6首选：对齐FastWAM的单卡batch 16，4张GH200累积2次，GBS=128。
+# Clariden M6平衡回退：4张GH200、单卡batch 8、累积4次，GBS=128。
 precision: bf16-mixed
 devices: 4
-batch_size_per_gpu: 16
-accumulate_grad_batches: 2
+batch_size_per_gpu: 8
+accumulate_grad_batches: 4
 global_batch_size: 128
 num_workers_per_gpu: 2
 prefetch_factor: 2
 use_gradient_checkpointing: true
 
-# 正式profile使用ZeRO-1 GPU AdamW/FP32 state和完整checkpoint，不继承debug CPU offload。
 formal_zero_stage: 1
 deepspeed_stage: 1
 deepspeed_offload_optimizer: false

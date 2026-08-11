@@ -315,6 +315,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
         for expected in (
             "#SBATCH --gpus-per-node=4",
             "gh200x4_96gb_gbs128.yaml",
+            "gh200x4_96gb_gbs128_balanced.yaml",
             "gh200x4_96gb_gbs128_safe.yaml",
             "XWAM_M6_HARDWARE_CONFIG",
             "robocasa365_m6_gh200_gate.yaml",
@@ -328,6 +329,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
         ):
             self.assertIn(expected, script)
         self.assertNotIn("deepspeed_exclude_frozen_parameters=true", script)
+        self.assertNotIn("deepspeed_stage=2", script)
 
 
 if __name__ == "__main__":

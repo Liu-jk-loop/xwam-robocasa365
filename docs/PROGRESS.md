@@ -52,7 +52,7 @@
 - Job `3053264`在干净commit `a2787ded5106f5178c21010d8378a0d2070e7f88`完成4×GH200全新step 2保存及严格恢复到step 4，联合audit为`ok=true/result=pass`并输出最终PASS；四rank FP32 optimizer state、完整model/optimizer shard、有限loss和恢复源均通过。Clariden多卡checkpoint/resume工程门禁正式关闭。
 - 新增Clariden M6数据预检作业：只扫描`pretrain/atomic`的Atomic-Seen 18任务，在Store生成manifest/global stats/preflight并由真实clip数计算GBS 128、5 epoch step。该作业集群运行仍为`cluster-pending`；通过后才冻结GH200正式hardware profile。
 - Job `3053322`在commit `f923c1d27db6ecf9b07e0d4e9258b6c3b50fa7ef`完成M6数据预检：18任务/493,658 frames/419,706 clips，digest与16D/12D global stats一致；GBS128下每epoch 3,278 steps、5 epoch共16,390 steps、每epoch丢弃122 clips，机器报告pass。M6数据门禁关闭。
-- 已新增GH200正式首选/safe profile、通用formal accelerator guard和完整18任务step 2→4门禁。首选profile为4×micro-batch4×累积8，GPU AdamW/FP32 state/完整checkpoint；真实显存和恢复审计为`cluster-pending`，因此尚未授权16,390-step正式训练。
+- GH200正式门禁已按正式训练要求固定ZeRO-1，并将GBS128候选梯度冻结为默认`4×16×2`、balanced `4×8×4`和safe `4×4×8`。默认档参考FastWAM同类3相机/9帧Clariden设置，但X-WAM的512长度文本上下文和实现差异仍需真实step 2→4门禁冻结。合同会在加载模型前拒绝Clariden ZeRO-2；真实显存、FP32 optimizer、完整checkpoint和恢复审计为`cluster-pending`，因此尚未授权16,390-step正式训练。
 
 ## 已确认资源
 

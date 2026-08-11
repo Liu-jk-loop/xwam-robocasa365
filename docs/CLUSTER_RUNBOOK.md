@@ -720,7 +720,15 @@ git status --short
 sbatch deployment/clariden/smoke_m6_gate_xwam.sbatch
 ```
 
-首选profile为`4×micro-batch 4×accumulation 8=GBS128`。如果日志明确是CUDA OOM，使用新Job从公开pretrained权重重新开始safe profile；不能复用首选profile的半成品checkpoint：
+三档profile都固定4卡、GBS128、BF16和ZeRO-1 GPU AdamW，只改单卡batch/累积次数。默认先验证与FastWAM对齐的`4×16×2=128`；这是候选值，只有完整step 2→4门禁通过后才能用于正式训练。如果日志明确是CUDA OOM，先用新Job从公开pretrained权重重跑balanced `4×8×4=128`：
+
+```bash
+sbatch \
+  --export=ALL,XWAM_M6_HARDWARE_CONFIG=configs/hardware/gh200x4_96gb_gbs128_balanced.yaml \
+  deployment/clariden/smoke_m6_gate_xwam.sbatch
+```
+
+如balanced仍OOM，再重跑safe `4×4×8=128`：
 
 ```bash
 sbatch \
@@ -728,11 +736,11 @@ sbatch \
   deployment/clariden/smoke_m6_gate_xwam.sbatch
 ```
 
-只有总日志出现`[PASS] X-WAM Clariden M6 4xGH200 formal-profile step 2 to 4 gate`且audit为`ok=true/result=pass`，才能生成并提交16,390-step正式训练作业。
+不得在任何一档上临时改成ZeRO-2；`formal_zero_stage=1`与`deepspeed_stage=1`不一致会在加载5B模型前被配置合同拒绝。不能复用前一档的半成品checkpoint。只有总日志出现`[PASS] X-WAM Clariden M6 4xGH200 formal-profile step 2 to 4 gate`且audit为`ok=true/result=pass`，才能生成并提交16,390-step正式训练作业；正式作业必须复用最终通过门禁的同一hardware profile。
 
 ## M6：4×H100 RGB-only训练（兼容路径）
 
-本阶段只使用 Atomic-Seen 同名18任务的 `pretrain/atomic` 数据，不读取 composite，也不启用depth。模型前向保持BF16 mixed precision；正式optimizer state恢复FP32，并关闭A800调试所用的CPU offload和冻结参数排除。
+本阶段只使用 Atomic-Seen 同名18任务的 `pretrain/atomic` 数据，不读取 composite，也不启用depth。模型前向保持BF16 mixed precision；正式profile同样固定ZeRO-1和FP32 optimizer state，并关闭A800调试所用的CPU offload和冻结参数排除。
 
 ### 1. 公共路径与18任务数据清单
 
@@ -864,7 +872,7 @@ python scripts/audit_robocasa365_m6_h100_gate.py \
 configs/hardware/h100x4_80gb_gbs128_safe.yaml
 ```
 
-safe profile为`4×micro-batch 2×accumulation 16`，GBS仍为128。不要把首选profile的半成品checkpoint与safe profile混用，也不要改回A800的BF16 optimizer state、CPU offload或排除冻结参数。
+safe profile为`4×micro-batch 2×accumulation 16`，GBS仍为128。不要把首选profile的半成品checkpoint与safe profile混用，也不要改回ZeRO-2、A800的BF16 optimizer state、CPU offload或排除冻结参数。
 
 ### 5. 正式5-epoch训练
 

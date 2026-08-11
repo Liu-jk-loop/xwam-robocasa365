@@ -239,7 +239,7 @@ RoboCasa365 原生数据
 阶段执行过程：
 
 1. Codex 提供18任务数据审计与全局统计工具；用户在集群生成不可变 manifest/global stats，工具据有效clip数计算 `5*floor(N/128)` 正式step。
-2. 用户在目标正式accelerator上先运行2步、保存并恢复到4步；机器审计确认GPU型号/显存、GBS 128、FP32 optimizer state、多卡RNG、有限loss和完整checkpoint。
+2. 用户在目标正式accelerator上先运行2步、保存并恢复到4步；机器审计确认GPU型号/显存、GBS 128、显式ZeRO stage、FP32 optimizer state、多卡RNG、有限loss和完整checkpoint。Clariden固定ZeRO-1，以单卡batch 16/8/4的顺序冻结能通过门禁的最大档。
 3. 用户启动正式训练；每次反馈 commit、配置、Job ID、checkpoint、训练曲线和异常日志。
 4. Codex 只针对已记录 commit 诊断问题，并将修改推送为新的可追踪 commit。
 5. 用户用固定 seed 对 Atomic-Seen 18 执行闭环评测，补跑缺失或明确记录失败 rollout。

@@ -151,12 +151,16 @@ def validate_m6_formal_training_contract(
     accumulate = int(get("accumulate_grad_batches"))
     configured_global_batch = int(get("global_batch_size"))
     actual_global_batch = per_device_batch * int(world_size) * accumulate
+    zero_stage = int(get("deepspeed_stage"))
+    declared_zero_stage = int(get("formal_zero_stage", -1))
+    required_zero_stage = 1
     checks = {
         "four_gpu_world": int(world_size) == 4,
         "global_batch_128": configured_global_batch == 128
         and actual_global_batch == 128,
         "bf16_model_compute": str(get("precision")) == "bf16-mixed",
-        "zero2": int(get("deepspeed_stage")) == 2,
+        "formal_zero_stage_declared": declared_zero_stage in {1, 2},
+        "formal_zero1": zero_stage == declared_zero_stage == required_zero_stage,
         "no_optimizer_offload": not bool(get("deepspeed_offload_optimizer")),
         "fp32_optimizer_state_requested": bool(get("deepspeed_fp32_optimizer_states")),
         "communication_overlap": bool(get("deepspeed_overlap_comm")),
@@ -182,6 +186,8 @@ def validate_m6_formal_training_contract(
         "batch_size_per_gpu": per_device_batch,
         "accumulate_grad_batches": accumulate,
         "global_batch_size": actual_global_batch,
+        "zero_stage": zero_stage,
+        "required_zero_stage": required_zero_stage,
     }
 
 
@@ -432,6 +438,7 @@ def _run_contract(
         "run_id": metadata.get("run_id"),
         "git_commit": git.get("commit"),
         "accelerator": formal_contract.get("accelerator"),
+        "zero_stage": formal_contract.get("zero_stage"),
         "manifest_digest": training.get("manifest_digest"),
         "resume_checkpoint": resume_value,
         "completed_checkpoint": completed_checkpoint,
@@ -467,6 +474,8 @@ def build_m6_gate_report(
             and initial_report["git_commit"] == resumed_report["git_commit"],
             "same_accelerator": bool(initial_report["accelerator"])
             and initial_report["accelerator"] == resumed_report["accelerator"],
+            "same_zero_stage": initial_report["zero_stage"] in {1, 2}
+            and initial_report["zero_stage"] == resumed_report["zero_stage"],
             "same_manifest": bool(initial_report["manifest_digest"])
             and initial_report["manifest_digest"] == resumed_report["manifest_digest"],
             "same_full_schedule": initial_report["schedule"].get("num_training_steps")

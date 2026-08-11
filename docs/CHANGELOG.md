@@ -14,6 +14,13 @@
 - 将原H100专用入口泛化为M6 formal accelerator合同，同时保留H100配置兼容。新增Clariden GH200首选`4×4×8=GBS128`与safe `4×2×16=128`profile，均使用ZeRO-2 GPU AdamW、FP32 optimizer state、完整checkpoint和显式4×GH200/≥90 GiB runtime guard。
 - 新增GH200正式profile两阶段门禁及通用审计CLI：使用完整18任务和16,390-step scheduler先到step 2，再从精确完整checkpoint恢复到step 4；审计增加clean commit、accelerator一致、model/四rank optimizer shard、resume源及manifest合同。真实首选profile显存、GPU optimizer、完整checkpoint和恢复为`cluster-pending`，通过前禁止启动16,390-step正式训练。
 
+### Clariden GBS128 batch梯度与ZeRO-1合同
+
+- 按用户的正式训练要求，Clariden GH200三档profile及保留的H100正式profile统一改为ZeRO-1；新增`formal_zero_stage`并在训练前要求它与`deepspeed_stage`及正式策略一致。因此命令行意外覆盖为ZeRO-2会直接失败。已验证的debug/CPU-offload smoke仍保留ZeRO-2，不作为正式训练设置。
+- 对照FastWAM Clariden的`4卡×单卡batch 16×累积2=GBS128`，确认两项目都是3相机、9个视频帧且训练DiT；FastWAM使用`384×320`画面和128长度缓存文本embedding，X-WAM使用`256×320`画面但文本上下文长度为512，所以不将FastWAM结果直接当成X-WAM显存证据。
+- GH200门禁默认候选更新为`16×2`，并提供balanced `8×4`和safe `4×8`两级OOM回退；三档均保持GBS128、BF16、GPU AdamW/FP32 state、无offload和完整checkpoint。联合audit现在还要求初始/恢复两段ZeRO stage一致。
+- 本地只能验证配置、合同、审计和Slurm语法；`mb16/ZeRO-1`的真实峰值显存、optimizer update、checkpoint及resume仍为`cluster-pending`。若回滚本次commit，将恢复GH200的ZeRO-2 `mb4/mb2`候选及H100旧profile，不会删除任何集群产物。
+
 ## 2026-08-10 — Clariden 4×GH200 step 2→4 checkpoint/resume 门禁
 
 - 在单卡单步门禁关闭后新增独立的 Clariden 四卡调试层与两阶段实验层；不直接套用M6 H100正式配置。门禁固定CloseFridge前8个clip、4×micro-batch 1、GBS 4、BF16 compute、ZeRO-2 FP32 CPUAdam offload和四步scheduler。

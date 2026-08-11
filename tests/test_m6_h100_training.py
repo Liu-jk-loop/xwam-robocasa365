@@ -53,6 +53,7 @@ def _write_gate_run(
         "git": {"commit": commit, "dirty": False, "status": []},
         "formal_contract": {
             "accelerator": "GH200",
+            "zero_stage": 1,
             "checks": {"contract": True},
         },
         "formal_runtime": {
@@ -230,6 +231,8 @@ class M6H100TrainingTest(unittest.TestCase):
             self.assertIn("devices: 4", config)
             self.assertIn("global_batch_size: 128", config)
             self.assertIn("precision: bf16-mixed", config)
+            self.assertIn("formal_zero_stage: 1", config)
+            self.assertIn("deepspeed_stage: 1", config)
             self.assertIn("deepspeed_offload_optimizer: false", config)
             self.assertIn("deepspeed_fp32_optimizer_states: true", config)
             self.assertIn("deepspeed_exclude_frozen_parameters: false", config)
@@ -246,25 +249,32 @@ class M6H100TrainingTest(unittest.TestCase):
     def test_gh200_configs_preserve_the_m6_formal_contract(self) -> None:
         root = Path(__file__).resolve().parents[1]
         preferred = (root / "configs/hardware/gh200x4_96gb_gbs128.yaml").read_text()
+        balanced = (
+            root / "configs/hardware/gh200x4_96gb_gbs128_balanced.yaml"
+        ).read_text()
         fallback = (
             root / "configs/hardware/gh200x4_96gb_gbs128_safe.yaml"
         ).read_text()
         gate = (
             root / "configs/experiment/robocasa365_m6_gh200_gate.yaml"
         ).read_text()
-        for config in (preferred, fallback):
+        for config in (preferred, balanced, fallback):
             self.assertIn("devices: 4", config)
             self.assertIn("global_batch_size: 128", config)
+            self.assertIn("formal_zero_stage: 1", config)
+            self.assertIn("deepspeed_stage: 1", config)
             self.assertIn("deepspeed_offload_optimizer: false", config)
             self.assertIn("deepspeed_fp32_optimizer_states: true", config)
             self.assertIn("deepspeed_exclude_frozen_parameters: false", config)
             self.assertIn("m6_formal_guard: true", config)
             self.assertIn("formal_accelerator: GH200", config)
             self.assertIn("formal_minimum_memory_gib: 90", config)
-        self.assertIn("batch_size_per_gpu: 4", preferred)
-        self.assertIn("accumulate_grad_batches: 8", preferred)
-        self.assertIn("batch_size_per_gpu: 2", fallback)
-        self.assertIn("accumulate_grad_batches: 16", fallback)
+        self.assertIn("batch_size_per_gpu: 16", preferred)
+        self.assertIn("accumulate_grad_batches: 2", preferred)
+        self.assertIn("batch_size_per_gpu: 8", balanced)
+        self.assertIn("accumulate_grad_batches: 4", balanced)
+        self.assertIn("batch_size_per_gpu: 4", fallback)
+        self.assertIn("accumulate_grad_batches: 8", fallback)
         self.assertIn("trainer_max_steps: 2", gate)
         self.assertIn("save_interval: 2", gate)
 
@@ -272,11 +282,12 @@ class M6H100TrainingTest(unittest.TestCase):
             {
                 "formal_accelerator": "GH200",
                 "formal_minimum_memory_gib": 90,
-                "batch_size_per_gpu": 4,
-                "accumulate_grad_batches": 8,
+                "batch_size_per_gpu": 16,
+                "accumulate_grad_batches": 2,
                 "global_batch_size": 128,
                 "precision": "bf16-mixed",
-                "deepspeed_stage": 2,
+                "formal_zero_stage": 1,
+                "deepspeed_stage": 1,
                 "deepspeed_offload_optimizer": False,
                 "deepspeed_fp32_optimizer_states": True,
                 "deepspeed_overlap_comm": True,
@@ -291,7 +302,33 @@ class M6H100TrainingTest(unittest.TestCase):
             world_size=4,
         )
         self.assertEqual(contract["accelerator"], "GH200")
+        self.assertEqual(contract["zero_stage"], 1)
         self.assertTrue(all(contract["checks"].values()))
+
+        with self.assertRaisesRegex(ValueError, "formal_zero1"):
+            validate_m6_formal_training_contract(
+                {
+                    "formal_accelerator": "GH200",
+                    "formal_minimum_memory_gib": 90,
+                    "batch_size_per_gpu": 16,
+                    "accumulate_grad_batches": 2,
+                    "global_batch_size": 128,
+                    "precision": "bf16-mixed",
+                    "formal_zero_stage": 1,
+                    "deepspeed_stage": 2,
+                    "deepspeed_offload_optimizer": False,
+                    "deepspeed_fp32_optimizer_states": True,
+                    "deepspeed_overlap_comm": True,
+                    "deepspeed_exclude_frozen_parameters": False,
+                    "use_depth": False,
+                    "depth_loss_weight": 0.0,
+                    "num_train_epochs": 5,
+                    "dataset": {"expected_sampling": "natural_proportional"},
+                    "train_subset_size": None,
+                    "train_shuffle": True,
+                },
+                world_size=4,
+            )
 
     def test_training_entry_uses_epoch_aligned_sampler_and_formal_guards(self) -> None:
         root = Path(__file__).resolve().parents[1]
