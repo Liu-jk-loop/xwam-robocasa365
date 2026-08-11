@@ -121,6 +121,7 @@ class TrainingPerformanceContractTest(unittest.TestCase):
             self.assertIn(f'"timing/{metric}"', runner)
         self.assertIn("torch.cuda.Event(enable_timing=True)", runner)
         self.assertIn("torch.cuda.synchronize(self.device)", runner)
+        self.assertIn("if self._timing_window_batches == 0:", runner)
 
 
 if __name__ == "__main__":

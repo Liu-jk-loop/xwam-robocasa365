@@ -206,6 +206,9 @@ class XWAMRunner(L.LightningModule):
             return
         torch.cuda.synchronize(self.device)
         self._drain_timing_records()
+        if self._timing_window_batches == 0:
+            self._timing_last_logged_step = int(step)
+            return
         self._log_segment_timing(step)
 
     def on_train_batch_start(self, batch, batch_idx):
