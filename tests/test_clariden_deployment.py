@@ -36,6 +36,10 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertEqual(contract["validation"]["training"], "pass")
         self.assertEqual(
             contract["validation"]["multigpu_checkpoint_resume"],
+            "pass",
+        )
+        self.assertEqual(
+            contract["validation"]["m6_atomic_seen18_preflight"],
             "cluster-pending",
         )
         self.assertEqual(contract["cluster_evidence"]["training_smoke_result"], "pass")
@@ -64,6 +68,15 @@ class ClaridenDeploymentTest(unittest.TestCase):
             full_retry["checkpoint_optimizer_shard_prefix"],
             "bf16_zero_pp_rank_",
         )
+        multigpu_pass = contract["cluster_evidence"][
+            "multigpu_checkpoint_resume_pass"
+        ]
+        self.assertEqual(multigpu_pass["job_id"], 3053264)
+        self.assertEqual(
+            multigpu_pass["source_commit"],
+            "a2787ded5106f5178c21010d8378a0d2070e7f88",
+        )
+        self.assertTrue(multigpu_pass["audit_ok"])
 
     def test_containerfile_pins_arm64_critical_builds(self) -> None:
         containerfile = (DEPLOY_ROOT / "Containerfile").read_text(encoding="utf-8")
@@ -145,6 +158,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "smoke_train_xwam.sbatch",
             "prepare_runtime_overlay_xwam.sbatch",
             "smoke_train_resume_xwam.sbatch",
+            "prepare_m6_data_xwam.sbatch",
         ):
             result = subprocess.run(
                 ["bash", "-n", str(DEPLOY_ROOT / script)],
@@ -263,6 +277,24 @@ class ClaridenDeploymentTest(unittest.TestCase):
             self.assertIn(expected, script)
         self.assertNotIn('CHECKPOINT="$(python - "$INITIAL_RESULT"', script)
         self.assertNotIn("payload['result']", script)
+
+    def test_clariden_m6_data_preflight_is_atomic_only_and_machine_audited(self) -> None:
+        script = (DEPLOY_ROOT / "prepare_m6_data_xwam.sbatch").read_text(
+            encoding="utf-8"
+        )
+        for expected in (
+            "/datasets/robocasa/v1.0/pretrain/atomic",
+            "build_robocasa365_m6_training_manifest.py",
+            "compute_robocasa365_global_stats.py",
+            "audit_robocasa365_m6_preflight.py",
+            "--global-batch-size 128",
+            "--epochs 5",
+            'test -z "$(git status --porcelain)"',
+            "grep -q '\"ok\": true'",
+            "[PASS] X-WAM Clariden M6 Atomic-Seen 18 manifest, global stats and schedule",
+        ):
+            self.assertIn(expected, script)
+        self.assertNotIn("/composite", script)
 
 
 if __name__ == "__main__":

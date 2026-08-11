@@ -1,5 +1,12 @@
 # 变更记录
 
+## 2026-08-11 — Clariden 四卡恢复门禁关闭与 M6 数据预检
+
+- Job `3053264`在干净commit `a2787ded5106f5178c21010d8378a0d2070e7f88`上完成4×GH200全新step 2保存和严格恢复到step 4。两阶段result均为pass，四rank FP32 optimizer实态、有限RGB-only loss、step 2/4完整checkpoint、恢复源一致性及clean Git provenance全部通过；联合audit为`ok=true/result=pass`，最终输出四卡恢复PASS。每rank峰值显存allocated/reserved为30.677/33.039 GiB，Clariden多卡checkpoint/resume工程门禁关闭。
+- 新增`prepare_m6_data_xwam.sbatch`作为正式训练前的CPU/I/O门禁：EDF内只读取`pretrain/atomic`，依次生成Atomic-Seen 18 manifest、与其digest绑定的跨任务global stats，并审计GBS 128、5 epoch精确step。产物持久化到Store，临时memmap写Capstor scratch；worktree dirty、任务缺失/多日期歧义、schema漂移、NaN/Inf、digest不一致或任一机器报告非pass都会阻塞。
+- 本地通过dependency-light单元测试、shell语法、Python/JSON和变更记录检查。真实18任务目录解析、全Parquet统计和精确step仍为`cluster-pending`；此作业不代表GH200正式hardware profile已经冻结，也不会启动模型训练。
+- 回滚本次commit会移除Clariden M6数据作业并恢复环境状态记录，不会删除Store现有manifest/stats或Capstor实验数据；外部产物如需清理必须单独确认。
+
 ## 2026-08-10 — Clariden 4×GH200 step 2→4 checkpoint/resume 门禁
 
 - 在单卡单步门禁关闭后新增独立的 Clariden 四卡调试层与两阶段实验层；不直接套用M6 H100正式配置。门禁固定CloseFridge前8个clip、4×micro-batch 1、GBS 4、BF16 compute、ZeRO-2 FP32 CPUAdam offload和四步scheduler。

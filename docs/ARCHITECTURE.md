@@ -136,6 +136,12 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - dependency-light审计同时检查四张GH200、有限RGB-only loss、step 2/4 checkpoint完成事件、恢复源一致性及`global_step=4`。通过只关闭部署恢复门禁，不代表M6正式训练配置、吞吐或模型质量。
 - 两阶段编排不依赖Clariden宿主机Python：checkpoint result解析和最终联合审计都在EDF内执行。若initial阶段已保存并通过，可用其Slurm Job ID重建实验/run路径并只执行恢复阶段；复用仍会重新验证initial result与checkpoint目录，不会跳过最终联合审计。由于编排修复会改变Git commit，复用模式只在Git diff严格局限于冻结的编排、审计、测试和文档路径时接受commit差异；任何训练runtime、模型、数据或实验配置变化都会阻塞。
 
+### Clariden M6 数据冻结门禁
+
+- Clariden正式profile冻结前，独立EDF作业只扫描`pretrain/atomic`中的Atomic-Seen 18同名任务，生成不可变manifest、与manifest digest绑定的16D state/12D action跨任务统计，以及GBS 128、5 epoch的精确step计划。
+- manifest、global stats和preflight统一写入Store的`manifests/xwam/m6`，临时memmap只写Capstor scratch；三份机器产物必须同时为`ok=true/result=pass`，且生成时Git worktree必须干净。
+- 该门禁不加载模型、不解码视频、不开始训练。它关闭后才能依据真实总clip数和GH200资源冻结正式hardware profile及step 2→4正式配置门禁。
+
 ### M6 H100 RGB-only 正式训练合同
 
 - 训练任务固定为版本化 Atomic-Seen 清单中的18个同名任务，但数据来源固定为 `pretrain/atomic`；manifest 必须逐任务解析唯一日期目录、检查真实 Parquet/三路视频，并按 `sum(max(episode_length-32, 0))` 记录有效 clip。任何缺失、重复、多日期歧义或 composite 路径都会阻塞。
