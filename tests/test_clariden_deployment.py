@@ -23,6 +23,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertEqual(contract["packages"]["numpy"], "1.23.5")
         self.assertEqual(contract["packages"]["safetensors"], "0.8.0")
         self.assertEqual(contract["packages"]["nvtx"], "0.2.15")
+        self.assertEqual(contract["packages"]["wandb"], "0.23.1")
         self.assertTrue(contract["simulator_contract"]["separate_container"])
         for gate in (
             "container_build",
@@ -44,6 +45,10 @@ class ClaridenDeploymentTest(unittest.TestCase):
         )
         self.assertEqual(
             contract["validation"]["m6_gh200_formal_profile_gate"],
+            "cluster-pending",
+        )
+        self.assertEqual(
+            contract["validation"]["wandb_runtime_overlay"],
             "cluster-pending",
         )
         self.assertEqual(contract["cluster_evidence"]["training_smoke_result"], "pass")
@@ -105,6 +110,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "transformer-engine transformer-engine-cu12 torch-tensorrt",
             'assert safetensors.__version__ == "0.8.0"',
             'assert importlib.metadata.version("nvtx") == "0.2.15"',
+            'assert importlib.metadata.version("wandb") == "0.23.1"',
             "assert callable(nvtx.get_domain)",
             'nvtx_domain.push_range(message="probe", category=None)',
         ):
@@ -133,6 +139,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "lightning==2.6.5",
             "deepspeed==0.19.4",
             "nvtx==0.2.15",
+            "wandb==0.23.1",
             "pyarrow==16.1.0",
         ):
             self.assertIn(expected, requirements)
@@ -143,6 +150,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "huggingface-hub==0.36.0",
             "safetensors==0.8.0",
             "nvtx==0.2.15",
+            "wandb==0.23.1",
         ):
             self.assertIn(expected, constraints)
 
@@ -168,9 +176,11 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "smoke_batch_xwam.sbatch",
             "smoke_train_xwam.sbatch",
             "prepare_runtime_overlay_xwam.sbatch",
+            "prepare_wandb_overlay_xwam.sbatch",
             "smoke_train_resume_xwam.sbatch",
             "prepare_m6_data_xwam.sbatch",
             "smoke_m6_gate_xwam.sbatch",
+            "train_m6_formal_xwam.sbatch",
         ):
             result = subprocess.run(
                 ["bash", "-n", str(DEPLOY_ROOT / script)],
@@ -239,6 +249,30 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "callable(nvtx.get_domain)",
             'domain.push_range(message="probe", category=None)',
             "xwam_runtime_overlay.txt",
+        ):
+            self.assertIn(expected, script)
+
+    def test_wandb_overlay_is_pinned_probed_and_atomically_published(self) -> None:
+        requirements = (DEPLOY_ROOT / "wandb-overlay-clariden.txt").read_text(
+            encoding="utf-8"
+        )
+        script = (DEPLOY_ROOT / "prepare_wandb_overlay_xwam.sbatch").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("wandb==0.23.1", requirements)
+        self.assertIn(
+            "sha256:6cc984cf85feb2f8ee0451d76bc9fb7f39da94956bb8183e30d26284cf203b65",
+            requirements,
+        )
+        for expected in (
+            "--require-hashes",
+            "--no-deps",
+            "mktemp -d",
+            'mv "$STAGING" "$OVERLAY"',
+            'importlib.metadata.version("wandb") == "0.23.1"',
+            'mode="offline"',
+            'run.log({"probe": 1.0}, step=0)',
+            "xwam_wandb_overlay.txt",
         ):
             self.assertIn(expected, script)
 
@@ -349,6 +383,12 @@ class ClaridenDeploymentTest(unittest.TestCase):
             'flock -n 9',
             "audit_robocasa365_m6_formal_chunk.py",
             "audit_robocasa365_m6_formal_training.py",
+            'WANDB_OVERLAY="$DEPLOY_IOPS/python/xwam-wandb-0.23.1"',
+            'WANDB_RUN_ID_FILE="$EXP_DIR/.wandb_run_id"',
+            "WANDB_MODE=online",
+            "WANDB_RESUME=allow",
+            "wandb.login(verify=True)",
+            '--expected-wandb-run-id "$WANDB_RUN_ID"',
             'resume_checkpoint=$RESUME_CHECKPOINT',
             'test -z "$(git status --porcelain)"',
             "[PASS] X-WAM Clariden M6 formal chunk completed",

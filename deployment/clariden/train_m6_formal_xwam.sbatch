@@ -17,6 +17,7 @@ DEPLOY_IOPS=/iopsstor/scratch/cscs/zjingchen/terry_nys
 REPO="$DEPLOY_STORE/src/xwam-robocasa365"
 EDF="$DEPLOY_STORE/containers/edf/xwam.toml"
 RUNTIME_OVERLAY="$DEPLOY_IOPS/python/xwam-nvtx-0.2.15"
+WANDB_OVERLAY="$DEPLOY_IOPS/python/xwam-wandb-0.23.1"
 WAN_DIR="$DEPLOY_STORE/checkpoints/xwam/wan22_5b"
 PRETRAINED="$DEPLOY_STORE/checkpoints/xwam/pretrained/checkpoints/last.ckpt"
 MANIFEST="$DEPLOY_STORE/manifests/xwam/m6/robocasa365_m6_atomic_seen18_manifest.json"
@@ -31,6 +32,11 @@ EXP_NAME="${XWAM_M6_FORMAL_NAME:-robocasa365_m6_atomic_seen18_rgb_seed42}"
 EXP_DIR="$EXP_ROOT/$EXP_NAME"
 CHECKPOINT_ROOT="$EXP_DIR/checkpoints"
 RUN_DIR="$EXP_DIR/runs"
+WANDB_RUN_ID_FILE="$EXP_DIR/.wandb_run_id"
+WANDB_PROJECT="${WANDB_PROJECT:-xwam-robocasa365}"
+WANDB_ENTITY="${WANDB_ENTITY:-}"
+WANDB_ROOT="$DEPLOY_IOPS/wandb/xwam/$EXP_NAME"
+WANDB_CACHE_DIR="$DEPLOY_IOPS/cache/wandb"
 PLAN_JSON="$RUN_DIR/m6-formal-${SLURM_JOB_ID}-plan.json"
 PLAN_ENV="$RUN_DIR/m6-formal-${SLURM_JOB_ID}-plan.env"
 QUARANTINE_ROOT="$EXP_DIR/incomplete-checkpoints/m6-formal-${SLURM_JOB_ID}"
@@ -42,6 +48,7 @@ FINAL_AUDIT="$DEPLOY_STORE/logs/xwam/m6-formal-${SLURM_JOB_ID}-final-audit.json"
 cd "$REPO"
 test -s "$EDF"
 test -d "$RUNTIME_OVERLAY"
+test -d "$WANDB_OVERLAY"
 test -s "$WAN_DIR/config.json"
 test -s "$WAN_DIR/models_t5_umt5-xxl-enc-bf16.pth"
 test -s "$WAN_DIR/Wan2.2_VAE.pth"
@@ -58,17 +65,33 @@ test -z "$(git status --porcelain)" || {
   git status --short >&2
   exit 2
 }
-mkdir -p "$EXP_ROOT" "$RUN_DIR"
+mkdir -p "$EXP_ROOT" "$RUN_DIR" "$WANDB_ROOT" "$WANDB_CACHE_DIR"
 exec 9>"$EXP_DIR/.formal-training.lock"
 flock -n 9 || {
   echo "[FAIL] Another formal job is already writing $EXP_DIR" >&2
   exit 2
 }
 
+if [[ ! -s "$WANDB_RUN_ID_FILE" ]]; then
+  WANDB_RUN_ID_TMP="$WANDB_RUN_ID_FILE.${SLURM_JOB_ID}.tmp"
+  umask 077
+  printf 'xwam-m6-a18-seed42-%s-%s\n' \
+    "$(date -u +%Y%m%dT%H%M%SZ)" "$SLURM_JOB_ID" > "$WANDB_RUN_ID_TMP"
+  mv "$WANDB_RUN_ID_TMP" "$WANDB_RUN_ID_FILE"
+fi
+read -r WANDB_RUN_ID < "$WANDB_RUN_ID_FILE"
+[[ "$WANDB_RUN_ID" =~ ^[A-Za-z0-9_-]+$ ]] || {
+  echo "[FAIL] Invalid persistent W&B run ID: $WANDB_RUN_ID" >&2
+  exit 2
+}
+echo "wandb_project=$WANDB_PROJECT"
+echo "wandb_run_id=$WANDB_RUN_ID"
+
 srun --kill-on-bad-exit=1 --environment="$EDF" \
   env \
     REPO="$REPO" \
     RUNTIME_OVERLAY="$RUNTIME_OVERLAY" \
+    WANDB_OVERLAY="$WANDB_OVERLAY" \
     CHECKPOINT_ROOT="$CHECKPOINT_ROOT" \
     PLAN_JSON="$PLAN_JSON" \
     PLAN_ENV="$PLAN_ENV" \
@@ -118,6 +141,7 @@ srun --kill-on-bad-exit=1 --environment="$EDF" \
   env \
     REPO="$REPO" \
     RUNTIME_OVERLAY="$RUNTIME_OVERLAY" \
+    WANDB_OVERLAY="$WANDB_OVERLAY" \
     WAN_DIR="$WAN_DIR" \
     PRETRAINED="$PRETRAINED" \
     MANIFEST="$MANIFEST" \
@@ -135,6 +159,13 @@ srun --kill-on-bad-exit=1 --environment="$EDF" \
     OPTIMIZER_DIR="$OPTIMIZER_DIR" \
     CHUNK_AUDIT="$CHUNK_AUDIT" \
     FINAL_AUDIT="$FINAL_AUDIT" \
+    WANDB_PROJECT="$WANDB_PROJECT" \
+    WANDB_ENTITY="$WANDB_ENTITY" \
+    WANDB_RUN_ID="$WANDB_RUN_ID" \
+    WANDB_DIR="$WANDB_ROOT" \
+    WANDB_CACHE_DIR="$WANDB_CACHE_DIR" \
+    WANDB_MODE=online \
+    WANDB_RESUME=allow \
   bash -lc '
 set -Eeuo pipefail
 cd "$REPO"
@@ -146,7 +177,29 @@ export PYTHONUNBUFFERED=1
 export SLURM_JOB_NAME=interactive
 unset SLURM_NTASKS SLURM_NTASKS_PER_NODE SLURM_PROCID SLURM_LOCALID SLURM_NODEID
 export XWAM_RUN_ID="$RUN_ID"
-export PYTHONPATH="$RUNTIME_OVERLAY${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$WANDB_OVERLAY:$RUNTIME_OVERLAY${PYTHONPATH:+:$PYTHONPATH}"
+
+python - <<"PY"
+import importlib.metadata
+import os
+from pathlib import Path
+
+import wandb
+
+overlay = Path(os.environ["WANDB_OVERLAY"]).resolve()
+module = Path(wandb.__file__).resolve()
+assert module.is_relative_to(overlay), (module, overlay)
+assert importlib.metadata.version("wandb") == "0.23.1"
+assert os.environ["WANDB_MODE"] == "online"
+assert os.environ["WANDB_RESUME"] == "allow"
+assert os.environ["WANDB_RUN_ID"]
+assert wandb.login(verify=True)
+print("wandb version:", importlib.metadata.version("wandb"))
+print("wandb module:", module)
+print("wandb project:", os.environ["WANDB_PROJECT"])
+print("wandb run id:", os.environ["WANDB_RUN_ID"])
+print("wandb authentication: pass")
+PY
 
 TRAIN_ARGS=(
   python scripts/train_sft.py
@@ -186,6 +239,7 @@ AUDIT_ARGS=(
   --optimizer-dir "$OPTIMIZER_DIR"
   --log "$TRAIN_LOG"
   --expected-step "$TARGET_STEP"
+  --expected-wandb-run-id "$WANDB_RUN_ID"
   --output "$CHUNK_AUDIT"
 )
 if [[ -n "$RESUME_CHECKPOINT" ]]; then
@@ -200,6 +254,7 @@ if [[ "$SAVE_FINAL" == true ]]; then
     --events "$EVENTS" \
     --optimizer-dir "$OPTIMIZER_DIR" \
     --log "$TRAIN_LOG" \
+    --expected-wandb-run-id "$WANDB_RUN_ID" \
     --output "$FINAL_AUDIT"
 fi
 '

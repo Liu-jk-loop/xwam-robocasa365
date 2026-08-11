@@ -479,6 +479,7 @@ def _run_contract(
     )
     git = metadata.get("git") or {}
     sampler = (metadata.get("dataset") or {}).get("sampler_provenance") or {}
+    wandb = (metadata.get("tracking") or {}).get("wandb") or {}
     complete_steps = {
         int(event.get("global_step", -1))
         for event in events
@@ -545,6 +546,7 @@ def _run_contract(
         "optimizer": optimizer,
         "metrics": metrics,
         "checkpoint": checkpoint,
+        "wandb": wandb,
     }
 
 
@@ -618,6 +620,7 @@ def build_m6_formal_chunk_report(
     log_path: str,
     expected_step: int,
     expected_resume_checkpoint: str | None,
+    expected_wandb_run_id: str,
 ) -> dict[str, Any]:
     """Audit one normally completed restartable formal-training chunk."""
     errors: list[str] = []
@@ -648,6 +651,12 @@ def build_m6_formal_chunk_report(
             "positive_chunk_target": expected > 0,
             "within_formal_schedule": expected <= schedule_total,
             "exact_resume_source": actual_resume == expected_resume,
+            "wandb_online": run["wandb"].get("enabled") is True
+            and run["wandb"].get("mode") == "online",
+            "wandb_persistent_run": bool(run["wandb"].get("run_id"))
+            and run["wandb"].get("resume") == "allow",
+            "expected_wandb_run": bool(expected_wandb_run_id)
+            and run["wandb"].get("run_id") == expected_wandb_run_id,
             "all_run_checks": all(run["checks"].values()),
         }
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -676,6 +685,7 @@ def build_m6_formal_report(
     events_path: str,
     optimizer_dir: str,
     log_path: str,
+    expected_wandb_run_id: str | None = None,
 ) -> dict[str, Any]:
     errors: list[str] = []
     try:
@@ -697,6 +707,17 @@ def build_m6_formal_report(
             "positive_formal_step_count": expected_step > 4,
             "all_run_checks": all(run["checks"].values()),
         }
+        if expected_wandb_run_id is not None:
+            checks.update(
+                {
+                    "wandb_online": run["wandb"].get("enabled") is True
+                    and run["wandb"].get("mode") == "online",
+                    "wandb_persistent_run": bool(run["wandb"].get("run_id"))
+                    and run["wandb"].get("resume") == "allow",
+                    "expected_wandb_run": run["wandb"].get("run_id")
+                    == expected_wandb_run_id,
+                }
+            )
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         run = None
         checks = {"artifact_loading": False}

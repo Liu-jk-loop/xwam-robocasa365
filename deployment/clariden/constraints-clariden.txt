@@ -10,6 +10,7 @@ diffusers==0.38.0
 safetensors==0.8.0
 accelerate==1.14.0
 lightning==2.6.5
+wandb==0.23.1
 deepspeed==0.19.4
 nvtx==0.2.15
 pyarrow==16.1.0

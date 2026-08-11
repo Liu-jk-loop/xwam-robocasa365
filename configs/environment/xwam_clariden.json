@@ -23,6 +23,7 @@
     "deepspeed": "0.19.4",
     "nvtx": "0.2.15",
     "lightning": "2.6.5",
+    "wandb": "0.23.1",
     "decord": "0.6.0",
     "pyarrow": "16.1.0"
   },
@@ -58,7 +59,8 @@
     "training": "pass",
     "multigpu_checkpoint_resume": "pass",
     "m6_atomic_seen18_preflight": "pass",
-    "m6_gh200_formal_profile_gate": "cluster-pending"
+    "m6_gh200_formal_profile_gate": "cluster-pending",
+    "wandb_runtime_overlay": "cluster-pending"
   },
   "cluster_evidence": {
     "source_commit": "6594d898a87145101afe5f8a45fa6ba907b2b3c3",
@@ -164,6 +166,9 @@
       "cuda_peak_reserved_gib_per_rank_max": 92.545,
       "audit_ok": true,
       "audit_result": "pass"
-    }
+    },
+    "wandb_runtime_overlay_result": "cluster-pending",
+    "wandb_runtime_overlay_job_id": null,
+    "wandb_formal_run_result": "cluster-pending"
   }
 }

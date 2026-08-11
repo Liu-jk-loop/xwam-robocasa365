@@ -22,6 +22,7 @@ def main() -> int:
     parser.add_argument("--events", required=True)
     parser.add_argument("--optimizer-dir", required=True)
     parser.add_argument("--log", required=True)
+    parser.add_argument("--expected-wandb-run-id")
     parser.add_argument(
         "--output",
         default="logs/cluster/robocasa365_m6_formal_audit.json",
@@ -33,6 +34,7 @@ def main() -> int:
         events_path=args.events,
         optimizer_dir=args.optimizer_dir,
         log_path=args.log,
+        expected_wandb_run_id=args.expected_wandb_run_id,
     )
     output = write_json_atomic(args.output, report)
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))

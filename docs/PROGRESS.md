@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：Clariden 迁移——独立 X-WAM aarch64/GH200 policy 容器部署
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划，Job `3053436`已关闭4×GH200 `mb16/ZeRO-1` 正式profile门禁；下一步为启动可恢复的正式5-epoch训练
+- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划，Job `3053436`已关闭4×GH200 `mb16/ZeRO-1` 正式profile门禁；正式训练已接入持久W&B run，下一步先验证W&B overlay/认证再启动首个chunk
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
-| M6 Atomic 正式训练与评测 | 18任务数据/统计与mb16/ZeRO-1 GH200 profile已冻结 | 正式训练待启动 | 完成16,390-step训练与final audit |
+| M6 Atomic 正式训练与评测 | 18任务数据/统计与mb16/ZeRO-1 GH200 profile已冻结 | W&B overlay与首个正式chunk待运行 | 完成16,390-step训练、连续W&B run与final audit |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
 ## Clariden 部署状态
@@ -54,6 +54,7 @@
 - Job `3053322`在commit `f923c1d27db6ecf9b07e0d4e9258b6c3b50fa7ef`完成M6数据预检：18任务/493,658 frames/419,706 clips，digest与16D/12D global stats一致；GBS128下每epoch 3,278 steps、5 epoch共16,390 steps、每epoch丢弃122 clips，机器报告pass。M6数据门禁关闭。
 - Job `3053436`在干净commit `f4aad5a15f2df428d36639391763debe03280b68`上使用4×GH200 120GB、单卡batch 16、累积2、GBS128和ZeRO-1完成正式profile step 2保存与step 2→4严格恢复。initial/resumed的全部run checks、四rank FP32 optimizer实态、完整model/四rank shard、有限RGB-only loss、manifest/scheduler一致和恢复源均通过；audit为`ok=true/result=pass`。每rank峰值allocated约78.231 GiB，最高reserved 92.545 GiB；默认mb16 profile正式冻结，现已授权启动16,390-step训练。
 - 新增Clariden正式分段作业：固定同一seed42实验目录，每个12小时作业自动选择最新完整checkpoint并把绝对global step推进1,000；不完整checkpoint可恢复地隔离，文件锁防止并发写入。每段独立机器审计，最终step 16,390额外执行formal final audit。本地无Torch/Clariden，该正式作业的首段实跑为`cluster-pending`。
+- 正式分段作业已接入`wandb==0.23.1`：当前SQSH通过独立、固定hash、原子发布的IOPS overlay补充依赖；固定实验目录持久化一个W&B run ID，所有chunk以online/`resume=allow`写入同一run，并由chunk/final audit核验。overlay离线probe、在线凭据验证和首个chunk仍为`cluster-pending`。
 
 ## 已确认资源
 

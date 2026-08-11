@@ -148,6 +148,7 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - Clariden的GBS128候选梯度为默认`4×micro-batch 16×accumulation 2`、balanced `4×8×4`和safe `4×4×8`。三者均使用BF16 model compute、ZeRO-1 GPU AdamW、实际FP32 optimizer state、通信overlap和完整checkpoint，不继承debug的CPU offload或冻结参数排除。默认值来自同为3相机/9视频帧的FastWAM Clariden设置，但X-WAM的更长文本上下文和实现差异仍必须由真实step 2→4门禁验证。
 - 正式profile必须先以完整18任务manifest/global stats和16,390-step scheduler运行到step 2，保存完整model/四rank optimizer shard，再从精确checkpoint恢复到step 4。联合审计要求相同clean commit、accelerator、manifest与scheduler，有限RGB-only loss、四rankFP32 state、完整checkpoint和精确resume来源。
 - Clariden正式5-epoch训练使用固定实验目录和绝对global-step目标，每个12小时Slurm作业正常推进1,000步后保存退出。文件锁禁止两个作业同时写入；下一作业只从同目录中最新的完整model+四rank optimizer checkpoint恢复，未完整目录原子移入按Job分隔的`incomplete-checkpoints/`保留证据。中间作业关闭final checkpoint另存，step 16,390才写入并审计唯一正式final checkpoint。
+- 正式Clariden分段训练的W&B身份属于完整实验而非单个Slurm Job：固定实验目录原子持久化一个run ID，所有chunk以online模式和`resume=allow`写入同一曲线。每个训练调用仍保留独立本地run ID和metadata用于checkpoint/audit provenance；机器审计要求metadata中的W&B ID等于持久化ID。API key只来自运行环境或用户凭据文件，不进入配置、源码和日志。
 
 ### M6 H100 RGB-only 正式训练合同
 

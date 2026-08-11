@@ -744,6 +744,40 @@ Job `3053436`已在commit `f4aad5a15f2df428d36639391763debe03280b68`上关闭默
 
 正式实验固定为Atomic-Seen同名18任务、`pretrain/atomic`、自然比例、RGB-only、seed 42、GBS128、ZeRO-1和5 epochs，总计16,390 optimizer steps。第一段必须从公开X-WAM pretrained权重重新初始化，不能复用step-4门禁checkpoint。
 
+当前SQSH尚未冻结W&B版本。首次正式训练前，只需运行一次固定hash的W&B overlay作业；它在计算节点下载`wandb==0.23.1`，完成offline init/log/finish后才原子发布：
+
+```bash
+cd /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+
+WJOB=$(sbatch --parsable deployment/clariden/prepare_wandb_overlay_xwam.sbatch)
+echo "$WJOB"
+```
+
+作业结束后必须同时看到两个PASS；否则不要提交正式训练，并反馈完整日志：
+
+```bash
+grep -F '[PASS] X-WAM W&B runtime overlay prepared' \
+  "/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/wandb-overlay-${WJOB}.log"
+grep -F '[PASS] X-WAM W&B runtime overlay manifest written' \
+  "/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/wandb-overlay-${WJOB}.log"
+```
+
+如果同一账户此前已为FastWAM执行过`wandb login`且计算容器能读取该`~/.netrc`，无需重复登录。否则在一个交互计算allocation内执行下面的交互式认证；API key只在W&B提示符中输入，不要贴进sbatch、Git或聊天：
+
+```bash
+salloc --account=aa004 --partition=normal --nodes=1 --ntasks=1 \
+  --gpus-per-node=1 --time=00:20:00
+
+srun --environment=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/containers/edf/xwam.toml \
+  env PYTHONPATH=/iopsstor/scratch/cscs/zjingchen/terry_nys/python/xwam-wandb-0.23.1:/iopsstor/scratch/cscs/zjingchen/terry_nys/python/xwam-nvtx-0.2.15 \
+  wandb login --verify
+
+exit
+```
+
+正式作业在加载5B模型前还会自动执行在线凭据验证；没有有效凭据会立即失败，不会消耗时间进入训练。默认project为`xwam-robocasa365`。若需指定W&B team/entity，提交时使用`--export=ALL,WANDB_ENTITY=<team>`；不要通过该参数传API key。
+
 首次启动：
 
 ```bash
@@ -754,6 +788,8 @@ git status --short
 
 sbatch deployment/clariden/train_m6_formal_xwam.sbatch
 ```
+
+首次Job在固定实验目录原子写入`.wandb_run_id`。之后所有12小时chunk都必须保留同一默认实验名，并以online/`resume=allow`写入同一个W&B run；不要手工删除或修改该文件。每段chunk audit会核验metadata里的W&B ID与该持久ID完全一致。
 
 作业固定12小时，每次把绝对global step推进到下一个1,000步边界，正常写入完整checkpoint并退出。总日志出现以下行且chunk audit为`ok=true/result=pass`后，再串行提交同一条命令：
 

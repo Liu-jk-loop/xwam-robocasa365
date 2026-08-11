@@ -76,6 +76,15 @@ def _write_gate_run(
                 "dropped_per_epoch": 122,
             }
         },
+        "tracking": {
+            "wandb": {
+                "enabled": True,
+                "project": "xwam-robocasa365",
+                "run_id": "persistent-run-id",
+                "mode": "online",
+                "resume": "allow",
+            }
+        },
     }
     result = {
         "result": "pass",
@@ -192,10 +201,19 @@ class M6H100TrainingTest(unittest.TestCase):
                 **artifacts,
                 expected_step=1000,
                 expected_resume_checkpoint=None,
+                expected_wandb_run_id="persistent-run-id",
             )
             self.assertTrue(report["ok"], report)
             self.assertTrue(report["checks"]["within_formal_schedule"])
             self.assertTrue(report["checks"]["exact_resume_source"])
+            mismatch = build_m6_formal_chunk_report(
+                **artifacts,
+                expected_step=1000,
+                expected_resume_checkpoint=None,
+                expected_wandb_run_id="different-run-id",
+            )
+            self.assertFalse(mismatch["ok"])
+            self.assertFalse(mismatch["checks"]["expected_wandb_run"])
 
     def test_gh200_formal_gate_requires_exact_full_checkpoint_resume(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -354,6 +372,8 @@ class M6H100TrainingTest(unittest.TestCase):
         self.assertIn("trainer_max_steps: null", formal)
         self.assertIn("save_interval: 1000", formal)
         self.assertIn("save_final_checkpoint: true", formal)
+        self.assertIn("enable_wandb: true", formal)
+        self.assertIn("wandb_mode: online", formal)
 
         contract = validate_m6_formal_training_contract(
             {
@@ -417,6 +437,8 @@ class M6H100TrainingTest(unittest.TestCase):
             "_validate_formal_runtime",
             "OptimizerStateDtypeAudit",
             "final_checkpoint_save_complete",
+            "WandbLogger",
+            'resume="allow"',
         ):
             self.assertIn(token, entrypoint)
 

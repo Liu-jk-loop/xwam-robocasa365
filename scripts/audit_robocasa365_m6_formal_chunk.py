@@ -24,6 +24,7 @@ def main() -> int:
     parser.add_argument("--log", required=True)
     parser.add_argument("--expected-step", type=int, required=True)
     parser.add_argument("--expected-resume-checkpoint")
+    parser.add_argument("--expected-wandb-run-id", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
     report = build_m6_formal_chunk_report(
@@ -34,6 +35,7 @@ def main() -> int:
         log_path=args.log,
         expected_step=args.expected_step,
         expected_resume_checkpoint=args.expected_resume_checkpoint,
+        expected_wandb_run_id=args.expected_wandb_run_id,
     )
     output = write_json_atomic(args.output, report)
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))

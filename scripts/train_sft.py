@@ -22,7 +22,7 @@ from lightning.pytorch.callbacks import (
     ModelSummary,
     LearningRateMonitor,
 )
-from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
 from lightning.pytorch.strategies import DeepSpeedStrategy
 
 from data.dataset_factory import build_dataset
@@ -373,6 +373,51 @@ def main():
 
     tb_path = os.getenv("TENSORBOARD_LOG_PATH", None)
     loggers = [ConsoleLogger(max_steps=schedule["trainer_max_steps"])]
+    wandb_contract = None
+    if bool(config.get("enable_wandb", False)):
+        wandb_run_id = os.environ.get("WANDB_RUN_ID") or config.get("wandb_run_id")
+        if not wandb_run_id:
+            raise ValueError("enable_wandb=true 时必须提供持久化 WANDB_RUN_ID")
+        wandb_mode = str(
+            os.environ.get("WANDB_MODE") or config.get("wandb_mode", "online")
+        ).lower()
+        if wandb_mode not in {"online", "offline"}:
+            raise ValueError(f"wandb_mode 只允许 online/offline，当前为 {wandb_mode}")
+        wandb_project = str(
+            os.environ.get("WANDB_PROJECT")
+            or config.get("wandb_project", "xwam-robocasa365")
+        )
+        wandb_name = str(config.get("wandb_name", config.exp_name))
+        wandb_entity = os.environ.get("WANDB_ENTITY") or config.get("wandb_entity")
+        wandb_group = config.get("wandb_group")
+        wandb_save_dir = os.environ.get("WANDB_DIR") or os.path.join(
+            config.exp_root, config.exp_name, "wandb"
+        )
+        loggers.insert(
+            0,
+            WandbLogger(
+                project=wandb_project,
+                name=wandb_name,
+                version=str(wandb_run_id),
+                save_dir=wandb_save_dir,
+                entity=wandb_entity,
+                group=wandb_group,
+                offline=wandb_mode == "offline",
+                resume="allow",
+                log_model=bool(config.get("wandb_log_model", False)),
+            ),
+        )
+        wandb_contract = {
+            "enabled": True,
+            "project": wandb_project,
+            "entity": wandb_entity,
+            "name": wandb_name,
+            "group": wandb_group,
+            "run_id": str(wandb_run_id),
+            "mode": wandb_mode,
+            "resume": "allow",
+            "save_dir": str(Path(wandb_save_dir).expanduser().resolve()),
+        }
     if bool(config.get("enable_tensorboard", True)):
         loggers.insert(
             0,
@@ -531,6 +576,7 @@ def main():
                     "backend": resolve_optimizer_backend(config),
                     **resolve_cpu_adam_options(config),
                 },
+                "tracking": {"wandb": wandb_contract},
                 "topology": topology,
                 "formal_contract": formal_contract,
                 "formal_runtime": formal_runtime,

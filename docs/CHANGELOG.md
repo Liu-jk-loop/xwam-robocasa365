@@ -29,6 +29,14 @@
 - 新增dependency-light chunk planner和audit：planner严格要求非空model state和rank 0～3 optimizer shard，不完整checkpoint会原子移入按Job分隔的`incomplete-checkpoints/`而不删除；共享文件锁拒绝同实验并发写入。每段audit检查精确resume源、目标global step、完整checkpoint、FP32 optimizer、有限RGB-only metrics、正式manifest/scheduler和clean provenance。中间段关闭final另存，只有step 16,390写入final checkpoint并执行完整formal audit。
 - 回滚本次commit会移除分段正式作业、planner/audit及证据记录，不会删除Job `3053436`的Store日志、Capstor checkpoint或未来正式实验目录。首个正式chunk仍为`cluster-pending`。
 
+### Clariden正式训练接入W&B监控
+
+- 正式GH200实验启用Lightning `WandbLogger`，记录训练loss、学习率和trainer指标；project默认`xwam-robocasa365`，checkpoint不上传为W&B artifact，避免重复传输大型DeepSpeed分片。非正式实验默认行为不变。
+- 所有12小时chunk共享固定实验目录中的`.wandb_run_id`，logger固定`resume=allow`。首个Job在文件锁内原子创建ID，后续Job和checkpoint resume复用同一ID，避免将16,390步曲线拆成多个W&B run；metadata、chunk audit与final audit都核验online模式、resume合同和预期ID。
+- 当前已验收SQSH不重建。新增固定hash的`wandb==0.23.1` IOPS overlay作业，先在临时目录执行真实offline init/log/finish，再原子发布；未来镜像requirements、constraints和image import门禁同时固定同一版本。正式作业在加载5B模型前验证overlay来源、精确版本和在线凭据，失败不会进入训练。
+- API key不写入Git、sbatch参数或日志。正式作业复用W&B支持的`WANDB_API_KEY`、settings或`~/.netrc`凭据来源，并通过`wandb.login(verify=True)`做服务端验证；用户已有FastWAM登录可直接复用，否则需在交互计算节点运行`wandb login --verify`。
+- 本地通过dependency-light测试、Python编译、JSON及shell语法后才发布；aarch64 wheel安装、现有SQSH直接依赖兼容、在线认证和首个W&B正式chunk均为`cluster-pending`。回滚本次commit会关闭正式配置中的W&B并移除overlay/审计接入，不会删除远端W&B run、IOPS overlay、Capstor checkpoint或Store日志；外部产物清理需单独确认。
+
 ## 2026-08-10 — Clariden 4×GH200 step 2→4 checkpoint/resume 门禁
 
 - 在单卡单步门禁关闭后新增独立的 Clariden 四卡调试层与两阶段实验层；不直接套用M6 H100正式配置。门禁固定CloseFridge前8个clip、4×micro-batch 1、GBS 4、BF16 compute、ZeRO-2 FP32 CPUAdam offload和四步scheduler。

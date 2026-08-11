@@ -1,0 +1,2 @@
+wandb==0.23.1 \
+    --hash=sha256:6cc984cf85feb2f8ee0451d76bc9fb7f39da94956bb8183e30d26284cf203b65
