@@ -202,6 +202,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
     def test_cluster_scripts_pass_shell_syntax(self) -> None:
         for script in (
             "error_trap.sh",
+            "archive_debug_logs_xwam.sh",
             "prepare_xwam.sh",
             "build_xwam.sbatch",
             "validate_xwam.sbatch",
@@ -229,6 +230,58 @@ class ClaridenDeploymentTest(unittest.TestCase):
         )
         self.assertIn("unsquashfs -s", build_script)
         self.assertIn("ENROOT_STATUS", build_script)
+
+    def test_debug_log_archiver_preserves_formal_logs(self) -> None:
+        script = (DEPLOY_ROOT / "archive_debug_logs_xwam.sh").read_text(
+            encoding="utf-8"
+        )
+        for debug_prefix in (
+            '"build-*"',
+            '"validate-*"',
+            '"wandb-overlay-*"',
+            '"train4-resume-*"',
+            '"m6-data-*"',
+            '"m6-gate-*"',
+        ):
+            self.assertIn(debug_prefix, script)
+        self.assertNotIn('"m6-formal-*"', script)
+        self.assertNotIn("rm ", script)
+        self.assertIn('DEBUG_LOG_ROOT="$LOG_ROOT/debug"', script)
+        self.assertIn("target already exists", script)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            deploy_store = Path(tmp)
+            log_root = deploy_store / "logs/xwam"
+            log_root.mkdir(parents=True)
+            (log_root / "build-1.log").write_text("build", encoding="utf-8")
+            (log_root / "m6-gate-2-audit.json").write_text(
+                "gate", encoding="utf-8"
+            )
+            (log_root / "m6-formal-3.log").write_text(
+                "formal", encoding="utf-8"
+            )
+            result = subprocess.run(
+                ["bash", str(DEPLOY_ROOT / "archive_debug_logs_xwam.sh")],
+                cwd=REPO_ROOT,
+                env={**os.environ, "XWAM_DEPLOY_STORE": str(deploy_store)},
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((log_root / "debug/build-1.log").is_file())
+            self.assertTrue((log_root / "debug/m6-gate-2-audit.json").is_file())
+            self.assertTrue((log_root / "m6-formal-3.log").is_file())
+            self.assertIn("Archived 2 X-WAM debug log files", result.stdout)
+
+        formal_script = (DEPLOY_ROOT / "train_m6_formal_xwam.sbatch").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "$DEPLOY_STORE/logs/xwam/debug/m6-gate-3053436-audit.json",
+            formal_script,
+        )
 
     def test_clariden_error_trap_records_phase_command_and_exit_code(self) -> None:
         helper = DEPLOY_ROOT / "error_trap.sh"

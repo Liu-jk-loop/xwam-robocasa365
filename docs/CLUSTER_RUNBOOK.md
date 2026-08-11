@@ -744,6 +744,18 @@ Job `3053436`已在commit `f4aad5a15f2df428d36639391763debe03280b68`上关闭默
 
 正式实验固定为Atomic-Seen同名18任务、`pretrain/atomic`、自然比例、RGB-only、seed 42、GBS128、ZeRO-1和5 epochs，总计16,390 optimizer steps。第一段必须从公开X-WAM pretrained权重重新初始化，不能复用step-4门禁checkpoint。
 
+正式训练前先把Store日志根目录中的build、环境、单步、恢复及M6门禁产物统一移动到`logs/xwam/debug/`。脚本只匹配已知debug前缀，不删除文件、不移动任何`m6-formal-*`，目标文件重名时会停止；Job `3053436`的门禁audit归档后，正式脚本默认从debug目录读取：
+
+```bash
+cd /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365
+bash deployment/clariden/archive_debug_logs_xwam.sh
+
+find /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam \
+  -maxdepth 1 -type f -print | sort
+```
+
+执行后根目录只保留未识别文件和后续正式训练的`m6-formal-*`；历史debug证据保留在同一Store文件系统中，可直接恢复，不要手工删除`debug/m6-gate-3053436-audit.json`。
+
 当前SQSH尚未冻结W&B版本。首次正式训练前，只需运行一次固定hash的W&B overlay作业；它在计算节点下载`wandb==0.23.1`、`sentry-sdk==2.58.0`及GitPython完整依赖链，验证全部声明依赖并完成offline init/log/finish后才原子发布。Job `3053810`和`3053849`分别在临时probe发现旧清单漏装Sentry和GitPython，均未发布临时overlay；更新代码后直接重提同一作业即可，无需手工清理：
 
 ```bash

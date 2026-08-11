@@ -55,6 +55,12 @@
 - chunk planner扩展为同时扫描IOPS和Store，选择global step最大的完整model+四rank optimizer checkpoint；同step优先后声明的Store副本。两层不完整checkpoint分别原子移入同文件系统的`incomplete-checkpoints/m6-formal-<JOB_ID>`，不执行可能因`EXDEV`失败的跨盘rename。
 - 本地验证覆盖双root选择、IOPS较新点恢复、同step Store优先、分盘隔离、配置/Slurm/审计wiring；真实Lightning双callback、500/3000重合step、滚动删除与跨Job恢复仍为`cluster-pending`。回滚本次commit恢复单目录1,000步保存，不会删除任何已生成的IOPS或Store checkpoint。
 
+### Clariden正式训练前日志归档
+
+- 正式训练前保留全部历史工程证据，但把build、validation、overlay、单步、四卡恢复、M6数据和profile门禁等已知前缀统一移动到Store的`logs/xwam/debug/`；新增登录节点归档脚本只执行同文件系统`mv`，不删除文件、不匹配`m6-formal-*`，目标重名时拒绝覆盖。
+- 正式训练默认门禁audit路径同步更新为`logs/xwam/debug/m6-gate-3053436-audit.json`，避免归档后outer preflight误报缺文件。正式作业自己的主日志、train log、failure report和audit继续写`logs/xwam/`根目录，便于监控。
+- 本地下载的既有M4/四卡/M6证据已统一放入忽略目录`log/debug/`；这些产物不进入Git。集群归档脚本的真实Store移动由用户执行，状态为`cluster-pending`；回滚代码不会自动移回已归档日志，可用普通`mv`从debug目录恢复。
+
 ## 2026-08-10 — Clariden 4×GH200 step 2→4 checkpoint/resume 门禁
 
 - 在单卡单步门禁关闭后新增独立的 Clariden 四卡调试层与两阶段实验层；不直接套用M6 H100正式配置。门禁固定CloseFridge前8个clip、4×micro-batch 1、GBS 4、BF16 compute、ZeRO-2 FP32 CPUAdam offload和四步scheduler。

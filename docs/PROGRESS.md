@@ -59,6 +59,7 @@
 - W&B overlay Job `3053810`在临时目录offline probe中以`ModuleNotFoundError: sentry_sdk`退出，failure report正确定位`wandb_overlay_staging_probe`；未进入原子发布或正式训练。清单现以官方wheel哈希补入与FastWAM一致的`sentry-sdk==2.58.0`，并在发布前检查W&B全部直接依赖；集群重试为`cluster-pending`。
 - Job `3053849`证明Sentry安装已通过，并由metadata门禁一次定位下一项缺失`GitPython`；仍未发布overlay。现按完整传递链固定无已知PyPI漏洞的`GitPython 3.1.58`、`gitdb 4.0.12`和`smmap 5.0.3`及官方wheel哈希，集群重试为`cluster-pending`。
 - 正式checkpoint改为双层：IOPS `xwam_run/<实验名>`每500步滚动保留5个，Store `checkpoints/xwam/<实验名>`每3,000步永久保留且最终step也落Store。planner/audit已支持跨两层选择、同step Store优先和各盘原子隔离；真实双callback保存、淘汰和恢复为`cluster-pending`。
+- 正式训练前日志合同已拆分：历史build/smoke/overlay/恢复/M6门禁统一归档到Store `logs/xwam/debug/`，未来`m6-formal-*`继续留在根目录。归档不删除文件且保留Job `3053436` audit供正式preflight读取；集群归档执行为`cluster-pending`。
 
 ## 已确认资源
 
