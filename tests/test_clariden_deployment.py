@@ -59,6 +59,11 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertEqual(full_retry["initial_result"], "pass")
         self.assertEqual(full_retry["resumed_result"], "pass")
         self.assertEqual(full_retry["audit_result"], "fail")
+        self.assertTrue(full_retry["checkpoint_optimizer_shards_verified"])
+        self.assertEqual(
+            full_retry["checkpoint_optimizer_shard_prefix"],
+            "bf16_zero_pp_rank_",
+        )
 
     def test_containerfile_pins_arm64_critical_builds(self) -> None:
         containerfile = (DEPLOY_ROOT / "Containerfile").read_text(encoding="utf-8")

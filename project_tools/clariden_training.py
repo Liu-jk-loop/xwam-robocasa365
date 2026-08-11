@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +63,7 @@ def _checkpoint_layout(path: str | Path) -> dict[str, Any]:
             "path": None,
             "model_states": [],
             "optimizer_states": [],
+            "optimizer_ranks": [],
             "checks": {
                 "checkpoint_directory": False,
                 "model_state_present": False,
@@ -70,18 +72,30 @@ def _checkpoint_layout(path: str | Path) -> dict[str, Any]:
         }
     root = Path(path).expanduser().resolve()
     model_states = sorted(root.glob("**/mp_rank_*_model_states.pt"))
-    optimizer_states = sorted(root.glob("**/zero_pp_rank_*_optim_states.pt"))
+    optimizer_state_pattern = re.compile(
+        r"^(?:[^/]+_)?zero_pp_rank_(\d+)_mp_rank_\d+_optim_states\.pt$"
+    )
+    optimizer_states = sorted(
+        item
+        for item in root.glob("**/*zero_pp_rank_*_optim_states.pt")
+        if optimizer_state_pattern.fullmatch(item.name)
+    )
+    optimizer_ranks = sorted(
+        int(optimizer_state_pattern.fullmatch(item.name).group(1))
+        for item in optimizer_states
+    )
     checks = {
         "checkpoint_directory": root.is_dir(),
         "model_state_present": bool(model_states)
         and all(item.stat().st_size > 0 for item in model_states),
-        "four_optimizer_shards": len(optimizer_states) == 4
+        "four_optimizer_shards": optimizer_ranks == [0, 1, 2, 3]
         and all(item.stat().st_size > 0 for item in optimizer_states),
     }
     return {
         "path": str(root),
         "model_states": [str(item) for item in model_states],
         "optimizer_states": [str(item) for item in optimizer_states],
+        "optimizer_ranks": optimizer_ranks,
         "checks": checks,
     }
 

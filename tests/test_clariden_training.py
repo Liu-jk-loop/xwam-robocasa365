@@ -27,6 +27,7 @@ def _write_run(
     metric_steps: list[int],
     resume_checkpoint: str | None,
     commit: str,
+    optimizer_shard_prefix: str = "",
 ) -> dict[str, str]:
     run_root = root / name
     checkpoint = run_root / f"step={global_step}.ckpt"
@@ -34,9 +35,11 @@ def _write_run(
     state_root.mkdir(parents=True)
     (state_root / "mp_rank_00_model_states.pt").write_bytes(b"model")
     for rank in range(4):
-        (state_root / f"zero_pp_rank_{rank}_mp_rank_00_optim_states.pt").write_bytes(
-            b"optimizer"
+        shard_name = (
+            f"{optimizer_shard_prefix}zero_pp_rank_{rank}_"
+            "mp_rank_00_optim_states.pt"
         )
+        (state_root / shard_name).write_bytes(b"optimizer")
 
     metadata = {
         "run_id": name,
@@ -206,6 +209,40 @@ class ClaridenTrainingAuditTest(unittest.TestCase):
             self.assertEqual(
                 report["resumed"]["resume_module_load"]["missing_frozen_count"],
                 438,
+            )
+
+    def test_bf16_prefixed_deepspeed_optimizer_shards_are_detected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            commit = "e" * 40
+            initial = _write_run(
+                root,
+                name="initial",
+                global_step=2,
+                metric_steps=[0, 1],
+                resume_checkpoint=None,
+                commit=commit,
+                optimizer_shard_prefix="bf16_",
+            )
+            resumed = _write_run(
+                root,
+                name="resumed",
+                global_step=4,
+                metric_steps=[2, 3],
+                resume_checkpoint=initial["checkpoint"],
+                commit=commit,
+                optimizer_shard_prefix="bf16_",
+            )
+            initial.pop("checkpoint")
+            resumed.pop("checkpoint")
+            report = build_clariden_4gpu_resume_report(
+                initial=initial,
+                resumed=resumed,
+            )
+            self.assertTrue(report["ok"], report)
+            self.assertEqual(report["initial"]["checkpoint"]["optimizer_ranks"], [0, 1, 2, 3])
+            self.assertTrue(
+                report["resumed"]["checks"]["checkpoint_layout"], report
             )
 
     def test_resume_must_use_the_initial_completed_checkpoint(self) -> None:

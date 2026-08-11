@@ -112,7 +112,10 @@
         "clean_git",
         "checkpoint_layout"
       ],
-      "evidence_note": "The run restored to step 4 on 4x GH200 with finite RGB-only metrics and four passing FP32 optimizer dtype reports, but the repository was dirty due to a local sbatch edit and the audit found no optimizer shard files under either checkpoint"
+      "checkpoint_optimizer_shards_verified": true,
+      "checkpoint_optimizer_shard_prefix": "bf16_zero_pp_rank_",
+      "checkpoint_layout_audit_diagnosis": "The four nonempty optimizer shards exist in both checkpoints; the audit glob did not accept DeepSpeed's bf16_ filename prefix",
+      "evidence_note": "The run restored to step 4 on 4x GH200 with finite RGB-only metrics and four passing FP32 optimizer dtype reports. The repository was dirty due to a local sbatch edit; a server file listing subsequently confirmed four bf16-prefixed optimizer shards in each checkpoint"
     }
   }
 }
