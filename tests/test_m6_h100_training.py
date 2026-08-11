@@ -7,9 +7,12 @@ import unittest
 from pathlib import Path
 
 from project_tools.h100_training import (
+    build_m6_formal_chunk_report,
     build_m6_gate_report,
     build_m6_preflight_report,
+    quarantine_m6_incomplete_checkpoints,
     resolve_epoch_schedule,
+    resolve_m6_formal_chunk,
     validate_m6_formal_training_contract,
 )
 
@@ -126,6 +129,74 @@ def _write_gate_run(
 
 
 class M6H100TrainingTest(unittest.TestCase):
+    def test_formal_chunk_planner_uses_only_the_newest_complete_checkpoint(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "checkpoints"
+            complete = root / "epoch=0-step=1000.ckpt" / "checkpoint"
+            incomplete = root / "epoch=0-step=2000.ckpt" / "checkpoint"
+            complete.mkdir(parents=True)
+            incomplete.mkdir(parents=True)
+            (complete / "mp_rank_00_model_states.pt").write_bytes(b"model")
+            for rank in range(4):
+                (
+                    complete
+                    / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt"
+                ).write_bytes(b"optimizer")
+            (incomplete / "mp_rank_00_model_states.pt").write_bytes(b"model")
+
+            plan = resolve_m6_formal_chunk(
+                root, total_steps=16390, chunk_steps=1000
+            )
+            self.assertEqual(plan["completed_step"], 1000)
+            self.assertEqual(plan["target_step"], 2000)
+            self.assertEqual(
+                plan["resume_checkpoint"], str(complete.parent.resolve())
+            )
+            self.assertFalse(plan["final_chunk"])
+            self.assertEqual(len(plan["incomplete_checkpoints"]), 1)
+            quarantine = Path(tmp) / "quarantine"
+            quarantined = quarantine_m6_incomplete_checkpoints(plan, quarantine)
+            self.assertFalse(incomplete.parent.exists())
+            self.assertTrue(
+                (quarantine / "epoch=0-step=2000.ckpt").is_dir()
+            )
+            self.assertEqual(len(quarantined["quarantined_checkpoints"]), 1)
+
+            final = root / "final-step=16390.ckpt" / "checkpoint"
+            final.mkdir(parents=True)
+            (final / "mp_rank_00_model_states.pt").write_bytes(b"model")
+            for rank in range(4):
+                (
+                    final
+                    / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt"
+                ).write_bytes(b"optimizer")
+            finished = resolve_m6_formal_chunk(
+                root, total_steps=16390, chunk_steps=1000
+            )
+            self.assertTrue(finished["already_complete"])
+            self.assertEqual(finished["target_step"], 16390)
+
+    def test_restartable_formal_chunk_has_the_full_run_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifacts = _write_gate_run(
+                Path(tmp),
+                name="formal-chunk",
+                global_step=1000,
+                resume_checkpoint=None,
+                commit="a" * 40,
+            )
+            artifacts.pop("checkpoint")
+            report = build_m6_formal_chunk_report(
+                **artifacts,
+                expected_step=1000,
+                expected_resume_checkpoint=None,
+            )
+            self.assertTrue(report["ok"], report)
+            self.assertTrue(report["checks"]["within_formal_schedule"])
+            self.assertTrue(report["checks"]["exact_resume_source"])
+
     def test_gh200_formal_gate_requires_exact_full_checkpoint_resume(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -258,6 +329,9 @@ class M6H100TrainingTest(unittest.TestCase):
         gate = (
             root / "configs/experiment/robocasa365_m6_gh200_gate.yaml"
         ).read_text()
+        formal = (
+            root / "configs/experiment/robocasa365_m6_gh200_rgb_formal.yaml"
+        ).read_text()
         for config in (preferred, balanced, fallback):
             self.assertIn("devices: 4", config)
             self.assertIn("global_batch_size: 128", config)
@@ -277,6 +351,9 @@ class M6H100TrainingTest(unittest.TestCase):
         self.assertIn("accumulate_grad_batches: 8", fallback)
         self.assertIn("trainer_max_steps: 2", gate)
         self.assertIn("save_interval: 2", gate)
+        self.assertIn("trainer_max_steps: null", formal)
+        self.assertIn("save_interval: 1000", formal)
+        self.assertIn("save_final_checkpoint: true", formal)
 
         contract = validate_m6_formal_training_contract(
             {

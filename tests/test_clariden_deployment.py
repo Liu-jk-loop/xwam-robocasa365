@@ -331,6 +331,33 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertNotIn("deepspeed_exclude_frozen_parameters=true", script)
         self.assertNotIn("deepspeed_stage=2", script)
 
+    def test_clariden_m6_formal_training_is_restartable_and_machine_audited(
+        self,
+    ) -> None:
+        script = (DEPLOY_ROOT / "train_m6_formal_xwam.sbatch").read_text(
+            encoding="utf-8"
+        )
+        for expected in (
+            "#SBATCH --gpus-per-node=4",
+            "#SBATCH --time=12:00:00",
+            "TOTAL_STEPS=16390",
+            "CHUNK_STEPS=1000",
+            "gh200x4_96gb_gbs128.yaml",
+            "robocasa365_m6_gh200_rgb_formal.yaml",
+            "plan_robocasa365_m6_formal_chunk.py",
+            "--quarantine-incomplete-root",
+            'flock -n 9',
+            "audit_robocasa365_m6_formal_chunk.py",
+            "audit_robocasa365_m6_formal_training.py",
+            'resume_checkpoint=$RESUME_CHECKPOINT',
+            'test -z "$(git status --porcelain)"',
+            "[PASS] X-WAM Clariden M6 formal chunk completed",
+            "[PASS] X-WAM Clariden M6 formal 5-epoch training completed",
+        ):
+            self.assertIn(expected, script)
+        self.assertNotIn("hardware_config=configs/hardware/gh200x4_96gb_gbs128_safe.yaml", script)
+        self.assertNotIn("deepspeed_stage=2", script)
+
 
 if __name__ == "__main__":
     unittest.main()

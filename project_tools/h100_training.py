@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -284,6 +285,103 @@ def _checkpoint_layout(path: str | Path) -> dict[str, Any]:
     }
 
 
+def resolve_m6_formal_chunk(
+    checkpoint_root: str | Path,
+    *,
+    total_steps: int,
+    chunk_steps: int,
+) -> dict[str, Any]:
+    """Select the newest complete checkpoint and the next absolute step target."""
+    root = Path(checkpoint_root).expanduser().resolve()
+    total = int(total_steps)
+    chunk = int(chunk_steps)
+    if total <= 0 or chunk <= 0:
+        raise ValueError("total_steps/chunk_steps 必须为正整数")
+    pattern = re.compile(r"^(?:epoch=\d+-step=|final-step=)(\d+)\.ckpt$")
+    complete: list[tuple[int, int, Path]] = []
+    incomplete: list[dict[str, Any]] = []
+    if root.exists():
+        for candidate in sorted(root.iterdir()):
+            match = pattern.fullmatch(candidate.name)
+            if match is None or not candidate.is_dir():
+                continue
+            step = int(match.group(1))
+            if step > total:
+                raise ValueError(
+                    f"检查点步数超过正式计划：step={step}, total={total}, path={candidate}"
+                )
+            layout = _checkpoint_layout(candidate)
+            if all(layout["checks"].values()):
+                final_priority = 1 if candidate.name.startswith("final-step=") else 0
+                complete.append((step, final_priority, candidate.resolve()))
+            else:
+                incomplete.append(
+                    {
+                        "step": step,
+                        "path": str(candidate.resolve()),
+                        "checks": layout["checks"],
+                    }
+                )
+    if complete:
+        completed_step, _, resume_path = max(
+            complete, key=lambda item: (item[0], item[1], str(item[2]))
+        )
+        resume_checkpoint = str(resume_path)
+    else:
+        completed_step = 0
+        resume_checkpoint = None
+    already_complete = completed_step == total
+    if already_complete:
+        target_step = total
+    else:
+        target_step = min(((completed_step // chunk) + 1) * chunk, total)
+        if target_step <= completed_step:
+            raise ValueError(
+                f"无法推进正式训练：completed={completed_step}, target={target_step}"
+            )
+    return {
+        "checkpoint_root": str(root),
+        "total_steps": total,
+        "chunk_steps": chunk,
+        "completed_step": completed_step,
+        "target_step": target_step,
+        "resume_checkpoint": resume_checkpoint,
+        "final_chunk": not already_complete and target_step == total,
+        "already_complete": already_complete,
+        "complete_checkpoint_count": len(complete),
+        "incomplete_checkpoints": incomplete,
+    }
+
+
+def quarantine_m6_incomplete_checkpoints(
+    plan: dict[str, Any], quarantine_root: str | Path
+) -> dict[str, Any]:
+    """Move incomplete checkpoint directories aside without deleting evidence."""
+    updated = dict(plan)
+    records = list(plan.get("incomplete_checkpoints") or [])
+    quarantined: list[dict[str, Any]] = []
+    if records:
+        root = Path(quarantine_root).expanduser().resolve()
+        root.mkdir(parents=True, exist_ok=False)
+        for record in records:
+            source = Path(str(record["path"])).expanduser().resolve()
+            destination = root / source.name
+            if not source.is_dir():
+                raise ValueError(f"待隔离的不完整checkpoint不存在：{source}")
+            if destination.exists():
+                raise ValueError(f"隔离目标已存在：{destination}")
+            os.replace(source, destination)
+            quarantined.append(
+                {
+                    **record,
+                    "original_path": str(source),
+                    "quarantine_path": str(destination),
+                }
+            )
+    updated["quarantined_checkpoints"] = quarantined
+    return updated
+
+
 def _optimizer_audit(directory: str | Path) -> dict[str, Any]:
     root = Path(directory).expanduser().resolve()
     reports = [
@@ -507,6 +605,66 @@ def build_m6_gate_report(
         "initial": initial_report,
         "resumed": resumed_report,
         "checks": cross_checks,
+        "errors": errors,
+    }
+
+
+def build_m6_formal_chunk_report(
+    *,
+    metadata_path: str,
+    result_path: str,
+    events_path: str,
+    optimizer_dir: str,
+    log_path: str,
+    expected_step: int,
+    expected_resume_checkpoint: str | None,
+) -> dict[str, Any]:
+    """Audit one normally completed restartable formal-training chunk."""
+    errors: list[str] = []
+    try:
+        expected = int(expected_step)
+        expected_resume = (
+            str(Path(expected_resume_checkpoint).expanduser().resolve())
+            if expected_resume_checkpoint
+            else None
+        )
+        run = _run_contract(
+            metadata_path=metadata_path,
+            result_path=result_path,
+            events_path=events_path,
+            optimizer_dir=optimizer_dir,
+            log_path=log_path,
+            expected_step=expected,
+            expect_resume=expected_resume is not None,
+            require_final_checkpoint=False,
+        )
+        actual_resume = (
+            str(Path(run["resume_checkpoint"]).expanduser().resolve())
+            if run["resume_checkpoint"]
+            else None
+        )
+        schedule_total = int(run["schedule"].get("num_training_steps", -1))
+        checks = {
+            "positive_chunk_target": expected > 0,
+            "within_formal_schedule": expected <= schedule_total,
+            "exact_resume_source": actual_resume == expected_resume,
+            "all_run_checks": all(run["checks"].values()),
+        }
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        run = None
+        checks = {"artifact_loading": False}
+        errors.append(f"{type(exc).__name__}: {exc}")
+    failed = [name for name, passed in checks.items() if not passed]
+    if failed:
+        errors.append(f"未通过检查：{failed}")
+    ok = not errors
+    return {
+        "schema_version": 1,
+        "stage": "M6-formal-training-chunk",
+        "result": "pass" if ok else "fail",
+        "ok": ok,
+        "run": run,
+        "checks": checks,
         "errors": errors,
     }
 

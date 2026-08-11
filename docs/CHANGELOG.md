@@ -21,6 +21,14 @@
 - GH200门禁默认候选更新为`16×2`，并提供balanced `8×4`和safe `4×8`两级OOM回退；三档均保持GBS128、BF16、GPU AdamW/FP32 state、无offload和完整checkpoint。联合audit现在还要求初始/恢复两段ZeRO stage一致。
 - 本地只能验证配置、合同、审计和Slurm语法；`mb16/ZeRO-1`的真实峰值显存、optimizer update、checkpoint及resume仍为`cluster-pending`。若回滚本次commit，将恢复GH200的ZeRO-2 `mb4/mb2`候选及H100旧profile，不会删除任何集群产物。
 
+### GH200正式profile门禁通过与5-epoch分段作业
+
+- Job `3053436`在干净commit `f4aad5a15f2df428d36639391763debe03280b68`上完整运行默认GH200 profile：4卡均为NVIDIA GH200 120GB，`batch_size_per_gpu=16`、`accumulate_grad_batches=2`、GBS128、BF16、ZeRO-1、无optimizer offload。峰值allocated约78.231 GiB，最高reserved 92.545 GiB，没有OOM。
+- Initial到step 2并写入model+四rank optimizer shard，resumed从该精确checkpoint恢复到step 4；两段的18任务manifest digest、16,390-step scheduler、clean commit和ZeRO stage一致。四个rank的AdamW/DeepSpeed optimizer实态全为FP32且非空，loss有限、depth loss为0。联合audit所有checks为true，`errors=[]/ok=true/result=pass`，mb16/ZeRO-1正式profile门禁关闭。
+- 新增`train_m6_formal_xwam.sbatch`作为Clariden正式入口：固定Atomic-Seen 18、自然比例、RGB-only、seed42、5 epoch和16,390 steps，不复用门禁checkpoint。由于门禁约为0.033 optimizer step/s，每个12小时作业以1,000步为正常退出边界；重复提交同一脚本自动从最新完整checkpoint推进。
+- 新增dependency-light chunk planner和audit：planner严格要求非空model state和rank 0～3 optimizer shard，不完整checkpoint会原子移入按Job分隔的`incomplete-checkpoints/`而不删除；共享文件锁拒绝同实验并发写入。每段audit检查精确resume源、目标global step、完整checkpoint、FP32 optimizer、有限RGB-only metrics、正式manifest/scheduler和clean provenance。中间段关闭final另存，只有step 16,390写入final checkpoint并执行完整formal audit。
+- 回滚本次commit会移除分段正式作业、planner/audit及证据记录，不会删除Job `3053436`的Store日志、Capstor checkpoint或未来正式实验目录。首个正式chunk仍为`cluster-pending`。
+
 ## 2026-08-10 — Clariden 4×GH200 step 2→4 checkpoint/resume 门禁
 
 - 在单卡单步门禁关闭后新增独立的 Clariden 四卡调试层与两阶段实验层；不直接套用M6 H100正式配置。门禁固定CloseFridge前8个clip、4×micro-batch 1、GBS 4、BF16 compute、ZeRO-2 FP32 CPUAdam offload和四步scheduler。

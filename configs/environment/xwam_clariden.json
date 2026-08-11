@@ -147,6 +147,23 @@
       "num_training_steps": 16390,
       "samples_dropped_per_epoch": 122,
       "result": "pass"
+    },
+    "m6_gh200_formal_profile_gate_pass": {
+      "job_id": 3053436,
+      "source_commit": "f4aad5a15f2df428d36639391763debe03280b68",
+      "gpu_topology": "4x NVIDIA GH200 120GB, compute capability 9.0",
+      "batch_size_per_gpu": 16,
+      "accumulate_grad_batches": 2,
+      "global_batch_size": 128,
+      "deepspeed_stage": 1,
+      "optimizer_state_dtype": "torch.float32",
+      "initial_global_step": 2,
+      "resumed_global_step": 4,
+      "manifest_digest": "2db4380bcae894abb9ec26d4d1aa16876f076163f3e47a830266abccefdd7977",
+      "cuda_peak_allocated_gib_per_rank": 78.231,
+      "cuda_peak_reserved_gib_per_rank_max": 92.545,
+      "audit_ok": true,
+      "audit_result": "pass"
     }
   }
 }

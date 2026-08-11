@@ -738,6 +738,58 @@ sbatch \
 
 不得在任何一档上临时改成ZeRO-2；`formal_zero_stage=1`与`deepspeed_stage=1`不一致会在加载5B模型前被配置合同拒绝。不能复用前一档的半成品checkpoint。只有总日志出现`[PASS] X-WAM Clariden M6 4xGH200 formal-profile step 2 to 4 gate`且audit为`ok=true/result=pass`，才能生成并提交16,390-step正式训练作业；正式作业必须复用最终通过门禁的同一hardware profile。
 
+Job `3053436`已在commit `f4aad5a15f2df428d36639391763debe03280b68`上关闭默认档门禁：`4×16×2=GBS128`、ZeRO-1、四rank FP32 optimizer state、step 2→4严格恢复和完整checkpoint全部通过。每rank峰值allocated约78.231 GiB，最高reserved 92.545 GiB。
+
+## M6 Clariden：正式5-epoch可恢复训练
+
+正式实验固定为Atomic-Seen同名18任务、`pretrain/atomic`、自然比例、RGB-only、seed 42、GBS128、ZeRO-1和5 epochs，总计16,390 optimizer steps。第一段必须从公开X-WAM pretrained权重重新初始化，不能复用step-4门禁checkpoint。
+
+首次启动：
+
+```bash
+cd /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+git rev-parse HEAD
+git status --short
+
+sbatch deployment/clariden/train_m6_formal_xwam.sbatch
+```
+
+作业固定12小时，每次把绝对global step推进到下一个1,000步边界，正常写入完整checkpoint并退出。总日志出现以下行且chunk audit为`ok=true/result=pass`后，再串行提交同一条命令：
+
+```text
+[PASS] X-WAM Clariden M6 formal chunk completed at step <N>
+```
+
+```bash
+sbatch deployment/clariden/train_m6_formal_xwam.sbatch
+```
+
+每次重复提交都使用同一默认实验目录：
+
+```text
+/capstor/scratch/cscs/zjingchen/terry_nys/experiments/xwam/robocasa365_m6_atomic_seen18_rgb_seed42
+```
+
+planner只会选择同目录中包含非空model state和rank 0～3四个optimizer shard的最新checkpoint。如果作业被调度中断，直接重新提交同一脚本；未写完的checkpoint会先原子移到`$EXP_DIR/incomplete-checkpoints/m6-formal-<JOB_ID>/`保留证据，然后从上一个完整点重跑当前chunk。脚本使用共享文件锁直接拒绝第二个并发作业；仍不要同时提交两个写入该实验目录的作业。
+
+每个Job的主日志、训练日志和chunk audit位于：
+
+```text
+/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/m6-formal-<JOB_ID>.log
+/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/m6-formal-<JOB_ID>-train.log
+/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/m6-formal-<JOB_ID>-chunk-audit.json
+```
+
+最终段达到step 16,390时会额外生成`final-step=16390.ckpt`和：
+
+```text
+/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/m6-formal-<JOB_ID>-final-audit.json
+[PASS] X-WAM Clariden M6 formal 5-epoch training completed at step 16390
+```
+
+只有final audit为`ok=true/result=pass`才视为正式训练完成。中间checkpoint保留最新两个并维护`last.ckpt`；不要手工移动、删除或修改运行中的checkpoint目录。
+
 ## M6：4×H100 RGB-only训练（兼容路径）
 
 本阶段只使用 Atomic-Seen 同名18任务的 `pretrain/atomic` 数据，不读取 composite，也不启用depth。模型前向保持BF16 mixed precision；正式profile同样固定ZeRO-1和FP32 optimizer state，并关闭A800调试所用的CPU offload和冻结参数排除。
