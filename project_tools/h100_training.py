@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -139,8 +140,13 @@ def _valid_stats_block(block: Any, dimension: int) -> bool:
     )
 
 
-def validate_h100_training_contract(config: Any, *, world_size: int) -> dict[str, Any]:
+def validate_m6_formal_training_contract(
+    config: Any, *, world_size: int
+) -> dict[str, Any]:
     get = config.get
+    accelerator = str(get("formal_accelerator", "H100")).upper()
+    if accelerator not in {"H100", "GH200"}:
+        raise ValueError(f"M6正式训练不支持accelerator={accelerator!r}")
     per_device_batch = int(get("batch_size_per_gpu"))
     accumulate = int(get("accumulate_grad_batches"))
     configured_global_batch = int(get("global_batch_size"))
@@ -167,14 +173,21 @@ def validate_h100_training_contract(config: Any, *, world_size: int) -> dict[str
     }
     failed = [name for name, passed in checks.items() if not passed]
     if failed:
-        raise ValueError(f"H100正式训练配置合同失败：{failed}")
+        raise ValueError(f"M6正式训练配置合同失败：{failed}")
     return {
         "checks": checks,
+        "accelerator": accelerator,
+        "minimum_memory_gib": float(get("formal_minimum_memory_gib", 75.0)),
         "world_size": int(world_size),
         "batch_size_per_gpu": per_device_batch,
         "accumulate_grad_batches": accumulate,
         "global_batch_size": actual_global_batch,
     }
+
+
+def validate_h100_training_contract(config: Any, *, world_size: int) -> dict[str, Any]:
+    """Backward-compatible alias for existing H100 entry points."""
+    return validate_m6_formal_training_contract(config, world_size=world_size)
 
 
 def build_m6_preflight_report(
@@ -232,6 +245,37 @@ def _load_events(path: str | Path) -> list[dict[str, Any]]:
             raise ValueError(f"JSONL 第 {line_number} 行不是对象：{resolved}")
         events.append(event)
     return events
+
+
+def _checkpoint_layout(path: str | Path) -> dict[str, Any]:
+    root = Path(path).expanduser().resolve()
+    optimizer_pattern = re.compile(
+        r"^(?:[^/]+_)?zero_pp_rank_(\d+)_mp_rank_\d+_optim_states\.pt$"
+    )
+    model_states = sorted(root.glob("**/mp_rank_*_model_states.pt"))
+    optimizer_states = sorted(
+        item
+        for item in root.glob("**/*zero_pp_rank_*_optim_states.pt")
+        if optimizer_pattern.fullmatch(item.name)
+    )
+    optimizer_ranks = sorted(
+        int(optimizer_pattern.fullmatch(item.name).group(1))
+        for item in optimizer_states
+    )
+    checks = {
+        "checkpoint_directory": root.is_dir(),
+        "model_state_present": bool(model_states)
+        and all(item.stat().st_size > 0 for item in model_states),
+        "four_optimizer_shards": optimizer_ranks == [0, 1, 2, 3]
+        and all(item.stat().st_size > 0 for item in optimizer_states),
+    }
+    return {
+        "path": str(root),
+        "model_states": [str(item) for item in model_states],
+        "optimizer_states": [str(item) for item in optimizer_states],
+        "optimizer_ranks": optimizer_ranks,
+        "checks": checks,
+    }
 
 
 def _optimizer_audit(directory: str | Path) -> dict[str, Any]:
@@ -325,8 +369,11 @@ def _run_contract(
     optimizer = _optimizer_audit(optimizer_dir)
     metrics = _metrics_audit(log_path)
     training = metadata.get("training") or {}
-    runtime = metadata.get("h100_runtime") or {}
-    h100_contract = metadata.get("h100_contract") or {}
+    runtime = metadata.get("formal_runtime") or metadata.get("h100_runtime") or {}
+    formal_contract = (
+        metadata.get("formal_contract") or metadata.get("h100_contract") or {}
+    )
+    git = metadata.get("git") or {}
     sampler = (metadata.get("dataset") or {}).get("sampler_provenance") or {}
     complete_steps = {
         int(event.get("global_step", -1))
@@ -334,6 +381,20 @@ def _run_contract(
         if event.get("event")
         in {"checkpoint_save_complete", "final_checkpoint_save_complete"}
     }
+    completed_checkpoint_paths = [
+        str(event.get("filepath"))
+        for event in events
+        if event.get("event")
+        in {"checkpoint_save_complete", "final_checkpoint_save_complete"}
+        and int(event.get("global_step", -1)) == int(expected_step)
+        and event.get("filepath")
+    ]
+    completed_checkpoint = (
+        str(Path(completed_checkpoint_paths[-1]).expanduser().resolve())
+        if completed_checkpoint_paths
+        else ""
+    )
+    checkpoint = _checkpoint_layout(completed_checkpoint) if completed_checkpoint else None
     resume_value = result.get("resume_checkpoint")
     checks = {
         "run_pass": result.get("result") == "pass",
@@ -342,16 +403,19 @@ def _run_contract(
         "trainer_limit_reached": int(result.get("trainer_max_steps", -1))
         == int(expected_step),
         "resume_mode": bool(resume_value) is bool(expect_resume),
-        "h100_contract_pass": bool(h100_contract.get("checks"))
-        and all(h100_contract["checks"].values()),
-        "h100_runtime_pass": bool(runtime.get("checks"))
+        "formal_contract_pass": bool(formal_contract.get("checks"))
+        and all(formal_contract["checks"].values()),
+        "formal_runtime_pass": bool(runtime.get("checks"))
         and all(runtime["checks"].values()),
+        "clean_git": bool(git.get("commit")) and git.get("dirty") is False,
         "five_epoch_schedule": int(training.get("num_train_epochs", -1)) == 5,
         "global_batch_128": int(training.get("global_batch_size", -1)) == 128,
         "epoch_aligned_sampler": sampler.get("type") == "epoch_aligned_distributed"
         and int(sampler.get("dropped_per_epoch", -1))
         == int(training.get("samples_dropped_per_epoch", -2)),
         "checkpoint_complete": int(expected_step) in complete_steps,
+        "checkpoint_layout": bool(checkpoint)
+        and all(checkpoint["checks"].values()),
         "optimizer_state_pass": all(optimizer["checks"].values()),
         "metrics_pass": all(metrics["checks"].values()),
     }
@@ -366,11 +430,16 @@ def _run_contract(
         "result": str(Path(result_path).expanduser().resolve()),
         "events": str(Path(events_path).expanduser().resolve()),
         "run_id": metadata.get("run_id"),
+        "git_commit": git.get("commit"),
+        "accelerator": formal_contract.get("accelerator"),
         "manifest_digest": training.get("manifest_digest"),
+        "resume_checkpoint": resume_value,
+        "completed_checkpoint": completed_checkpoint,
         "schedule": training,
         "checks": checks,
         "optimizer": optimizer,
         "metrics": metrics,
+        "checkpoint": checkpoint,
     }
 
 
@@ -392,10 +461,23 @@ def build_m6_gate_report(
             require_final_checkpoint=False,
         )
         cross_checks = {
+            "different_run_ids": bool(initial_report["run_id"])
+            and initial_report["run_id"] != resumed_report["run_id"],
+            "same_clean_commit": bool(initial_report["git_commit"])
+            and initial_report["git_commit"] == resumed_report["git_commit"],
+            "same_accelerator": bool(initial_report["accelerator"])
+            and initial_report["accelerator"] == resumed_report["accelerator"],
             "same_manifest": bool(initial_report["manifest_digest"])
             and initial_report["manifest_digest"] == resumed_report["manifest_digest"],
             "same_full_schedule": initial_report["schedule"].get("num_training_steps")
             == resumed_report["schedule"].get("num_training_steps"),
+            "resume_uses_initial_checkpoint": bool(
+                resumed_report["resume_checkpoint"]
+            )
+            and str(
+                Path(resumed_report["resume_checkpoint"]).expanduser().resolve()
+            )
+            == initial_report["completed_checkpoint"],
             "all_run_checks": all(initial_report["checks"].values())
             and all(resumed_report["checks"].values()),
         }
@@ -410,7 +492,7 @@ def build_m6_gate_report(
     ok = not errors
     return {
         "schema_version": 1,
-        "stage": "M6-H100-gate",
+        "stage": "M6-formal-accelerator-gate",
         "result": "pass" if ok else "fail",
         "ok": ok,
         "initial": initial_report,
@@ -458,7 +540,7 @@ def build_m6_formal_report(
     ok = not errors
     return {
         "schema_version": 1,
-        "stage": "M6-H100-formal",
+        "stage": "M6-formal-training",
         "result": "pass" if ok else "fail",
         "ok": ok,
         "run": run,

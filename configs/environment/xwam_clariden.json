@@ -57,7 +57,8 @@
     "nvtx_runtime_overlay": "pass",
     "training": "pass",
     "multigpu_checkpoint_resume": "pass",
-    "m6_atomic_seen18_preflight": "cluster-pending"
+    "m6_atomic_seen18_preflight": "pass",
+    "m6_gh200_formal_profile_gate": "cluster-pending"
   },
   "cluster_evidence": {
     "source_commit": "6594d898a87145101afe5f8a45fa6ba907b2b3c3",
@@ -131,6 +132,21 @@
       "clean_git": true,
       "cuda_peak_allocated_gib_per_rank": 30.677,
       "cuda_peak_reserved_gib_per_rank": 33.039
+    },
+    "m6_atomic_seen18_preflight_pass": {
+      "job_id": 3053322,
+      "source_commit": "f923c1d27db6ecf9b07e0d4e9258b6c3b50fa7ef",
+      "scope": "atomic_only",
+      "task_count": 18,
+      "total_frames": 493658,
+      "total_valid_clips": 419706,
+      "manifest_digest": "2db4380bcae894abb9ec26d4d1aa16876f076163f3e47a830266abccefdd7977",
+      "global_batch_size": 128,
+      "steps_per_epoch": 3278,
+      "num_train_epochs": 5,
+      "num_training_steps": 16390,
+      "samples_dropped_per_epoch": 122,
+      "result": "pass"
     }
   }
 }

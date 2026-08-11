@@ -46,7 +46,7 @@ from project_tools.training_run import (
 from project_tools.h100_training import (
     load_epoch_schedule_from_manifest,
     validate_global_stats_contract,
-    validate_h100_training_contract,
+    validate_m6_formal_training_contract,
 )
 from runners.xwam_runner import XWAMRunner
 from utils.console_logger import ConsoleLogger
@@ -163,9 +163,18 @@ class OptimizerStateDtypeAudit(Callback):
         self.written = True
 
 
-def _validate_h100_runtime(config, topology):
-    if not bool(config.get("h100_formal_guard", False)):
+def _formal_guard_enabled(config):
+    return bool(
+        config.get("m6_formal_guard", False)
+        or config.get("h100_formal_guard", False)
+    )
+
+
+def _validate_formal_runtime(config, topology):
+    if not _formal_guard_enabled(config):
         return None
+    expected_accelerator = str(config.get("formal_accelerator", "H100")).upper()
+    minimum_memory_gib = float(config.get("formal_minimum_memory_gib", 75.0))
     names = [
         torch.cuda.get_device_name(index) for index in range(torch.cuda.device_count())
     ]
@@ -177,16 +186,25 @@ def _validate_h100_runtime(config, topology):
         "visible_gpu_count": len(names) == 4,
         "world_size": int(topology["world_size"]) == 4,
         "single_node": int(topology["num_nodes"]) == 1,
-        "h100_names": len(names) == 4 and all("H100" in name.upper() for name in names),
-        "minimum_75_gib": len(memory_gib) == 4
-        and all(value >= 75.0 for value in memory_gib),
+        "accelerator_names": len(names) == 4
+        and all(expected_accelerator in name.upper() for name in names),
+        "minimum_memory": len(memory_gib) == 4
+        and all(value >= minimum_memory_gib for value in memory_gib),
     }
     failed = [name for name, passed in checks.items() if not passed]
     if failed:
         raise RuntimeError(
-            f"H100 runtime门禁失败：{failed}; gpu_names={names}, memory_gib={memory_gib}"
+            "M6 formal runtime门禁失败："
+            f"{failed}; expected={expected_accelerator}, "
+            f"gpu_names={names}, memory_gib={memory_gib}"
         )
-    return {"checks": checks, "gpu_names": names, "memory_gib": memory_gib}
+    return {
+        "checks": checks,
+        "accelerator": expected_accelerator,
+        "minimum_memory_gib": minimum_memory_gib,
+        "gpu_names": names,
+        "memory_gib": memory_gib,
+    }
 
 
 def _load_config():
@@ -257,10 +275,10 @@ def _global_rank_from_environment() -> int:
 def main():
     config = _load_config()
     topology = _resolve_trainer_topology(config)
-    h100_contract = None
+    formal_contract = None
     stats_contract = None
-    if bool(config.get("h100_formal_guard", False)):
-        h100_contract = validate_h100_training_contract(
+    if _formal_guard_enabled(config):
+        formal_contract = validate_m6_formal_training_contract(
             config, world_size=int(topology["world_size"])
         )
         schedule = load_epoch_schedule_from_manifest(
@@ -321,7 +339,7 @@ def main():
             resolve=True,
         )
     L.seed_everything(config.seed, workers=True)
-    h100_runtime = _validate_h100_runtime(config, topology)
+    formal_runtime = _validate_formal_runtime(config, topology)
 
     callbacks = [
         ModelSummary(max_depth=2),
@@ -376,7 +394,7 @@ def main():
     if dataset_provenance is not None:
         print(f"Training dataset provenance: {dataset_provenance}")
     config.action_num = base_train_dataset.action_num
-    if bool(config.get("h100_formal_guard", False)):
+    if _formal_guard_enabled(config):
         expected_samples = int(schedule["total_samples"])
         if len(base_train_dataset) != expected_samples:
             raise ValueError(
@@ -405,7 +423,7 @@ def main():
     train_shuffle = bool(config.get("train_shuffle", True))
     train_sampler = None
     sampler_provenance = None
-    if bool(config.get("h100_formal_guard", False)):
+    if _formal_guard_enabled(config):
         samples_per_rank = (
             int(schedule["steps_per_epoch"])
             * int(config.batch_size_per_gpu)
@@ -514,8 +532,8 @@ def main():
                     **resolve_cpu_adam_options(config),
                 },
                 "topology": topology,
-                "h100_contract": h100_contract,
-                "h100_runtime": h100_runtime,
+                "formal_contract": formal_contract,
+                "formal_runtime": formal_runtime,
                 "global_stats_contract": stats_contract,
                 "optimizer_state_audit_dir": str(optimizer_audit_dir.resolve()),
                 "memory_at_metadata": collect_memory_snapshot(),

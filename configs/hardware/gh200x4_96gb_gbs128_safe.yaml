@@ -1,0 +1,24 @@
+# Clariden M6显存回退：4张GH200、micro-batch 2、累积16，GBS仍为128。
+precision: bf16-mixed
+devices: 4
+batch_size_per_gpu: 2
+accumulate_grad_batches: 16
+global_batch_size: 128
+num_workers_per_gpu: 2
+prefetch_factor: 2
+use_gradient_checkpointing: true
+
+deepspeed_stage: 2
+deepspeed_offload_optimizer: false
+deepspeed_offload_optimizer_device: cpu
+deepspeed_pin_memory: false
+deepspeed_overlap_comm: true
+deepspeed_bucket_size: 500000000
+deepspeed_fp32_optimizer_states: true
+deepspeed_exclude_frozen_parameters: false
+
+m6_formal_guard: true
+formal_accelerator: GH200
+formal_minimum_memory_gib: 90
+audit_optimizer_state_dtype: true
+allow_distributed_generator_state: true

@@ -231,7 +231,7 @@ RoboCasa365 原生数据
 工作内容：
 
 - 固定 Atomic-Seen 对应18个任务的 `pretrain/atomic` 数据清单，以自然样本比例扫描跨任务 normalization statistics。
-- 在4张 H100 80GB上，以 GBS 128、5 epoch、RGB-only训练 X-WAM pretrained 主实验。
+- 在单节点4张正式accelerator上以GBS 128、5 epoch、RGB-only训练X-WAM pretrained主实验；当前Clariden目标为4×GH200，保留既有H100兼容配置。
 - 资源允许时运行 Wan-base 初始化消融。
 - 使用固定 seed 和 checkpoint 选择规则评测全部 Atomic-Seen 任务。
 - 汇总 per-task、per-skill、整体成功率、延迟和失败类型。
@@ -239,7 +239,7 @@ RoboCasa365 原生数据
 阶段执行过程：
 
 1. Codex 提供18任务数据审计与全局统计工具；用户在集群生成不可变 manifest/global stats，工具据有效clip数计算 `5*floor(N/128)` 正式step。
-2. 用户在4张H100上先运行2步、保存并恢复到4步；机器审计确认GBS 128、FP32 optimizer state、多卡RNG、有限loss和完整checkpoint。
+2. 用户在目标正式accelerator上先运行2步、保存并恢复到4步；机器审计确认GPU型号/显存、GBS 128、FP32 optimizer state、多卡RNG、有限loss和完整checkpoint。
 3. 用户启动正式训练；每次反馈 commit、配置、Job ID、checkpoint、训练曲线和异常日志。
 4. Codex 只针对已记录 commit 诊断问题，并将修改推送为新的可追踪 commit。
 5. 用户用固定 seed 对 Atomic-Seen 18 执行闭环评测，补跑缺失或明确记录失败 rollout。
@@ -248,7 +248,7 @@ RoboCasa365 原生数据
 验收条件：
 
 - 训练可断点恢复，所有产物记录 Git commit、完整配置和数据清单。
-- 正式RGB主实验精确使用18任务、自然采样、4张H100、GBS 128与5 epoch；门禁checkpoint不作为正式初始化。
+- 正式RGB主实验精确使用18任务、自然采样、单节点4张同型号正式GPU、GBS 128与5 epoch；当前Clariden运行冻结为GH200，门禁checkpoint不作为正式初始化。
 - 所有预期 rollout 均存在，或有明确失败记录。
 - 报告明确标注 atomic-only，不冒充 Human300/composite-trained 的标准榜单设置。
 

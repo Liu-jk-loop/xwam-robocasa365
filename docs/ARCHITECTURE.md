@@ -142,6 +142,12 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - manifest、global stats和preflight统一写入Store的`manifests/xwam/m6`，临时memmap只写Capstor scratch；三份机器产物必须同时为`ok=true/result=pass`，且生成时Git worktree必须干净。
 - 该门禁不加载模型、不解码视频、不开始训练。它关闭后才能依据真实总clip数和GH200资源冻结正式hardware profile及step 2→4正式配置门禁。
 
+### M6 正式 accelerator 合同
+
+- M6数据/sampler/scheduler/GBS/ZeRO/FP32 optimizer/full-checkpoint合同与GPU型号解耦；配置必须显式声明`formal_accelerator`和最低显存。既有H100配置默认解析为H100，新Clariden配置严格要求4张GH200且每张至少90 GiB。
+- Clariden首选profile为`4×micro-batch 4×accumulation 8=GBS 128`，safe profile为`4×2×16=128`。两者均使用BF16 model compute、ZeRO-2 GPU AdamW、实际FP32 optimizer state、通信overlap和完整checkpoint，不继承debug的CPU offload或冻结参数排除。
+- 正式profile必须先以完整18任务manifest/global stats和16,390-step scheduler运行到step 2，保存完整model/四rank optimizer shard，再从精确checkpoint恢复到step 4。联合审计要求相同clean commit、accelerator、manifest与scheduler，有限RGB-only loss、四rankFP32 state、完整checkpoint和精确resume来源。
+
 ### M6 H100 RGB-only 正式训练合同
 
 - 训练任务固定为版本化 Atomic-Seen 清单中的18个同名任务，但数据来源固定为 `pretrain/atomic`；manifest 必须逐任务解析唯一日期目录、检查真实 Parquet/三路视频，并按 `sum(max(episode_length-32, 0))` 记录有效 clip。任何缺失、重复、多日期歧义或 composite 路径都会阻塞。

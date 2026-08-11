@@ -7,6 +7,13 @@
 - 本地通过dependency-light单元测试、shell语法、Python/JSON和变更记录检查。真实18任务目录解析、全Parquet统计和精确step仍为`cluster-pending`；此作业不代表GH200正式hardware profile已经冻结，也不会启动模型训练。
 - 回滚本次commit会移除Clariden M6数据作业并恢复环境状态记录，不会删除Store现有manifest/stats或Capstor实验数据；外部产物如需清理必须单独确认。
 
+### M6 数据门禁通过与 GH200 正式 profile 门禁
+
+- Job `3053322`在干净commit `f923c1d27db6ecf9b07e0d4e9258b6c3b50fa7ef`上完成Atomic-Seen 18数据冻结：18个唯一`pretrain/atomic`任务、493,658 frames、419,706 valid clips，manifest digest为`2db4380bcae894abb9ec26d4d1aa16876f076163f3e47a830266abccefdd7977`。16D state/12D action统计与该digest一致，preflight为`ok=true/result=pass`。
+- GBS 128、5 epoch精确计划冻结为每epoch 3,278 steps、每epoch使用419,584 clips并丢弃122个尾样本，总计16,390 optimizer steps。自然比例采样保持数据原始任务规模，不把18任务人工均衡。
+- 将原H100专用入口泛化为M6 formal accelerator合同，同时保留H100配置兼容。新增Clariden GH200首选`4×4×8=GBS128`与safe `4×2×16=128`profile，均使用ZeRO-2 GPU AdamW、FP32 optimizer state、完整checkpoint和显式4×GH200/≥90 GiB runtime guard。
+- 新增GH200正式profile两阶段门禁及通用审计CLI：使用完整18任务和16,390-step scheduler先到step 2，再从精确完整checkpoint恢复到step 4；审计增加clean commit、accelerator一致、model/四rank optimizer shard、resume源及manifest合同。真实首选profile显存、GPU optimizer、完整checkpoint和恢复为`cluster-pending`，通过前禁止启动16,390-step正式训练。
+
 ## 2026-08-10 — Clariden 4×GH200 step 2→4 checkpoint/resume 门禁
 
 - 在单卡单步门禁关闭后新增独立的 Clariden 四卡调试层与两阶段实验层；不直接套用M6 H100正式配置。门禁固定CloseFridge前8个clip、4×micro-batch 1、GBS 4、BF16 compute、ZeRO-2 FP32 CPUAdam offload和四步scheduler。

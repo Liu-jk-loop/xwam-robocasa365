@@ -40,6 +40,10 @@ class ClaridenDeploymentTest(unittest.TestCase):
         )
         self.assertEqual(
             contract["validation"]["m6_atomic_seen18_preflight"],
+            "pass",
+        )
+        self.assertEqual(
+            contract["validation"]["m6_gh200_formal_profile_gate"],
             "cluster-pending",
         )
         self.assertEqual(contract["cluster_evidence"]["training_smoke_result"], "pass")
@@ -77,6 +81,13 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "a2787ded5106f5178c21010d8378a0d2070e7f88",
         )
         self.assertTrue(multigpu_pass["audit_ok"])
+        m6_preflight = contract["cluster_evidence"][
+            "m6_atomic_seen18_preflight_pass"
+        ]
+        self.assertEqual(m6_preflight["job_id"], 3053322)
+        self.assertEqual(m6_preflight["task_count"], 18)
+        self.assertEqual(m6_preflight["total_valid_clips"], 419706)
+        self.assertEqual(m6_preflight["num_training_steps"], 16390)
 
     def test_containerfile_pins_arm64_critical_builds(self) -> None:
         containerfile = (DEPLOY_ROOT / "Containerfile").read_text(encoding="utf-8")
@@ -159,6 +170,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "prepare_runtime_overlay_xwam.sbatch",
             "smoke_train_resume_xwam.sbatch",
             "prepare_m6_data_xwam.sbatch",
+            "smoke_m6_gate_xwam.sbatch",
         ):
             result = subprocess.run(
                 ["bash", "-n", str(DEPLOY_ROOT / script)],
@@ -295,6 +307,27 @@ class ClaridenDeploymentTest(unittest.TestCase):
         ):
             self.assertIn(expected, script)
         self.assertNotIn("/composite", script)
+
+    def test_clariden_m6_formal_profile_gate_is_four_gpu_and_audited(self) -> None:
+        script = (DEPLOY_ROOT / "smoke_m6_gate_xwam.sbatch").read_text(
+            encoding="utf-8"
+        )
+        for expected in (
+            "#SBATCH --gpus-per-node=4",
+            "gh200x4_96gb_gbs128.yaml",
+            "gh200x4_96gb_gbs128_safe.yaml",
+            "XWAM_M6_HARDWARE_CONFIG",
+            "robocasa365_m6_gh200_gate.yaml",
+            "robocasa365_m6_atomic_seen18_manifest.json",
+            "robocasa365_m6_atomic_seen18_global_stats.json",
+            "trainer_max_steps=4",
+            "resume_checkpoint='$CHECKPOINT'",
+            "audit_robocasa365_m6_gate.py",
+            'test -z "$(git status --porcelain)"',
+            "[PASS] X-WAM Clariden M6 4xGH200 formal-profile step 2 to 4 gate",
+        ):
+            self.assertIn(expected, script)
+        self.assertNotIn("deepspeed_exclude_frozen_parameters=true", script)
 
 
 if __name__ == "__main__":

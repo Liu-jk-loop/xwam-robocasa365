@@ -707,7 +707,30 @@ ffprobe -v error \
 
 反馈`git rev-parse HEAD`、`audit.json`、`server_report.json`、`server_requests.jsonl`、两段client日志、summary/episode/progress、视频ffprobe和三个进程退出码。原始产物继续保留在Git之外。
 
-## M6：4×H100 RGB-only训练
+## M6 Clariden：4×GH200 正式 profile 门禁
+
+数据预检通过后，先在干净worktree运行完整18任务、GBS128、16,390-step scheduler的短门禁；不得直接开始正式5 epoch：
+
+```bash
+cd /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+git rev-parse HEAD
+git status --short
+
+sbatch deployment/clariden/smoke_m6_gate_xwam.sbatch
+```
+
+首选profile为`4×micro-batch 4×accumulation 8=GBS128`。如果日志明确是CUDA OOM，使用新Job从公开pretrained权重重新开始safe profile；不能复用首选profile的半成品checkpoint：
+
+```bash
+sbatch \
+  --export=ALL,XWAM_M6_HARDWARE_CONFIG=configs/hardware/gh200x4_96gb_gbs128_safe.yaml \
+  deployment/clariden/smoke_m6_gate_xwam.sbatch
+```
+
+只有总日志出现`[PASS] X-WAM Clariden M6 4xGH200 formal-profile step 2 to 4 gate`且audit为`ok=true/result=pass`，才能生成并提交16,390-step正式训练作业。
+
+## M6：4×H100 RGB-only训练（兼容路径）
 
 本阶段只使用 Atomic-Seen 同名18任务的 `pretrain/atomic` 数据，不读取 composite，也不启用depth。模型前向保持BF16 mixed precision；正式optimizer state恢复FP32，并关闭A800调试所用的CPU offload和冻结参数排除。
 

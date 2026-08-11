@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：Clariden 迁移——独立 X-WAM aarch64/GH200 policy 容器部署
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3门禁均已在原 A800 环境通过；Clariden镜像、真实batch、单步训练及Job `3053264`的4×GH200 step 2→4严格恢复联合审计均已通过；下一门禁为生成Atomic-Seen 18 manifest、global stats和5-epoch精确step
+- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划；下一门禁为4×GH200正式profile的step 2→4完整checkpoint恢复
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
-| M6 Atomic 正式训练与评测 | 18任务RGB训练实现完成 | cluster-pending | 生成全局统计，完成4×H100 step 2→4保存恢复门禁 |
+| M6 Atomic 正式训练与评测 | 18任务数据/统计已冻结，GH200 profile已实现 | cluster-pending | 完成4×GH200正式profile step 2→4门禁 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
 ## Clariden 部署状态
@@ -51,6 +51,8 @@
 - 后续服务器文件清单确认两个checkpoint均有rank 0～3四个`bf16_zero_pp_rank_*_optim_states.pt`及model state；checkpoint数据完整，原audit只是未匹配dtype前缀。审计器已修复并新增真实命名回归测试；剩余阻塞仅为在新commit、干净worktree上重跑四卡门禁取得`ok=true/result=pass`，随后再进入Clariden正式profile和18任务统计门禁。
 - Job `3053264`在干净commit `a2787ded5106f5178c21010d8378a0d2070e7f88`完成4×GH200全新step 2保存及严格恢复到step 4，联合audit为`ok=true/result=pass`并输出最终PASS；四rank FP32 optimizer state、完整model/optimizer shard、有限loss和恢复源均通过。Clariden多卡checkpoint/resume工程门禁正式关闭。
 - 新增Clariden M6数据预检作业：只扫描`pretrain/atomic`的Atomic-Seen 18任务，在Store生成manifest/global stats/preflight并由真实clip数计算GBS 128、5 epoch step。该作业集群运行仍为`cluster-pending`；通过后才冻结GH200正式hardware profile。
+- Job `3053322`在commit `f923c1d27db6ecf9b07e0d4e9258b6c3b50fa7ef`完成M6数据预检：18任务/493,658 frames/419,706 clips，digest与16D/12D global stats一致；GBS128下每epoch 3,278 steps、5 epoch共16,390 steps、每epoch丢弃122 clips，机器报告pass。M6数据门禁关闭。
+- 已新增GH200正式首选/safe profile、通用formal accelerator guard和完整18任务step 2→4门禁。首选profile为4×micro-batch4×累积8，GPU AdamW/FP32 state/完整checkpoint；真实显存和恢复审计为`cluster-pending`，因此尚未授权16,390-step正式训练。
 
 ## 已确认资源
 
