@@ -763,6 +763,13 @@ grep -F '[PASS] X-WAM W&B runtime overlay manifest written' \
   "/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/wandb-overlay-${WJOB}.log"
 ```
 
+若overlay作业失败，直接读取阶段化错误报告和日志末尾；报告会区分下载、临时目录probe、原子发布和最终probe：
+
+```bash
+cat "/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/wandb-overlay-${WJOB}-failure.txt"
+tail -n 100 "/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/wandb-overlay-${WJOB}.log"
+```
+
 正式训练不使用机器上已有的W&B默认账号或`~/.netrc`身份。每次提交chunk前，都在当前登录shell中隐藏读取目标账号的API key，再由Slurm默认的环境继承传给作业：
 
 ```bash
@@ -788,6 +795,21 @@ FJOB=$(sbatch --parsable --export=ALL \
 echo "$FJOB"
 unset WANDB_API_KEY
 ```
+
+主日志会在开始时打印该Job的failure report路径。任一preflight、planner、W&B认证、训练、产物验证或audit命令非零退出时，日志末尾必须出现三行`[FAIL]`，并把根因阶段写入：
+
+```text
+/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/m6-formal-<JOB_ID>-failure.txt
+```
+
+直接检查：
+
+```bash
+cat "/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/m6-formal-${FJOB}-failure.txt"
+tail -n 100 "/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/m6-formal-${FJOB}.log"
+```
+
+failure report包含`phase`、`exit_code`、`line`、失败命令以及主/训练日志路径。EDF内先记录的具体阶段不会被外层笼统的`srun`失败覆盖；API key在写报告和终端输出前都会被替换为`<redacted>`。旧commit产生的失败Job没有该文件，只能提供Job ID和原主日志分析。
 
 首次Job在固定实验目录原子写入`.wandb_run_id`。之后所有12小时chunk都必须保留同一默认实验名，并以online/`resume=allow`写入同一个W&B run；不要手工删除或修改该文件。每段chunk audit会核验metadata里的W&B ID与该持久ID完全一致。
 

@@ -44,14 +44,23 @@ RUN_ID="m6-formal-${SLURM_JOB_ID}"
 TRAIN_LOG="$DEPLOY_STORE/logs/xwam/m6-formal-${SLURM_JOB_ID}-train.log"
 CHUNK_AUDIT="$DEPLOY_STORE/logs/xwam/m6-formal-${SLURM_JOB_ID}-chunk-audit.json"
 FINAL_AUDIT="$DEPLOY_STORE/logs/xwam/m6-formal-${SLURM_JOB_ID}-final-audit.json"
+MAIN_LOG="$DEPLOY_STORE/logs/xwam/m6-formal-${SLURM_JOB_ID}.log"
+FAILURE_REPORT="$DEPLOY_STORE/logs/xwam/m6-formal-${SLURM_JOB_ID}-failure.txt"
+
+export XWAM_FAILURE_REPORT="$FAILURE_REPORT"
+export XWAM_MAIN_LOG="$MAIN_LOG"
+export XWAM_TRAIN_LOG="$TRAIN_LOG"
+export XWAM_PHASE=outer_preflight
+# shellcheck source=deployment/clariden/error_trap.sh
+source "$REPO/deployment/clariden/error_trap.sh"
+xwam_install_err_trap
 
 cd "$REPO"
 test -s "$EDF"
 test -d "$RUNTIME_OVERLAY"
 test -d "$WANDB_OVERLAY"
 if [[ -z "${WANDB_API_KEY:-}" ]]; then
-  echo "[FAIL] WANDB_API_KEY must be exported before sbatch submission" >&2
-  exit 2
+  xwam_fail "WANDB_API_KEY must be exported before sbatch submission"
 fi
 test -s "$WAN_DIR/config.json"
 test -s "$WAN_DIR/models_t5_umt5-xxl-enc-bf16.pth"
@@ -65,15 +74,13 @@ done
 grep -q '"same_zero_stage": true' "$GATE_AUDIT"
 grep -q '"zero_stage": 1' "$GATE_AUDIT"
 test -z "$(git status --porcelain)" || {
-  echo "[FAIL] Git worktree must be clean before M6 formal training" >&2
   git status --short >&2
-  exit 2
+  xwam_fail "Git worktree must be clean before M6 formal training"
 }
 mkdir -p "$EXP_ROOT" "$RUN_DIR" "$WANDB_ROOT" "$WANDB_CACHE_DIR"
 exec 9>"$EXP_DIR/.formal-training.lock"
 flock -n 9 || {
-  echo "[FAIL] Another formal job is already writing $EXP_DIR" >&2
-  exit 2
+  xwam_fail "Another formal job is already writing $EXP_DIR"
 }
 
 if [[ ! -s "$WANDB_RUN_ID_FILE" ]]; then
@@ -85,12 +92,14 @@ if [[ ! -s "$WANDB_RUN_ID_FILE" ]]; then
 fi
 read -r WANDB_RUN_ID < "$WANDB_RUN_ID_FILE"
 [[ "$WANDB_RUN_ID" =~ ^[A-Za-z0-9_-]+$ ]] || {
-  echo "[FAIL] Invalid persistent W&B run ID: $WANDB_RUN_ID" >&2
-  exit 2
+  xwam_fail "Invalid persistent W&B run ID: $WANDB_RUN_ID"
 }
 echo "wandb_project=$WANDB_PROJECT"
+echo "wandb_entity=$WANDB_ENTITY"
 echo "wandb_run_id=$WANDB_RUN_ID"
+echo "failure_report=$FAILURE_REPORT"
 
+XWAM_PHASE=planner_srun
 srun --kill-on-bad-exit=1 --environment="$EDF" \
   env \
     REPO="$REPO" \
@@ -102,8 +111,14 @@ srun --kill-on-bad-exit=1 --environment="$EDF" \
     QUARANTINE_ROOT="$QUARANTINE_ROOT" \
     TOTAL_STEPS="$TOTAL_STEPS" \
     CHUNK_STEPS="$CHUNK_STEPS" \
+    XWAM_FAILURE_REPORT="$FAILURE_REPORT" \
+    XWAM_MAIN_LOG="$MAIN_LOG" \
+    XWAM_TRAIN_LOG="$TRAIN_LOG" \
   bash -lc '
 set -Eeuo pipefail
+export XWAM_PHASE=chunk_planner
+source "$REPO/deployment/clariden/error_trap.sh"
+xwam_install_err_trap
 cd "$REPO"
 export PYTHONPATH="$RUNTIME_OVERLAY${PYTHONPATH:+:$PYTHONPATH}"
 python scripts/plan_robocasa365_m6_formal_chunk.py \
@@ -115,6 +130,7 @@ python scripts/plan_robocasa365_m6_formal_chunk.py \
   --quarantine-incomplete-root "$QUARANTINE_ROOT"
 '
 
+XWAM_PHASE=plan_validation
 test -s "$PLAN_JSON"
 test -s "$PLAN_ENV"
 # shellcheck disable=SC1090
@@ -141,6 +157,7 @@ RESULT="$RUN_DIR/${RUN_ID}_result.json"
 EVENTS="$RUN_DIR/${RUN_ID}_checkpoint_events.jsonl"
 OPTIMIZER_DIR="$RUN_DIR/${RUN_ID}_optimizer_state"
 
+XWAM_PHASE=training_srun
 srun --kill-on-bad-exit=1 --environment="$EDF" \
   env \
     REPO="$REPO" \
@@ -170,8 +187,14 @@ srun --kill-on-bad-exit=1 --environment="$EDF" \
     WANDB_CACHE_DIR="$WANDB_CACHE_DIR" \
     WANDB_MODE=online \
     WANDB_RESUME=allow \
+    XWAM_FAILURE_REPORT="$FAILURE_REPORT" \
+    XWAM_MAIN_LOG="$MAIN_LOG" \
+    XWAM_TRAIN_LOG="$TRAIN_LOG" \
   bash -lc '
 set -Eeuo pipefail
+export XWAM_PHASE=training_shell_setup
+source "$REPO/deployment/clariden/error_trap.sh"
+xwam_install_err_trap
 cd "$REPO"
 export OMP_NUM_THREADS=16
 export MKL_NUM_THREADS=16
@@ -184,6 +207,7 @@ unset SLURM_NTASKS SLURM_NTASKS_PER_NODE SLURM_PROCID SLURM_LOCALID SLURM_NODEID
 export XWAM_RUN_ID="$RUN_ID"
 export PYTHONPATH="$WANDB_OVERLAY:$RUNTIME_OVERLAY${PYTHONPATH:+:$PYTHONPATH}"
 
+XWAM_PHASE=wandb_preflight
 python - <<"PY"
 import importlib.metadata
 import os
@@ -226,12 +250,14 @@ if [[ -n "$RESUME_CHECKPOINT" ]]; then
   TRAIN_ARGS+=("resume_checkpoint=$RESUME_CHECKPOINT")
 fi
 
+XWAM_PHASE=training
 git rev-parse HEAD
 test -z "$(git status --porcelain)"
 nvidia-smi
 free -h
 "${TRAIN_ARGS[@]}" 2>&1 | tee "$TRAIN_LOG"
 
+XWAM_PHASE=training_artifact_validation
 test -s "$METADATA"
 test -s "$RESULT"
 test -s "$EVENTS"
@@ -251,9 +277,11 @@ AUDIT_ARGS=(
 if [[ -n "$RESUME_CHECKPOINT" ]]; then
   AUDIT_ARGS+=(--expected-resume-checkpoint "$RESUME_CHECKPOINT")
 fi
+XWAM_PHASE=chunk_audit
 "${AUDIT_ARGS[@]}"
 
 if [[ "$SAVE_FINAL" == true ]]; then
+  XWAM_PHASE=final_audit
   python scripts/audit_robocasa365_m6_formal_training.py \
     --metadata "$METADATA" \
     --result "$RESULT" \
@@ -265,6 +293,7 @@ if [[ "$SAVE_FINAL" == true ]]; then
 fi
 '
 
+XWAM_PHASE=completion_reporting
 echo "plan=$PLAN_JSON"
 echo "train_log=$TRAIN_LOG"
 echo "chunk_audit=$CHUNK_AUDIT"

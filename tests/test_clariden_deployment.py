@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -170,6 +172,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
 
     def test_cluster_scripts_pass_shell_syntax(self) -> None:
         for script in (
+            "error_trap.sh",
             "prepare_xwam.sh",
             "build_xwam.sbatch",
             "validate_xwam.sbatch",
@@ -197,6 +200,41 @@ class ClaridenDeploymentTest(unittest.TestCase):
         )
         self.assertIn("unsquashfs -s", build_script)
         self.assertIn("ENROOT_STATUS", build_script)
+
+    def test_clariden_error_trap_records_phase_command_and_exit_code(self) -> None:
+        helper = DEPLOY_ROOT / "error_trap.sh"
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "failure.txt"
+            env = {
+                **os.environ,
+                "XWAM_FAILURE_REPORT": str(report),
+                "XWAM_PHASE": "unit_test_phase",
+                "XWAM_MAIN_LOG": "/tmp/main.log",
+                "XWAM_TRAIN_LOG": "/tmp/train.log",
+                "WANDB_API_KEY": "must-not-appear",
+            }
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    'set -Eeuo pipefail; source "$1"; '
+                    "xwam_install_err_trap; false",
+                    "bash",
+                    str(helper),
+                ],
+                env=env,
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 1)
+            payload = report.read_text(encoding="utf-8")
+            self.assertIn("phase=unit_test_phase", payload)
+            self.assertIn("exit_code=1", payload)
+            self.assertIn("command=false", payload)
+            self.assertIn("failure_report=", result.stderr)
+            self.assertNotIn("must-not-appear", payload + result.stderr)
 
     def test_clariden_train_smoke_is_one_gpu_one_step_without_checkpoint(self) -> None:
         hardware = (
@@ -273,6 +311,13 @@ class ClaridenDeploymentTest(unittest.TestCase):
             'mode="offline"',
             'run.log({"probe": 1.0}, step=0)',
             "xwam_wandb_overlay.txt",
+            "error_trap.sh",
+            "xwam_install_err_trap",
+            "wandb_overlay_existing_probe",
+            "wandb_overlay_install",
+            "wandb_overlay_staging_probe",
+            "wandb_overlay_final_probe",
+            'FAILURE_REPORT="$DEPLOY_STORE/logs/xwam/wandb-overlay-${SLURM_JOB_ID}-failure.txt"',
         ):
             self.assertIn(expected, script)
 
@@ -383,6 +428,12 @@ class ClaridenDeploymentTest(unittest.TestCase):
             'flock -n 9',
             "audit_robocasa365_m6_formal_chunk.py",
             "audit_robocasa365_m6_formal_training.py",
+            "error_trap.sh",
+            "xwam_install_err_trap",
+            'XWAM_PHASE=wandb_preflight',
+            'XWAM_PHASE=training',
+            'XWAM_PHASE=chunk_audit',
+            'FAILURE_REPORT="$DEPLOY_STORE/logs/xwam/m6-formal-${SLURM_JOB_ID}-failure.txt"',
             'WANDB_OVERLAY="$DEPLOY_IOPS/python/xwam-wandb-0.23.1"',
             'WANDB_RUN_ID_FILE="$EXP_DIR/.wandb_run_id"',
             "WANDB_MODE=online",

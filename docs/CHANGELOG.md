@@ -35,6 +35,7 @@
 - 所有12小时chunk共享固定实验目录中的`.wandb_run_id`，logger固定`resume=allow`。首个Job在文件锁内原子创建ID，后续Job和checkpoint resume复用同一ID，避免将16,390步曲线拆成多个W&B run；metadata、chunk audit与final audit都核验online模式、resume合同和预期ID。
 - 当前已验收SQSH不重建。新增固定hash的`wandb==0.23.1` IOPS overlay作业，先在临时目录执行真实offline init/log/finish，再原子发布；未来镜像requirements、constraints和image import门禁同时固定同一版本。正式作业在加载5B模型前验证overlay来源、精确版本和在线凭据，失败不会进入训练。
 - 按用户要求，正式作业不再接受settings或`~/.netrc`默认账号回退：配置固定`wandb_require_api_key=true`，sbatch和训练入口都要求当前提交环境存在`WANDB_API_KEY`，容器内移除identity-token覆盖并通过`wandb.login(verify=True)`验证该环境凭据。metadata/audit只记录`auth=api_key_env`，绝不记录key；运行手册使用隐藏`read`、Slurm环境继承和提交后立即`unset`，避免密钥进入shell history、进程参数、Git或日志。
+- 修复W&B overlay及正式sbatch只有`set -Eeuo pipefail`却没有统一错误上下文的问题。新增可复用的Clariden `ERR` trap，覆盖overlay下载/临时probe/发布、外层preflight/planner/training srun和EDF内planner、W&B preflight、训练、产物检查、chunk/final audit阶段；失败时主日志明确输出phase、exit code、line、command和报告路径，并分别原子写入`wandb-overlay-<JOB_ID>-failure.txt`或`m6-formal-<JOB_ID>-failure.txt`。内层根因报告先写后，外层`srun`失败不覆盖它；命令在日志和报告前都会移除API key并截断，测试同时验证非零退出、阶段定位和密钥不泄漏。
 - 本地通过dependency-light测试、Python编译、JSON及shell语法后才发布；aarch64 wheel安装、现有SQSH直接依赖兼容、在线认证和首个W&B正式chunk均为`cluster-pending`。回滚本次commit会关闭正式配置中的W&B并移除overlay/审计接入，不会删除远端W&B run、IOPS overlay、Capstor checkpoint或Store日志；外部产物清理需单独确认。
 
 ## 2026-08-10 — Clariden 4×GH200 step 2→4 checkpoint/resume 门禁

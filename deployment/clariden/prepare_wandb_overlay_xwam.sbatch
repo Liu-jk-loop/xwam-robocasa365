@@ -18,15 +18,35 @@ EDF="$DEPLOY_STORE/containers/edf/xwam.toml"
 REQUIREMENTS="$XWAM_REPO/deployment/clariden/wandb-overlay-clariden.txt"
 OVERLAY="$DEPLOY_IOPS/python/xwam-wandb-0.23.1"
 MANIFEST="$DEPLOY_STORE/manifests/xwam_wandb_overlay.txt"
+MAIN_LOG="$DEPLOY_STORE/logs/xwam/wandb-overlay-${SLURM_JOB_ID}.log"
+FAILURE_REPORT="$DEPLOY_STORE/logs/xwam/wandb-overlay-${SLURM_JOB_ID}-failure.txt"
+
+export XWAM_FAILURE_REPORT="$FAILURE_REPORT"
+export XWAM_MAIN_LOG="$MAIN_LOG"
+export XWAM_TRAIN_LOG=not-applicable
+export XWAM_PHASE=wandb_overlay_outer_preflight
+source "$XWAM_REPO/deployment/clariden/error_trap.sh"
+xwam_install_err_trap
 
 test -s "$EDF"
 test -s "$REQUIREMENTS"
 mkdir -p "$(dirname "$OVERLAY")" "$(dirname "$MANIFEST")"
+echo "failure_report=$FAILURE_REPORT"
 
+XWAM_PHASE=wandb_overlay_srun
 srun --kill-on-bad-exit=1 --environment="$EDF" \
-  env OVERLAY="$OVERLAY" REQUIREMENTS="$REQUIREMENTS" \
+  env \
+    OVERLAY="$OVERLAY" \
+    REQUIREMENTS="$REQUIREMENTS" \
+    XWAM_REPO="$XWAM_REPO" \
+    XWAM_FAILURE_REPORT="$FAILURE_REPORT" \
+    XWAM_MAIN_LOG="$MAIN_LOG" \
+    XWAM_TRAIN_LOG=not-applicable \
   bash -lc '
 set -Eeuo pipefail
+export XWAM_PHASE=wandb_overlay_shell_setup
+source "$XWAM_REPO/deployment/clariden/error_trap.sh"
+xwam_install_err_trap
 
 verify_overlay() {
   PROBE_DIR="$(mktemp -d)"
@@ -65,12 +85,14 @@ PY
 }
 
 if [[ -d "$OVERLAY" ]]; then
+  XWAM_PHASE=wandb_overlay_existing_probe
   verify_overlay
   echo "[PASS] Existing X-WAM W&B overlay is valid"
   echo "[PASS] X-WAM W&B runtime overlay prepared"
   exit 0
 fi
 
+XWAM_PHASE=wandb_overlay_install
 STAGING="$(mktemp -d "$(dirname "$OVERLAY")/.xwam-wandb-0.23.1.XXXXXX")"
 trap '"'"'rm -rf "$STAGING"'"'"' EXIT
 python -m pip install \
@@ -79,17 +101,20 @@ python -m pip install \
   --target "$STAGING" \
   --requirement "$REQUIREMENTS"
 
+XWAM_PHASE=wandb_overlay_staging_probe
 OVERLAY="$STAGING" verify_overlay
 if [[ -e "$OVERLAY" ]]; then
-  echo "W&B overlay appeared during installation: $OVERLAY" >&2
-  exit 2
+  xwam_fail "W&B overlay appeared during installation: $OVERLAY"
 fi
+XWAM_PHASE=wandb_overlay_publish
 mv "$STAGING" "$OVERLAY"
 trap - EXIT
+XWAM_PHASE=wandb_overlay_final_probe
 verify_overlay
 echo "[PASS] X-WAM W&B runtime overlay prepared"
 '
 
+XWAM_PHASE=wandb_overlay_manifest
 MANIFEST_TMP="$(mktemp "$(dirname "$MANIFEST")/.xwam-wandb-overlay.XXXXXX")"
 trap 'rm -f "$MANIFEST_TMP"' EXIT
 {
@@ -104,4 +129,5 @@ mv "$MANIFEST_TMP" "$MANIFEST"
 trap - EXIT
 
 cat "$MANIFEST"
+XWAM_PHASE=wandb_overlay_complete
 echo "[PASS] X-WAM W&B runtime overlay manifest written"
