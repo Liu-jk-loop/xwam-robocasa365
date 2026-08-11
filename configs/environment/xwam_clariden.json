@@ -228,6 +228,15 @@
       "loader_workers_per_gpu": 4,
       "global_batch_size": 128,
       "deepspeed_stage": 1,
+      "validation": "fail",
+      "failure": "User reported CUDA OOM; Job ID, peak memory and source commit were not provided"
+    },
+    "m6_formal_restored_gradient_checkpointing": {
+      "use_gradient_checkpointing": true,
+      "batch_size_per_gpu": 16,
+      "accumulate_grad_batches": 2,
+      "global_batch_size": 128,
+      "deepspeed_stage": 1,
       "validation": "cluster-pending"
     }
   }

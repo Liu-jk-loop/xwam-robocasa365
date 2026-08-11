@@ -109,7 +109,7 @@ class TrainingPerformanceContractTest(unittest.TestCase):
             REPO_ROOT / "configs/hardware/gh200x4_96gb_gbs128.yaml"
         ).read_text(encoding="utf-8")
         self.assertIn("num_workers_per_gpu: 4", hardware)
-        self.assertIn("use_gradient_checkpointing: false", hardware)
+        self.assertIn("use_gradient_checkpointing: true", hardware)
         self.assertIn("enable_segment_timing: true", hardware)
         self.assertIn("segment_timing_interval_steps: 20", hardware)
 

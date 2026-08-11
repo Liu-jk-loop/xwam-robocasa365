@@ -177,8 +177,8 @@ def validate_m6_formal_training_contract(
         "shuffle_enabled": bool(get("train_shuffle")),
         "gh200_memory_safe_loader_workers": accelerator != "GH200"
         or int(get("num_workers_per_gpu", -1)) == 4,
-        "gh200_gradient_checkpointing_disabled": accelerator != "GH200"
-        or not bool(get("use_gradient_checkpointing", True)),
+        "gh200_gradient_checkpointing_enabled": accelerator != "GH200"
+        or bool(get("use_gradient_checkpointing", False)),
         "gh200_frozen_text_cache": accelerator != "GH200"
         or bool(get("cache_frozen_text_embeddings", False)),
         "gh200_bounded_text_cache": accelerator != "GH200"

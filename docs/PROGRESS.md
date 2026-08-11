@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：Clariden 迁移——独立 X-WAM aarch64/GH200 policy 容器部署
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划，Job `3053436`已关闭4×GH200 `mb16/ZeRO-1` 正式profile门禁；正式训练已有可恢复checkpoint。4-worker/T5缓存实测稳定吞吐仍约0.131～0.133 step/s，data/T5均非瓶颈；现按用户决定直接关闭DiT gradient checkpointing继续正式训练，显存与新吞吐为`cluster-pending`
+- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划，Job `3053436`已关闭4×GH200 `mb16/ZeRO-1` 正式profile门禁；正式训练已有可恢复checkpoint。关闭DiT gradient checkpointing的直接重试被用户确认为CUDA OOM，现恢复已验证的BS16/累积2/checkpointing配置继续正式训练
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
-| M6 Atomic 正式训练与评测 | 4-worker/T5优化实测约0.131～0.133 step/s；已直接关闭DiT gradient checkpointing | 关闭checkpointing后的显存、吞吐和正式checkpoint为`cluster-pending` | 从最新完整checkpoint恢复正式训练，监控首个20-step timing及CUDA峰值，随后持续完成16,390步 |
+| M6 Atomic 正式训练与评测 | 无checkpointing直接重试CUDA OOM；已恢复BS16/累积2/full checkpointing | 原配置已有稳定训练与保存证据；后续chunk继续`cluster-train` | 从最新完整checkpoint恢复并持续完成16,390步，不再混入未验证的BS8/no-checkpointing组合 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
 ## Clariden 部署状态
@@ -65,6 +65,7 @@
 - 冻结T5的lazy embedding cache和每20 optimizer step的data/T5/VAE/DiT forward/backward/optimizer分段计时已在Job `3055021`生效；step 539时data wait约44.9 ms、T5约21.7 ms，主要计算仍在VAE/DiT/backward。该Job的训练step随后被Slurm确认为主机`OUT_OF_MEMORY`（MaxRSS 397.06G），SIGKILL绕过错误trap，因此没有failure report。
 - GH200三档正式profile先从8恢复为2 workers/GPU，随后按用户要求选择4 workers/GPU作为吞吐与主机内存的折中试验；episode级多样prompt缓存保持每rank最多128项的LRU并记录淘汰计数。现有step-500 checkpoint不含该运行时缓存，可以继续严格恢复；4-worker的RSS、吞吐和chunk完成状态为`cluster-pending`，若内存持续增长则回退2 workers。
 - 4-worker重试在step 539/559稳定速度约0.133/0.131 step/s；data wait约22 ms、稳定T5约22 ms，而VAE、DiT forward和backward分别约1.16/1.15/1.25秒，说明loader/T5不是剩余瓶颈。按用户决定不再运行独立性能门禁，GH200三档正式profile直接关闭全部DiT block的gradient checkpointing并从最新完整checkpoint继续；训练目标、文本长度512、GBS128和ZeRO-1不变，显存及吞吐待正式Job反馈。
+- 无gradient checkpointing的直接正式重试被用户确认为CUDA OOM；反馈未附Job ID、完整日志或commit输出，因此只记录结果，不补造显存峰值和provenance。用户选择恢复已验证的BS16/累积2/full checkpointing原配置，不再比较BS8/累积4/no-checkpointing；现有完整checkpoint保持可恢复。
 
 ## 已确认资源
 

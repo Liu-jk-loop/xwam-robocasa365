@@ -445,7 +445,7 @@ class M6H100TrainingTest(unittest.TestCase):
             self.assertIn("formal_accelerator: GH200", config)
             self.assertIn("formal_minimum_memory_gib: 90", config)
             self.assertIn("num_workers_per_gpu: 4", config)
-            self.assertIn("use_gradient_checkpointing: false", config)
+            self.assertIn("use_gradient_checkpointing: true", config)
             self.assertIn("enable_segment_timing: true", config)
             self.assertIn("segment_timing_interval_steps: 20", config)
         self.assertIn("batch_size_per_gpu: 16", preferred)
@@ -487,7 +487,7 @@ class M6H100TrainingTest(unittest.TestCase):
                 "train_subset_size": None,
                 "train_shuffle": True,
                 "num_workers_per_gpu": 4,
-                "use_gradient_checkpointing": False,
+                "use_gradient_checkpointing": True,
                 "cache_frozen_text_embeddings": True,
                 "max_cached_text_embeddings": 128,
                 "enable_segment_timing": True,
@@ -521,7 +521,7 @@ class M6H100TrainingTest(unittest.TestCase):
                     "train_subset_size": None,
                     "train_shuffle": True,
                     "num_workers_per_gpu": 4,
-                    "use_gradient_checkpointing": False,
+                    "use_gradient_checkpointing": True,
                     "cache_frozen_text_embeddings": True,
                     "max_cached_text_embeddings": 128,
                     "enable_segment_timing": True,

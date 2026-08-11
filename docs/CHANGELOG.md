@@ -97,6 +97,13 @@
 - 该开关不改变参数shape、loss定义或checkpoint格式，允许从现有完整checkpoint恢复；它保存DiT各层activation以避免backward重算，预期提高吞吐但增加GPU显存。用户接受直接正式训练验证，首次无checkpointing运行的CUDA峰值、OOM状态和真实速度均为`cluster-pending`，不能从本地静态检查宣称提速已经实现。
 - 回滚本次commit会重新启用GH200 DiT gradient checkpointing，不修改或删除现有IOPS/Store checkpoint、W&B run、日志和数据；若正式Job发生CUDA OOM，可回滚该commit后从同一个最近完整checkpoint恢复。
 
+### Clariden恢复BS16/full gradient checkpointing
+
+- 用户确认`use_gradient_checkpointing=false`的直接正式重试发生CUDA OOM；本次反馈没有Job ID、完整日志、显存峰值或`git rev-parse HEAD`，因此只将结果归为用户确认的失败，不推断具体rank、step或commit provenance。该失败没有提供新的完整checkpoint证据，planner继续选择两层存储中最近的既有完整点。
+- 按用户选择恢复已验证的原配置：GH200首选仍为单卡BS16/累积2，balanced/safe保留各自batch梯度，但三档全部重新启用DiT gradient checkpointing。正式合同从“必须关闭”改为“必须开启”，避免resolved config误用无checkpointing路径。
+- 不采用BS8/累积4/no-checkpointing组合：固定GBS128时它需要每个optimizer step执行4个微批，关闭重计算可能提速、较小微批的GPU利用率可能降速，缺少实测无法确定净收益；用户决定不再为此增加门禁。文本长度512、4 workers/GPU、128项T5 LRU、ZeRO-1、W&B及checkpoint合同均不变。
+- 本地静态验证后恢复正式训练；回滚本次commit会再次关闭GH200 gradient checkpointing并复现已确认的CUDA OOM风险，不会修改或删除任何外部checkpoint、W&B run或日志。
+
 ## 2026-08-10 — Clariden 4×GH200 step 2→4 checkpoint/resume 门禁
 
 - 在单卡单步门禁关闭后新增独立的 Clariden 四卡调试层与两阶段实验层；不直接套用M6 H100正式配置。门禁固定CloseFridge前8个clip、4×micro-batch 1、GBS 4、BF16 compute、ZeRO-2 FP32 CPUAdam offload和四步scheduler。
