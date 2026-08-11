@@ -823,17 +823,21 @@ tail -n 100 "/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xw
 
 failure report包含`phase`、`exit_code`、`line`、失败命令以及主/训练日志路径。EDF内先记录的具体阶段不会被外层笼统的`srun`失败覆盖；API key在写报告和终端输出前都会被替换为`<redacted>`。旧commit产生的失败Job没有该文件，只能提供Job ID和原主日志分析。
 
-首次Job在固定实验目录原子写入`.wandb_run_id`。之后所有12小时chunk都必须保留同一默认实验名，并以online/`resume=allow`写入同一个W&B run；不要手工删除或修改该文件。每段chunk audit会核验metadata里的W&B ID与该持久ID完全一致。
+首次Job在固定实验目录原子写入`.wandb_run_id`。之后所有12小时作业都必须保留同一默认实验名，并以online/`resume=allow`写入同一个W&B run；不要手工删除或修改该文件。最终正常到达step 16,390的作业会核验metadata里的W&B ID与该持久ID完全一致。
 
 Job `3054130`已创建run ID `xwam-m6-a18-seed42-20260811T074558Z-3054130`，但在模型和训练前因旧滚动callback配置退出。修复后继续使用默认实验名重提会自动复用该ID；不要删除`.wandb_run_id`，也不要改`XWAM_M6_FORMAL_NAME`。
 
-作业固定12小时，每次把绝对global step推进到下一个1,000步边界，正常写入完整checkpoint并退出。总日志出现以下行且chunk audit为`ok=true/result=pass`后，再串行提交同一条命令：
+作业固定12小时，但trainer目标始终为最终step 16,390，不再每1,000步主动退出。若12小时先到，Slurm会将该Job标记为超时；等待它完全退出后，重新执行同一条隐藏读取API key和`sbatch`命令。planner会自动选择两层存储中最新的完整checkpoint继续，最多重跑最后500步。不要同时提交两个写同一实验目录的Job。
+
+超时Job不会生成正常chunk PASS/audit，且W&B可能已经记录checkpoint之后、随后被重跑的尾部step；这只影响该尾部监控曲线和浪费的计算，不改变从完整checkpoint恢复的模型、optimizer、scheduler或随机状态。若超时发生在checkpoint写入过程中，planner会隔离不完整目录并回退到上一个完整点。
+
+只有某个Job在12小时内真正到达step 16,390时，总日志才会出现：
 
 ```text
-[PASS] X-WAM Clariden M6 formal chunk completed at step <N>
+[PASS] X-WAM Clariden M6 formal chunk completed at step 16390
 ```
 
-后续每个chunk都重新执行上面的隐藏`read`、`export WANDB_API_KEY`、`sbatch --export=ALL`和`unset WANDB_API_KEY`四步。仅执行裸`sbatch`会因缺少API key被脚本拒绝。
+后续每个12小时作业都重新执行上面的隐藏`read`、`export WANDB_API_KEY`、`sbatch --export=ALL`和`unset WANDB_API_KEY`四步。仅执行裸`sbatch`会因缺少API key被脚本拒绝。
 
 每次重复提交都使用同一实验身份，但checkpoint分为两个新目录：
 

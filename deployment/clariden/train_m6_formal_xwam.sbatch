@@ -26,7 +26,10 @@ PREFLIGHT="$DEPLOY_STORE/manifests/xwam/m6/robocasa365_m6_gh200_preflight.json"
 GATE_AUDIT="${XWAM_M6_GATE_AUDIT:-$DEPLOY_STORE/logs/xwam/debug/m6-gate-3053436-audit.json}"
 
 TOTAL_STEPS=16390
-CHUNK_STEPS=1000
+# Do not stop at an artificial intermediate step boundary.  The 12-hour Slurm
+# allocation may end first; the next submission resumes the newest complete
+# rolling (500-step) or durable (3000-step) checkpoint.
+CHUNK_STEPS="$TOTAL_STEPS"
 EXP_ROOT="$DEPLOY_CAPSCR/experiments/xwam"
 EXP_NAME="${XWAM_M6_FORMAL_NAME:-robocasa365_m6_atomic_seen18_rgb_seed42}"
 EXP_DIR="$EXP_ROOT/$EXP_NAME"

@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
-| M6 Atomic 正式训练与评测 | 无checkpointing直接重试CUDA OOM；已恢复BS16/累积2/full checkpointing | 原配置已有稳定训练与保存证据；后续chunk继续`cluster-train` | 从最新完整checkpoint恢复并持续完成16,390步，不再混入未验证的BS8/no-checkpointing组合 |
+| M6 Atomic 正式训练与评测 | 已恢复BS16/累积2/full checkpointing；取消每1,000步主动退出 | 每500步滚动、每3,000步永久保存；12小时超时恢复为`cluster-pending` | 每次从最新完整checkpoint持续训练，直到某个Job正常到达16,390步并完成final audit |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
 ## Clariden 部署状态
@@ -66,6 +66,7 @@
 - GH200三档正式profile先从8恢复为2 workers/GPU，随后按用户要求选择4 workers/GPU作为吞吐与主机内存的折中试验；episode级多样prompt缓存保持每rank最多128项的LRU并记录淘汰计数。现有step-500 checkpoint不含该运行时缓存，可以继续严格恢复；4-worker的RSS、吞吐和chunk完成状态为`cluster-pending`，若内存持续增长则回退2 workers。
 - 4-worker重试在step 539/559稳定速度约0.133/0.131 step/s；data wait约22 ms、稳定T5约22 ms，而VAE、DiT forward和backward分别约1.16/1.15/1.25秒，说明loader/T5不是剩余瓶颈。按用户决定不再运行独立性能门禁，GH200三档正式profile直接关闭全部DiT block的gradient checkpointing并从最新完整checkpoint继续；训练目标、文本长度512、GBS128和ZeRO-1不变，显存及吞吐待正式Job反馈。
 - 无gradient checkpointing的直接正式重试被用户确认为CUDA OOM；反馈未附Job ID、完整日志或commit输出，因此只记录结果，不补造显存峰值和provenance。用户选择恢复已验证的BS16/累积2/full checkpointing原配置，不再比较BS8/累积4/no-checkpointing；现有完整checkpoint保持可恢复。
+- 根据实测约0.131 step/s，原每1,000步主动退出只使用约2.1小时，已不再符合12小时allocation。按用户接受最多重跑500步的取舍，正式planner目标改为始终指向最终step 16,390；12小时超时后重新提交同一脚本，从最新完整滚动/永久checkpoint恢复。中间超时Job不要求chunk audit PASS，最终正常到达16,390的Job仍执行完整final audit。
 
 ## 已确认资源
 

@@ -546,7 +546,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "#SBATCH --gpus-per-node=4",
             "#SBATCH --time=12:00:00",
             "TOTAL_STEPS=16390",
-            "CHUNK_STEPS=1000",
+            'CHUNK_STEPS="$TOTAL_STEPS"',
             'HOT_CHECKPOINT_ROOT="$DEPLOY_IOPS/xwam_run/$EXP_NAME/checkpoints"',
             'DURABLE_CHECKPOINT_ROOT="$DEPLOY_STORE/checkpoints/xwam/$EXP_NAME/checkpoints"',
             "gh200x4_96gb_gbs128.yaml",
@@ -582,6 +582,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "[PASS] X-WAM Clariden M6 formal 5-epoch training completed",
         ):
             self.assertIn(expected, script)
+        self.assertNotIn("CHUNK_STEPS=1000", script)
         self.assertNotIn("hardware_config=configs/hardware/gh200x4_96gb_gbs128_safe.yaml", script)
         self.assertNotIn("deepspeed_stage=2", script)
 

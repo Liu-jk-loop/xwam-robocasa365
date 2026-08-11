@@ -104,6 +104,13 @@
 - 不采用BS8/累积4/no-checkpointing组合：固定GBS128时它需要每个optimizer step执行4个微批，关闭重计算可能提速、较小微批的GPU利用率可能降速，缺少实测无法确定净收益；用户决定不再为此增加门禁。文本长度512、4 workers/GPU、128项T5 LRU、ZeRO-1、W&B及checkpoint合同均不变。
 - 本地静态验证后恢复正式训练；回滚本次commit会再次关闭GH200 gradient checkpointing并复现已确认的CUDA OOM风险，不会修改或删除任何外部checkpoint、W&B run或日志。
 
+### Clariden正式训练取消1,000步主动退出
+
+- 原`CHUNK_STEPS=1000`来自早期约0.033 optimizer step/s的门禁估算，用于在12小时内正常保存、审计和退出；当前稳定实测约0.131 step/s后，每1,000步只需约2.1小时，造成频繁重启和allocation利用不足。
+- 按用户明确接受最多回退500步，正式作业将`CHUNK_STEPS`设为总训练步数16,390。每次trainer都以最终step为目标；12小时先到时由Slurm终止，下一次提交由既有planner扫描IOPS/Store两层并选择最新完整checkpoint。500步滚动保存、最多5个，3,000步Store永久保存和最终另存合同均不变。
+- 中间超时Job预期不会完成chunk audit或正常W&B finish；checkpoint之后的尾部W&B记录可能与恢复后实际参数轨迹不一致，且最多浪费500步计算。模型、optimizer、scheduler和保存的随机状态从完整checkpoint恢复；写到一半的checkpoint继续由planner隔离。
+- 最终某个Job正常达到step 16,390后仍执行chunk/final audit并要求PASS。本地验证只覆盖planner/Slurm/文档合同，真实12小时超时、下一Job跨超时恢复和最终审计为`cluster-pending`。回滚本次commit会恢复每1,000步正常退出，不删除任何外部checkpoint、W&B run或日志。
+
 ## 2026-08-10 — Clariden 4×GH200 step 2→4 checkpoint/resume 门禁
 
 - 在单卡单步门禁关闭后新增独立的 Clariden 四卡调试层与两阶段实验层；不直接套用M6 H100正式配置。门禁固定CloseFridge前8个clip、4×micro-batch 1、GBS 4、BF16 compute、ZeRO-2 FP32 CPUAdam offload和四步scheduler。

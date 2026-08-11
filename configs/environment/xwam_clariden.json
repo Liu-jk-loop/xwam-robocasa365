@@ -238,6 +238,15 @@
       "global_batch_size": 128,
       "deepspeed_stage": 1,
       "validation": "cluster-pending"
+    },
+    "m6_formal_walltime_driven_resume": {
+      "trainer_target_step": 16390,
+      "slurm_walltime_hours": 12,
+      "rolling_checkpoint_interval_steps": 500,
+      "maximum_replayed_steps": 500,
+      "intermediate_timeout_audit_required": false,
+      "final_audit_required": true,
+      "validation": "cluster-pending"
     }
   }
 }
