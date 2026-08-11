@@ -115,6 +115,12 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertEqual(formal_failure["global_step"], 0)
         self.assertEqual(formal_failure["wandb_api_key_auth"], "pass")
         self.assertFalse(formal_failure["wandb_entity_explicit"])
+        entity_failure = contract["cluster_evidence"][
+            "wandb_entity_preflight_failure"
+        ]
+        self.assertEqual(entity_failure["job_id"], 3054165)
+        self.assertEqual(entity_failure["phase"], "outer_preflight")
+        self.assertEqual(entity_failure["global_step"], 0)
 
     def test_containerfile_pins_arm64_critical_builds(self) -> None:
         containerfile = (DEPLOY_ROOT / "Containerfile").read_text(encoding="utf-8")
@@ -566,8 +572,6 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "WANDB_MODE=online",
             "WANDB_RESUME=allow",
             'if [[ -z "${WANDB_API_KEY:-}" ]]',
-            'if [[ -z "$WANDB_ENTITY" ]]',
-            "WANDB_ENTITY must name the target account or team",
             "unset WANDB_IDENTITY_TOKEN_FILE",
             'assert os.environ.get("WANDB_API_KEY")',
             "wandb.login(verify=True)",

@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：Clariden 迁移——独立 X-WAM aarch64/GH200 policy 容器部署
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划，Job `3053436`已关闭4×GH200 `mb16/ZeRO-1` 正式profile门禁；Job `3054130`验证W&B overlay/API-key和首段planner通过，但在训练前因Lightning滚动checkpoint缺少monitor退出，现已修复并等待显式entity重试
+- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划，Job `3053436`已关闭4×GH200 `mb16/ZeRO-1` 正式profile门禁；Job `3054130`验证W&B overlay/API-key和首段planner通过，Lightning滚动checkpoint monitor已修复；Job `3054165`暴露的非必要entity强制已移除，等待首个chunk重试
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -60,7 +60,7 @@
 - Job `3053849`证明Sentry安装已通过，并由metadata门禁一次定位下一项缺失`GitPython`；仍未发布overlay。现按完整传递链固定无已知PyPI漏洞的`GitPython 3.1.58`、`gitdb 4.0.12`和`smmap 5.0.3`及官方wheel哈希，集群重试为`cluster-pending`。
 - 正式checkpoint改为双层：IOPS `xwam_run/<实验名>`每500步滚动保留5个，Store `checkpoints/xwam/<实验名>`每3,000步永久保留且最终step也落Store。planner/audit已支持跨两层选择、同step Store优先和各盘原子隔离；真实双callback保存、淘汰和恢复为`cluster-pending`。
 - 正式训练前日志合同已拆分：历史build/smoke/overlay/恢复/M6门禁统一归档到Store `logs/xwam/debug/`，未来`m6-formal-*`继续留在根目录。归档不删除文件且保留Job `3053436` audit供正式preflight读取；集群归档执行为`cluster-pending`。
-- Job `3054130`在commit `3258f8f`通过W&B overlay来源/版本、API-key认证（账号`liuwsh25`）、4×GH200资源和step 0→1000 planner，但Lightning 2.6.5在模型构造前拒绝`save_top_k=5/monitor=None`；global step为0且无checkpoint。滚动callback现固定`monitor=step/mode=max`并纳入audit；正式提交同时强制非空`WANDB_ENTITY`。真实callback构造和首个500步保存为`cluster-pending`。
+- Job `3054130`在commit `3258f8f`通过W&B overlay来源/版本、API-key认证（账号`liuwsh25`）、4×GH200资源和step 0→1000 planner，但Lightning 2.6.5在模型构造前拒绝`save_top_k=5/monitor=None`；global step为0且无checkpoint。滚动callback现固定`monitor=step/mode=max`并纳入audit。Job `3054165`随后因错误地强制非空entity在outer preflight退出；该限制已移除，API key仍必填、entity恢复可选。真实callback构造和首个500步保存为`cluster-pending`。
 
 ## 已确认资源
 

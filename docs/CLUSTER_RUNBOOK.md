@@ -792,7 +792,7 @@ export WANDB_ENTITY='<目标账号或team>'
 export WANDB_PROJECT='xwam-robocasa365'
 ```
 
-不要把真实key直接写成`export WANDB_API_KEY=...`，也不要放入`sbatch --export=...`、脚本、Git或聊天；隐藏输入避免进入shell history和进程命令行。API key决定认证身份，`WANDB_ENTITY`必须替换成明确的个人账号或team，不能留空或保留尖括号占位符。正式作业同时要求key和entity非空，并在加载5B模型前验证API key；不会回退到默认账号或默认entity。无效key、空entity或无权访问指定entity时会立即失败，不会进入训练。
+不要把真实key直接写成`export WANDB_API_KEY=...`，也不要放入`sbatch --export=...`、脚本、Git或聊天；隐藏输入避免进入shell history和进程命令行。API key决定认证身份且为正式作业必需；`WANDB_ENTITY`只是可选的项目归属覆盖项。留空时W&B使用该API key对应账号的默认entity，设置时写入指定个人空间或team。无效key或无权访问显式指定的entity时会立即失败，不会进入训练。
 
 首次启动：
 

@@ -529,7 +529,6 @@ class M6H100TrainingTest(unittest.TestCase):
             "wandb_require_api_key",
             "resolve_checkpoint_monitor",
             '"monitor": rolling_monitor.get("monitor")',
-            "必须显式提供非空 WANDB_ENTITY",
             '"auth": "api_key_env"',
         ):
             self.assertIn(token, entrypoint)

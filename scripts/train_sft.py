@@ -473,10 +473,6 @@ def main():
         wandb_entity = (
             str(wandb_entity_value).strip() if wandb_entity_value is not None else None
         )
-        if wandb_require_api_key and not wandb_entity:
-            raise ValueError(
-                "wandb_require_api_key=true 时必须显式提供非空 WANDB_ENTITY"
-            )
         wandb_group = config.get("wandb_group")
         wandb_save_dir = os.environ.get("WANDB_DIR") or os.path.join(
             config.exp_root, config.exp_name, "wandb"

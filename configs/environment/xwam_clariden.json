@@ -183,6 +183,13 @@
       "error": "MisconfigurationException: ModelCheckpoint(save_top_k=5, monitor=None)",
       "wandb_api_key_auth": "pass",
       "wandb_entity_explicit": false
+    },
+    "wandb_entity_preflight_failure": {
+      "job_id": 3054165,
+      "source_commit": "dd529bad360cb2dc104bfb6d30df2cbae35c6d90",
+      "phase": "outer_preflight",
+      "global_step": 0,
+      "error": "WANDB_ENTITY was incorrectly required even though API-key authentication had already passed"
     }
   }
 }
