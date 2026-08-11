@@ -177,6 +177,8 @@ def validate_m6_formal_training_contract(
         "shuffle_enabled": bool(get("train_shuffle")),
         "gh200_memory_safe_loader_workers": accelerator != "GH200"
         or int(get("num_workers_per_gpu", -1)) == 4,
+        "gh200_gradient_checkpointing_disabled": accelerator != "GH200"
+        or not bool(get("use_gradient_checkpointing", True)),
         "gh200_frozen_text_cache": accelerator != "GH200"
         or bool(get("cache_frozen_text_embeddings", False)),
         "gh200_bounded_text_cache": accelerator != "GH200"
@@ -199,6 +201,9 @@ def validate_m6_formal_training_contract(
         "accumulate_grad_batches": accumulate,
         "global_batch_size": actual_global_batch,
         "num_workers_per_gpu": int(get("num_workers_per_gpu", 0)),
+        "use_gradient_checkpointing": bool(
+            get("use_gradient_checkpointing", False)
+        ),
         "cache_frozen_text_embeddings": bool(
             get("cache_frozen_text_embeddings", False)
         ),

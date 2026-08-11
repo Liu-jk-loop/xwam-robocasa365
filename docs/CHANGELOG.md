@@ -90,6 +90,13 @@
 - 该选择位于已稳定达到step 500的2-worker配置与触发397.06G MaxRSS OOM的8-worker配置之间，但worker内存不保证严格线性，不能据此宣称安全或更快。集群复测必须同时观察训练step的`MaxRSS/AveRSS`和20-step data wait；若RSS持续增长或接近作业内存上限，应取消作业并回退2 workers。
 - 本地静态验证完成后发布；4-worker从step 500恢复的主机内存、吞吐及step-1000 checkpoint为`cluster-pending`。回滚本次commit只会把GH200三档恢复为2 workers，不修改checkpoint、W&B run、缓存上限或外部日志。
 
+### Clariden正式训练直接关闭gradient checkpointing
+
+- 4-worker正式重试在step 539/559的稳定吞吐约0.133/0.131 optimizer step/s；data wait与T5稳定开销均约22 ms，VAE、DiT forward和backward分别约1.16/1.15/1.25秒。该证据确认loader和冻结T5不再是主要瓶颈，继续调整worker或扩大文本缓存不会显著缩短训练。
+- 按用户明确决定，不再增加独立短门禁，GH200首选、balanced和safe三档正式profile直接设置`use_gradient_checkpointing=false`。正式合同新增同名阻塞检查，确保resolved config不能通过命令行或配置合并静默恢复重计算；4 workers/GPU、文本长度512、128项T5 LRU、GBS128、ZeRO-1、checkpoint与W&B合同保持不变。
+- 该开关不改变参数shape、loss定义或checkpoint格式，允许从现有完整checkpoint恢复；它保存DiT各层activation以避免backward重算，预期提高吞吐但增加GPU显存。用户接受直接正式训练验证，首次无checkpointing运行的CUDA峰值、OOM状态和真实速度均为`cluster-pending`，不能从本地静态检查宣称提速已经实现。
+- 回滚本次commit会重新启用GH200 DiT gradient checkpointing，不修改或删除现有IOPS/Store checkpoint、W&B run、日志和数据；若正式Job发生CUDA OOM，可回滚该commit后从同一个最近完整checkpoint恢复。
+
 ## 2026-08-10 — Clariden 4×GH200 step 2→4 checkpoint/resume 门禁
 
 - 在单卡单步门禁关闭后新增独立的 Clariden 四卡调试层与两阶段实验层；不直接套用M6 H100正式配置。门禁固定CloseFridge前8个clip、4×micro-batch 1、GBS 4、BF16 compute、ZeRO-2 FP32 CPUAdam offload和四步scheduler。

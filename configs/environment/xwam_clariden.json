@@ -219,6 +219,16 @@
       "resume_checkpoint_global_step": 500,
       "validation": "cluster-pending",
       "fallback_workers_per_gpu": 2
+    },
+    "m6_formal_no_gradient_checkpointing": {
+      "requested_by_user": true,
+      "independent_gate_skipped_by_user": true,
+      "use_gradient_checkpointing": false,
+      "text_len": 512,
+      "loader_workers_per_gpu": 4,
+      "global_batch_size": 128,
+      "deepspeed_stage": 1,
+      "validation": "cluster-pending"
     }
   }
 }
