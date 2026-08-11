@@ -38,6 +38,7 @@ from project_tools.training_run import (
     collect_memory_snapshot,
     collect_git_state,
     resolve_resume_checkpoint,
+    resolve_checkpoint_monitor,
     resolve_save_last,
     resolve_subset_indices,
     resolve_training_schedule,
@@ -369,16 +370,19 @@ def main():
         checkpoint_dir = Path(
             config.get("checkpoint_dir") or (exp_dir / "checkpoints")
         ).expanduser()
+        rolling_save_top_k = int(config.get("save_top_k", -1))
+        rolling_monitor = resolve_checkpoint_monitor(rolling_save_top_k)
         checkpoint_callback = ResourceAwareModelCheckpoint(
             diagnostics_path=checkpoint_events_path,
             checkpoint_tier="rolling",
             dirpath=checkpoint_dir,
-            save_top_k=int(config.get("save_top_k", -1)),
+            save_top_k=rolling_save_top_k,
             save_last=resolve_save_last(config.get("save_last", True)),
             save_weights_only=False,
             save_on_exception=bool(config.get("save_on_exception", False)),
             every_n_train_steps=int(config.save_interval),
             enable_version_counter=False,
+            **rolling_monitor,
         )
         callbacks.insert(
             1,
@@ -391,11 +395,13 @@ def main():
             ).expanduser()
             if durable_checkpoint_dir.resolve() == checkpoint_dir.resolve():
                 raise ValueError("滚动与永久checkpoint目录必须不同")
+            durable_save_top_k = int(config.get("durable_save_top_k", -1))
+            durable_monitor = resolve_checkpoint_monitor(durable_save_top_k)
             durable_checkpoint_callback = ResourceAwareModelCheckpoint(
                 diagnostics_path=checkpoint_events_path,
                 checkpoint_tier="durable",
                 dirpath=durable_checkpoint_dir,
-                save_top_k=int(config.get("durable_save_top_k", -1)),
+                save_top_k=durable_save_top_k,
                 save_last=resolve_save_last(
                     config.get("durable_save_last", False)
                 ),
@@ -403,6 +409,7 @@ def main():
                 save_on_exception=False,
                 every_n_train_steps=int(config.durable_save_interval),
                 enable_version_counter=False,
+                **durable_monitor,
             )
             callbacks.insert(2, durable_checkpoint_callback)
         final_checkpoint_dir = Path(
@@ -414,15 +421,19 @@ def main():
             "rolling": {
                 "directory": str(checkpoint_dir.resolve()),
                 "interval_steps": int(config.save_interval),
-                "save_top_k": int(config.get("save_top_k", -1)),
+                "save_top_k": rolling_save_top_k,
                 "save_last": config.get("save_last", True),
+                "monitor": rolling_monitor.get("monitor"),
+                "mode": rolling_monitor.get("mode"),
             },
             "durable": (
                 {
                     "directory": str(durable_checkpoint_dir.resolve()),
                     "interval_steps": int(config.durable_save_interval),
-                    "save_top_k": int(config.get("durable_save_top_k", -1)),
+                    "save_top_k": durable_save_top_k,
                     "save_last": config.get("durable_save_last", False),
+                    "monitor": durable_monitor.get("monitor"),
+                    "mode": durable_monitor.get("mode"),
                 }
                 if durable_checkpoint_callback is not None
                 else None
@@ -456,7 +467,16 @@ def main():
             or config.get("wandb_project", "xwam-robocasa365")
         )
         wandb_name = str(config.get("wandb_name", config.exp_name))
-        wandb_entity = os.environ.get("WANDB_ENTITY") or config.get("wandb_entity")
+        wandb_entity_value = os.environ.get("WANDB_ENTITY") or config.get(
+            "wandb_entity"
+        )
+        wandb_entity = (
+            str(wandb_entity_value).strip() if wandb_entity_value is not None else None
+        )
+        if wandb_require_api_key and not wandb_entity:
+            raise ValueError(
+                "wandb_require_api_key=true 时必须显式提供非空 WANDB_ENTITY"
+            )
         wandb_group = config.get("wandb_group")
         wandb_save_dir = os.environ.get("WANDB_DIR") or os.path.join(
             config.exp_root, config.exp_name, "wandb"

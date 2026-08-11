@@ -80,6 +80,7 @@ def _write_gate_run(
             "wandb": {
                 "enabled": True,
                 "project": "xwam-robocasa365",
+                "entity": "target-team",
                 "run_id": "persistent-run-id",
                 "mode": "online",
                 "resume": "allow",
@@ -92,6 +93,8 @@ def _write_gate_run(
                     "directory": str((run_root / "hot").resolve()),
                     "interval_steps": 500,
                     "save_top_k": 5,
+                    "monitor": "step",
+                    "mode": "max",
                 },
                 "durable": {
                     "directory": str((run_root / "durable").resolve()),
@@ -524,6 +527,9 @@ class M6H100TrainingTest(unittest.TestCase):
             "WandbLogger",
             'resume="allow"',
             "wandb_require_api_key",
+            "resolve_checkpoint_monitor",
+            '"monitor": rolling_monitor.get("monitor")',
+            "必须显式提供非空 WANDB_ENTITY",
             '"auth": "api_key_env"',
         ):
             self.assertIn(token, entrypoint)

@@ -96,6 +96,16 @@ def resolve_save_last(value: bool | str | None) -> bool | str:
     raise ValueError("save_last 只允许 true、false 或 link")
 
 
+def resolve_checkpoint_monitor(save_top_k: int) -> dict[str, str]:
+    """Rank step-based checkpoints when Lightning must retain more than one."""
+    top_k = int(save_top_k)
+    if top_k < -1:
+        raise ValueError("save_top_k 必须大于等于 -1")
+    if top_k > 1:
+        return {"monitor": "step", "mode": "max"}
+    return {}
+
+
 def collect_git_state(repo_root: str | os.PathLike[str]) -> dict[str, Any]:
     root = Path(repo_root).resolve()
 

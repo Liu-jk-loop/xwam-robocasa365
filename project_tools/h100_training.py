@@ -751,10 +751,13 @@ def build_m6_formal_chunk_report(
             "wandb_persistent_run": bool(run["wandb"].get("run_id"))
             and run["wandb"].get("resume") == "allow",
             "wandb_api_key_auth": run["wandb"].get("auth") == "api_key_env",
+            "wandb_explicit_entity": bool(run["wandb"].get("entity")),
             "rolling_checkpoint_policy": rolling_storage.get("directory")
             == expected_rolling_root
             and int(rolling_storage.get("interval_steps", -1)) == 500
-            and int(rolling_storage.get("save_top_k", -1)) == 5,
+            and int(rolling_storage.get("save_top_k", -1)) == 5
+            and rolling_storage.get("monitor") == "step"
+            and rolling_storage.get("mode") == "max",
             "durable_checkpoint_policy": durable_storage.get("directory")
             == expected_durable_root
             and int(durable_storage.get("interval_steps", -1)) == 3000
@@ -830,6 +833,7 @@ def build_m6_formal_report(
                     and run["wandb"].get("resume") == "allow",
                     "wandb_api_key_auth": run["wandb"].get("auth")
                     == "api_key_env",
+                    "wandb_explicit_entity": bool(run["wandb"].get("entity")),
                     "expected_wandb_run": run["wandb"].get("run_id")
                     == expected_wandb_run_id,
                 }
@@ -851,7 +855,9 @@ def build_m6_formal_report(
                     "rolling_checkpoint_policy": rolling_storage.get("directory")
                     == expected_rolling_root
                     and int(rolling_storage.get("interval_steps", -1)) == 500
-                    and int(rolling_storage.get("save_top_k", -1)) == 5,
+                    and int(rolling_storage.get("save_top_k", -1)) == 5
+                    and rolling_storage.get("monitor") == "step"
+                    and rolling_storage.get("mode") == "max",
                     "durable_checkpoint_policy": durable_storage.get("directory")
                     == expected_durable_root
                     and int(durable_storage.get("interval_steps", -1)) == 3000

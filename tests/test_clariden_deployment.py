@@ -55,7 +55,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
         )
         self.assertEqual(
             contract["validation"]["wandb_runtime_overlay"],
-            "cluster-pending",
+            "pass",
         )
         self.assertEqual(contract["cluster_evidence"]["training_smoke_result"], "pass")
         self.assertIsNone(contract["cluster_evidence"]["training_smoke_job_id"])
@@ -101,17 +101,20 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertEqual(m6_preflight["num_training_steps"], 16390)
         self.assertEqual(
             contract["cluster_evidence"]["wandb_runtime_overlay_result"],
-            "retry-pending",
+            "pass",
+        )
+        self.assertIsNone(
+            contract["cluster_evidence"]["wandb_runtime_overlay_job_id"]
         )
         self.assertEqual(
-            contract["cluster_evidence"]["wandb_runtime_overlay_job_id"],
-            3053849,
+            contract["cluster_evidence"]["wandb_runtime_overlay_validation_job_id"],
+            3054130,
         )
-        wandb_failure = contract["cluster_evidence"][
-            "wandb_runtime_overlay_failure"
-        ]
-        self.assertEqual(wandb_failure["phase"], "wandb_overlay_staging_probe")
-        self.assertFalse(wandb_failure["published"])
+        formal_failure = contract["cluster_evidence"]["wandb_formal_run_failure"]
+        self.assertEqual(formal_failure["job_id"], 3054130)
+        self.assertEqual(formal_failure["global_step"], 0)
+        self.assertEqual(formal_failure["wandb_api_key_auth"], "pass")
+        self.assertFalse(formal_failure["wandb_entity_explicit"])
 
     def test_containerfile_pins_arm64_critical_builds(self) -> None:
         containerfile = (DEPLOY_ROOT / "Containerfile").read_text(encoding="utf-8")
@@ -563,6 +566,8 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "WANDB_MODE=online",
             "WANDB_RESUME=allow",
             'if [[ -z "${WANDB_API_KEY:-}" ]]',
+            'if [[ -z "$WANDB_ENTITY" ]]',
+            "WANDB_ENTITY must name the target account or team",
             "unset WANDB_IDENTITY_TOKEN_FILE",
             'assert os.environ.get("WANDB_API_KEY")',
             "wandb.login(verify=True)",

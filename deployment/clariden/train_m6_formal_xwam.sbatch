@@ -64,6 +64,9 @@ test -d "$WANDB_OVERLAY"
 if [[ -z "${WANDB_API_KEY:-}" ]]; then
   xwam_fail "WANDB_API_KEY must be exported before sbatch submission"
 fi
+if [[ -z "$WANDB_ENTITY" ]]; then
+  xwam_fail "WANDB_ENTITY must name the target account or team before sbatch submission"
+fi
 test -s "$WAN_DIR/config.json"
 test -s "$WAN_DIR/models_t5_umt5-xxl-enc-bf16.pth"
 test -s "$WAN_DIR/Wan2.2_VAE.pth"

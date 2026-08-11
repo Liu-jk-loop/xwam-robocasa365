@@ -792,7 +792,7 @@ export WANDB_ENTITY='<目标账号或team>'
 export WANDB_PROJECT='xwam-robocasa365'
 ```
 
-不要把真实key直接写成`export WANDB_API_KEY=...`，也不要放入`sbatch --export=...`、脚本、Git或聊天；隐藏输入避免进入shell history和进程命令行。API key决定认证身份，`WANDB_ENTITY`明确指定指标归属的个人账号或team。正式作业要求该环境变量存在，并在加载5B模型前用它做服务端验证；不会回退到默认账号。无效key或无权访问指定entity时会立即失败，不会进入训练。
+不要把真实key直接写成`export WANDB_API_KEY=...`，也不要放入`sbatch --export=...`、脚本、Git或聊天；隐藏输入避免进入shell history和进程命令行。API key决定认证身份，`WANDB_ENTITY`必须替换成明确的个人账号或team，不能留空或保留尖括号占位符。正式作业同时要求key和entity非空，并在加载5B模型前验证API key；不会回退到默认账号或默认entity。无效key、空entity或无权访问指定entity时会立即失败，不会进入训练。
 
 首次启动：
 
@@ -824,6 +824,8 @@ tail -n 100 "/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xw
 failure report包含`phase`、`exit_code`、`line`、失败命令以及主/训练日志路径。EDF内先记录的具体阶段不会被外层笼统的`srun`失败覆盖；API key在写报告和终端输出前都会被替换为`<redacted>`。旧commit产生的失败Job没有该文件，只能提供Job ID和原主日志分析。
 
 首次Job在固定实验目录原子写入`.wandb_run_id`。之后所有12小时chunk都必须保留同一默认实验名，并以online/`resume=allow`写入同一个W&B run；不要手工删除或修改该文件。每段chunk audit会核验metadata里的W&B ID与该持久ID完全一致。
+
+Job `3054130`已创建run ID `xwam-m6-a18-seed42-20260811T074558Z-3054130`，但在模型和训练前因旧滚动callback配置退出。修复后继续使用默认实验名重提会自动复用该ID；不要删除`.wandb_run_id`，也不要改`XWAM_M6_FORMAL_NAME`。
 
 作业固定12小时，每次把绝对global step推进到下一个1,000步边界，正常写入完整checkpoint并退出。总日志出现以下行且chunk audit为`ok=true/result=pass`后，再串行提交同一条命令：
 

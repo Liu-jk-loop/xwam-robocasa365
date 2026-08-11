@@ -61,6 +61,13 @@
 - 正式训练默认门禁audit路径同步更新为`logs/xwam/debug/m6-gate-3053436-audit.json`，避免归档后outer preflight误报缺文件。正式作业自己的主日志、train log、failure report和audit继续写`logs/xwam/`根目录，便于监控。
 - 本地下载的既有M4/四卡/M6证据已统一放入忽略目录`log/debug/`；这些产物不进入Git。集群归档脚本的真实Store移动由用户执行，状态为`cluster-pending`；回滚代码不会自动移回已归档日志，可用普通`mv`从debug目录恢复。
 
+### Clariden首个正式Job的checkpoint与W&B entity修复
+
+- Job `3054130`在干净commit `3258f8fd7d279ff46d540919a2f69d825b3cdfb4`上通过overlay来源、W&B 0.23.1版本、API-key在线认证、4×GH200拓扑和首段step 0→1000 planner；随后在Dataset/5B模型构造前创建滚动callback时退出。Lightning 2.6.5明确拒绝`save_top_k=5, monitor=None`，因此本轮global step仍为0、没有训练checkpoint，不是CUDA、显存、数据或模型错误。
+- 新增dependency-light checkpoint monitor解析：当`save_top_k>1`时固定`monitor=step/mode=max`，利用Lightning内置global-step候选保留最大的最近K个；`-1/0/1`保持原语义。滚动storage metadata和chunk/final audit同步要求`step/max`，防止只绕过callback构造却未证明500步滚动保留合同。
+- 本轮API key成功认证为`liuwsh25`，但提交环境的`WANDB_ENTITY`为空。正式sbatch和训练入口现都要求非空entity；audit要求metadata保存显式entity，避免API key正确但项目归属依赖默认推断。已创建的`.wandb_run_id`没有远端训练曲线或checkpoint，重试会安全复用，不应删除。
+- 本地通过dependency-light测试、Python/shell/JSON、Ruff和文档门禁；Lightning 2.6.5 callback真实构造、500/1000步保存及5点淘汰仍为`cluster-pending`。回滚会恢复无monitor及可为空entity的旧行为，不会删除持久run ID、W&B项目、日志或checkpoint。
+
 ## 2026-08-10 — Clariden 4×GH200 step 2→4 checkpoint/resume 门禁
 
 - 在单卡单步门禁关闭后新增独立的 Clariden 四卡调试层与两阶段实验层；不直接套用M6 H100正式配置。门禁固定CloseFridge前8个clip、4×micro-batch 1、GBS 4、BF16 compute、ZeRO-2 FP32 CPUAdam offload和四步scheduler。

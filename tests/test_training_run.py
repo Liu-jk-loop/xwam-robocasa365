@@ -10,6 +10,7 @@ from project_tools.training_run import (
     collect_memory_snapshot,
     collect_git_state,
     resolve_resume_checkpoint,
+    resolve_checkpoint_monitor,
     resolve_save_last,
     resolve_subset_indices,
     resolve_training_schedule,
@@ -116,6 +117,20 @@ class TrainingRunTest(unittest.TestCase):
         self.assertIsNone(resolve_subset_indices(dataset_length=100, subset_size=None))
         with self.assertRaisesRegex(ValueError, "超出"):
             resolve_subset_indices(dataset_length=3, subset_size=2, subset_start=2)
+
+    def test_checkpoint_retention_ranks_multiple_periodic_saves_by_step(self) -> None:
+        self.assertEqual(
+            resolve_checkpoint_monitor(5),
+            {"monitor": "step", "mode": "max"},
+        )
+        self.assertEqual(
+            resolve_checkpoint_monitor(2),
+            {"monitor": "step", "mode": "max"},
+        )
+        for save_top_k in (-1, 0, 1):
+            self.assertEqual(resolve_checkpoint_monitor(save_top_k), {})
+        with self.assertRaisesRegex(ValueError, "大于等于 -1"):
+            resolve_checkpoint_monitor(-2)
 
     def test_resume_checkpoint_requires_existing_file_or_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

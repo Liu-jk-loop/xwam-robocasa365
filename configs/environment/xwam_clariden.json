@@ -64,7 +64,7 @@
     "multigpu_checkpoint_resume": "pass",
     "m6_atomic_seen18_preflight": "pass",
     "m6_gh200_formal_profile_gate": "cluster-pending",
-    "wandb_runtime_overlay": "cluster-pending"
+    "wandb_runtime_overlay": "pass"
   },
   "cluster_evidence": {
     "source_commit": "6594d898a87145101afe5f8a45fa6ba907b2b3c3",
@@ -171,13 +171,18 @@
       "audit_ok": true,
       "audit_result": "pass"
     },
-    "wandb_runtime_overlay_result": "retry-pending",
-    "wandb_runtime_overlay_job_id": 3053849,
-    "wandb_runtime_overlay_failure": {
-      "phase": "wandb_overlay_staging_probe",
-      "error": "PackageNotFoundError: No package metadata was found for gitpython",
-      "published": false
-    },
-    "wandb_formal_run_result": "cluster-pending"
+    "wandb_runtime_overlay_result": "pass",
+    "wandb_runtime_overlay_job_id": null,
+    "wandb_runtime_overlay_validation_job_id": 3054130,
+    "wandb_formal_run_result": "retry-pending",
+    "wandb_formal_run_failure": {
+      "job_id": 3054130,
+      "source_commit": "3258f8fd7d279ff46d540919a2f69d825b3cdfb4",
+      "phase": "training",
+      "global_step": 0,
+      "error": "MisconfigurationException: ModelCheckpoint(save_top_k=5, monitor=None)",
+      "wandb_api_key_auth": "pass",
+      "wandb_entity_explicit": false
+    }
   }
 }
