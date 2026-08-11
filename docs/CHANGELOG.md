@@ -44,6 +44,8 @@
 - 根因是overlay使用`--no-deps`保证当前SQSH不被解析器改写，但首版哈希清单只列了W&B本体。现固定FastWAM同环境版本`sentry-sdk==2.58.0`及官方PyPI wheel SHA256；未来镜像requirements、constraints、环境manifest和image import门禁同步冻结该版本。
 - 发布前probe现在要求W&B和Sentry模块都来自临时overlay，并根据两者的wheel metadata逐项验证当前环境满足全部声明依赖及版本范围，再真实执行offline init/log/finish。依赖缺失仍会阻塞原子发布，不会污染正式overlay。
 - 本地只验证固定哈希、shell/Python/JSON、dependency-light测试和文档合同；aarch64安装及offline probe重试仍为`cluster-pending`。回滚本次commit会恢复缺少Sentry的旧清单，不会删除集群overlay、日志、checkpoint或W&B run。
+- Job `3053849`确认Sentry修复有效，但完整metadata门禁继续发现SQSH缺少W&B声明的`GitPython`；失败仍位于临时probe，未发布overlay或启动训练。现一次补齐`GitPython → gitdb → smmap`完整链及三个官方wheel哈希；FastWAM环境记录用于确认依赖链版本基线，但GitPython采用W&B允许且PyPI当前无已知漏洞的`3.1.58`，不沿用已列出安全公告的3.1.45。
+- probe新增所有五个固定distribution的版本及overlay来源检查，再递归验证它们的声明依赖范围。未来镜像清单和import门禁同步固定`GitPython 3.1.58 / gitdb 4.0.12 / smmap 5.0.3`；Clariden重试仍为`cluster-pending`。
 
 ### Clariden正式训练双层checkpoint存储
 

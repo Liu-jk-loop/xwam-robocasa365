@@ -20,6 +20,9 @@ einops==0.8.2
 lightning==2.6.5
 wandb==0.23.1
 sentry-sdk==2.58.0
+GitPython==3.1.58
+gitdb==4.0.12
+smmap==5.0.3
 deepspeed==0.19.4
 nvtx==0.2.15
 pyzmq==27.1.0

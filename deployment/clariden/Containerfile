@@ -107,12 +107,15 @@ import decord
 import deepspeed
 import diffusers
 import flash_attn
+import git
+import gitdb
 import lightning
 import numpy
 import nvtx
 import pyarrow
 import safetensors
 import sentry_sdk
+import smmap
 import torch
 import transformers
 import wandb
@@ -136,6 +139,9 @@ print("accelerate:", accelerate.__version__)
 print("safetensors:", safetensors.__version__)
 print("wandb:", wandb.__version__)
 print("sentry-sdk:", importlib.metadata.version("sentry-sdk"))
+print("GitPython:", importlib.metadata.version("GitPython"))
+print("gitdb:", importlib.metadata.version("gitdb"))
+print("smmap:", importlib.metadata.version("smmap"))
 
 assert platform.machine() == "aarch64"
 assert sys.version_info[:2] == (3, 10)
@@ -147,6 +153,9 @@ assert flash_attn.__version__ == "2.8.3"
 assert importlib.metadata.version("nvtx") == "0.2.15"
 assert importlib.metadata.version("wandb") == "0.23.1"
 assert importlib.metadata.version("sentry-sdk") == "2.58.0"
+assert importlib.metadata.version("GitPython") == "3.1.58"
+assert importlib.metadata.version("gitdb") == "4.0.12"
+assert importlib.metadata.version("smmap") == "5.0.3"
 assert callable(nvtx.get_domain)
 nvtx_domain = nvtx.get_domain("xwam-clariden-deepspeed-probe")
 nvtx_domain.push_range(message="probe", category=None)

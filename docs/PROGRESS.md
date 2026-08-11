@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：Clariden 迁移——独立 X-WAM aarch64/GH200 policy 容器部署
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划，Job `3053436`已关闭4×GH200 `mb16/ZeRO-1` 正式profile门禁；Job `3053810`发现W&B overlay漏装Sentry且未发布，现已补齐清单，下一步重跑overlay/认证再启动首个chunk
+- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划，Job `3053436`已关闭4×GH200 `mb16/ZeRO-1` 正式profile门禁；Job `3053810/3053849`依次发现W&B overlay漏装Sentry/GitPython且均未发布，现已补齐完整依赖链，下一步重跑overlay/认证再启动首个chunk
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -57,6 +57,7 @@
 - 正式分段作业已接入`wandb==0.23.1`：当前SQSH通过独立、固定hash、原子发布的IOPS overlay补充依赖；固定实验目录持久化一个W&B run ID，所有chunk以online/`resume=allow`写入同一run，并由chunk/final audit核验。认证按用户要求只接受每次提交环境中的`WANDB_API_KEY`，不回退到默认账号；metadata只记录无敏感信息的`auth=api_key_env`。overlay离线probe、API-key在线验证和首个chunk仍为`cluster-pending`。
 - W&B overlay与正式作业现为每个Job生成独立failure report，并在外层及EDF子阶段安装统一`ERR` trap；以后任何非零退出都必须给出phase/exit code/line/command及主日志、训练日志路径，且不会记录API key。当前用户遇到的旧Job产生于该改动之前，仍需用其Job ID和原主日志回溯；新错误报告机制的真实Clariden行为为`cluster-pending`。
 - W&B overlay Job `3053810`在临时目录offline probe中以`ModuleNotFoundError: sentry_sdk`退出，failure report正确定位`wandb_overlay_staging_probe`；未进入原子发布或正式训练。清单现以官方wheel哈希补入与FastWAM一致的`sentry-sdk==2.58.0`，并在发布前检查W&B全部直接依赖；集群重试为`cluster-pending`。
+- Job `3053849`证明Sentry安装已通过，并由metadata门禁一次定位下一项缺失`GitPython`；仍未发布overlay。现按完整传递链固定无已知PyPI漏洞的`GitPython 3.1.58`、`gitdb 4.0.12`和`smmap 5.0.3`及官方wheel哈希，集群重试为`cluster-pending`。
 - 正式checkpoint改为双层：IOPS `xwam_run/<实验名>`每500步滚动保留5个，Store `checkpoints/xwam/<实验名>`每3,000步永久保留且最终step也落Store。planner/audit已支持跨两层选择、同step Store优先和各盘原子隔离；真实双callback保存、淘汰和恢复为`cluster-pending`。
 
 ## 已确认资源

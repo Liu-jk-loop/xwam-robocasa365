@@ -27,6 +27,9 @@ class ClaridenDeploymentTest(unittest.TestCase):
         self.assertEqual(contract["packages"]["nvtx"], "0.2.15")
         self.assertEqual(contract["packages"]["wandb"], "0.23.1")
         self.assertEqual(contract["packages"]["sentry_sdk"], "2.58.0")
+        self.assertEqual(contract["packages"]["gitpython"], "3.1.58")
+        self.assertEqual(contract["packages"]["gitdb"], "4.0.12")
+        self.assertEqual(contract["packages"]["smmap"], "5.0.3")
         self.assertTrue(contract["simulator_contract"]["separate_container"])
         for gate in (
             "container_build",
@@ -102,7 +105,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
         )
         self.assertEqual(
             contract["cluster_evidence"]["wandb_runtime_overlay_job_id"],
-            3053810,
+            3053849,
         )
         wandb_failure = contract["cluster_evidence"][
             "wandb_runtime_overlay_failure"
@@ -128,6 +131,9 @@ class ClaridenDeploymentTest(unittest.TestCase):
             'assert importlib.metadata.version("nvtx") == "0.2.15"',
             'assert importlib.metadata.version("wandb") == "0.23.1"',
             'assert importlib.metadata.version("sentry-sdk") == "2.58.0"',
+            'assert importlib.metadata.version("GitPython") == "3.1.58"',
+            'assert importlib.metadata.version("gitdb") == "4.0.12"',
+            'assert importlib.metadata.version("smmap") == "5.0.3"',
             "assert callable(nvtx.get_domain)",
             'nvtx_domain.push_range(message="probe", category=None)',
         ):
@@ -158,6 +164,9 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "nvtx==0.2.15",
             "wandb==0.23.1",
             "sentry-sdk==2.58.0",
+            "GitPython==3.1.58",
+            "gitdb==4.0.12",
+            "smmap==5.0.3",
             "pyarrow==16.1.0",
         ):
             self.assertIn(expected, requirements)
@@ -170,6 +179,9 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "nvtx==0.2.15",
             "wandb==0.23.1",
             "sentry-sdk==2.58.0",
+            "GitPython==3.1.58",
+            "gitdb==4.0.12",
+            "smmap==5.0.3",
         ):
             self.assertIn(expected, constraints)
 
@@ -316,6 +328,9 @@ class ClaridenDeploymentTest(unittest.TestCase):
         )
         self.assertIn("wandb==0.23.1", requirements)
         self.assertIn("sentry-sdk==2.58.0", requirements)
+        self.assertIn("GitPython==3.1.58", requirements)
+        self.assertIn("gitdb==4.0.12", requirements)
+        self.assertIn("smmap==5.0.3", requirements)
         self.assertIn(
             "sha256:6cc984cf85feb2f8ee0451d76bc9fb7f39da94956bb8183e30d26284cf203b65",
             requirements,
@@ -324,15 +339,26 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "sha256:688d1c704ddecf382ea3326f21a67453d4caa95592d722b7c780a36a9d23109e",
             requirements,
         )
+        for dependency_hash in (
+            "sha256:d331e722577f0fd7fc1f857419b3ecc07af66282b933d2a4d95f84a042fdd50f",
+            "sha256:67073e15955400952c6565cc3e707c554a4eea2e428946f7a4c162fab9bd9bcf",
+            "sha256:c106e05d5a61449cf6ba9a1e650227ecfb141590d2a98412103ff35d89fc7b2f",
+        ):
+            self.assertIn(dependency_hash, requirements)
         for expected in (
             "--require-hashes",
             "--no-deps",
             "mktemp -d",
             'mv "$STAGING" "$OVERLAY"',
-            'importlib.metadata.version("wandb") == "0.23.1"',
-            'importlib.metadata.version("sentry-sdk") == "2.58.0"',
+            '"GitPython": "3.1.58"',
+            '"gitdb": "4.0.12"',
+            '"sentry-sdk": "2.58.0"',
+            '"smmap": "5.0.3"',
+            '"wandb": "0.23.1"',
             "validate_declared_dependencies",
-            'for distribution in ("wandb", "sentry-sdk")',
+            "dependency_errors.extend(errors)",
+            "assert not dependency_errors, dependency_errors",
+            "distribution_root.is_relative_to(overlay)",
             "wandb_module.is_relative_to(overlay)",
             "sentry_module.is_relative_to(overlay)",
             'mode="offline"',
@@ -345,6 +371,9 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "wandb_overlay_staging_probe",
             "wandb_overlay_final_probe",
             "sentry_sdk=%s",
+            "gitpython=%s",
+            "gitdb=%s",
+            "smmap=%s",
             'FAILURE_REPORT="$DEPLOY_STORE/logs/xwam/wandb-overlay-${SLURM_JOB_ID}-failure.txt"',
         ):
             self.assertIn(expected, script)

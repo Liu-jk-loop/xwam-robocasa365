@@ -69,29 +69,56 @@ wandb_module = Path(wandb.__file__).resolve()
 sentry_module = Path(sentry_sdk.__file__).resolve()
 assert wandb_module.is_relative_to(overlay), (wandb_module, overlay)
 assert sentry_module.is_relative_to(overlay), (sentry_module, overlay)
-assert importlib.metadata.version("wandb") == "0.23.1"
-assert importlib.metadata.version("sentry-sdk") == "2.58.0"
+
+pinned_overlay_distributions = {
+    "GitPython": "3.1.58",
+    "gitdb": "4.0.12",
+    "sentry-sdk": "2.58.0",
+    "smmap": "5.0.3",
+    "wandb": "0.23.1",
+}
+for distribution_name, expected_version in pinned_overlay_distributions.items():
+    distribution = importlib.metadata.distribution(distribution_name)
+    distribution_root = Path(distribution.locate_file("")).resolve()
+    assert distribution_root.is_relative_to(overlay), (
+        distribution_name,
+        distribution_root,
+        overlay,
+    )
+    assert distribution.version == expected_version, (
+        distribution_name,
+        distribution.version,
+        expected_version,
+    )
+
 
 def validate_declared_dependencies(distribution):
     resolved = {}
+    errors = []
     for raw_requirement in importlib.metadata.requires(distribution) or ():
         requirement = Requirement(raw_requirement)
         if requirement.marker is not None and not requirement.marker.evaluate():
             continue
-        installed = importlib.metadata.version(requirement.name)
-        assert requirement.specifier.contains(installed, prereleases=True), (
-            distribution,
-            raw_requirement,
-            installed,
-        )
+        try:
+            installed = importlib.metadata.version(requirement.name)
+        except importlib.metadata.PackageNotFoundError:
+            errors.append(f"{distribution}: missing {raw_requirement}")
+            continue
+        if not requirement.specifier.contains(installed, prereleases=True):
+            errors.append(
+                f"{distribution}: {raw_requirement}, installed={installed}"
+            )
         resolved[requirement.name] = installed
-    return resolved
+    return resolved, errors
 
 
-declared_dependencies = {
-    distribution: validate_declared_dependencies(distribution)
-    for distribution in ("wandb", "sentry-sdk")
-}
+declared_dependencies = {}
+dependency_errors = []
+for distribution in pinned_overlay_distributions:
+    resolved, errors = validate_declared_dependencies(distribution)
+    declared_dependencies[distribution] = resolved
+    dependency_errors.extend(errors)
+assert not dependency_errors, dependency_errors
 run = wandb.init(
     project="xwam-overlay-probe",
     id="xwam-overlay-probe",
@@ -148,6 +175,9 @@ trap 'rm -f "$MANIFEST_TMP"' EXIT
   printf 'overlay=%s\n' "$OVERLAY"
   printf 'wandb=%s\n' '0.23.1'
   printf 'sentry_sdk=%s\n' '2.58.0'
+  printf 'gitpython=%s\n' '3.1.58'
+  printf 'gitdb=%s\n' '4.0.12'
+  printf 'smmap=%s\n' '5.0.3'
   printf 'requirements_sha256=%s\n' "$(sha256sum "$REQUIREMENTS" | cut -d ' ' -f 1)"
   printf 'source_commit=%s\n' "$(git -C "$XWAM_REPO" rev-parse HEAD)"
   printf 'job_id=%s\n' "${SLURM_JOB_ID:-unknown}"
