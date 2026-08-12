@@ -8,7 +8,8 @@
 - 新增八个固定broker/server池、十六client池和最终聚合器。server按顺序加载以避免八份checkpoint同时读取造成Store/主机内存峰值；client按映射设置EGL GPU。聚合必须收齐16份PASS client summary、18任务和每任务完整episode数，才生成overall成功率。
 - 新增`eval_m6_atomic18_xwam.sbatch`：单节点4×GH200、450G主机内存、12小时、`#SBATCH --export=ALL`，分别用既有X-WAM与RoboCasa EDF运行policy/simulator并通过Store控制文件协调。评测checkpoint、实验目录和eval ID必须由提交环境显式提供；外层/子进程日志和failure report均持久化。真实8份模型同时加载、16个EGL client、吞吐、12小时中断恢复和成功率聚合均为`cluster-pending`。
 - 同一eval ID额外冻结checkpoint、commit、topology、manifest、global stats和episode数；任一字段变化都会在启动client前拒绝，避免断点续评混入另一模型的episode。最终summary显式记录eval ID和checkpoint路径。
-- 本地完成topology/聚合/CLI/协议/Slurm shell语法、Python编译、JSON和既有M4回归测试；本地没有Torch、RoboCasa或Clariden runtime，不能据此宣称正式评测可运行。回滚本次变更不会删除Store评测结果、checkpoint或日志；若已开始评测，外部目录需单独确认后处理。
+- 按用户要求将完整评测根目录迁移到IOPS新目录`/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/<eval ID>`；逐episode结果、PNG帧、MP4、client/server日志、恢复状态和summary不再写Capstor/Store。仅Slurm主日志与failure report保留在Store日志目录。
+- 本地完成topology/聚合/CLI/协议/Slurm shell语法、Python编译、JSON和既有M4回归测试；本地没有Torch、RoboCasa或Clariden runtime，不能据此宣称正式评测可运行。回滚本次变更不会删除IOPS评测结果、Store checkpoint或日志；若已开始评测，外部目录需单独确认后处理。
 
 ## 2026-08-11 — Clariden 四卡恢复门禁关闭与 M6 数据预检
 

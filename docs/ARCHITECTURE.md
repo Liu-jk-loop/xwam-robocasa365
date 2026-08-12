@@ -90,6 +90,7 @@ The X-WAM backbone should consume validated tensors and remain free of dataset-p
 - M6 policy server从正式实验`config.yaml`与DeepSpeed model state恢复模型，从不可变M6 manifest获取训练任务集合，并使用与manifest绑定的跨任务16D/12D statistics。每个server再按topology限制允许任务，禁止把单任务M4统计或未训练任务用于正式评测。
 - 默认每任务50个episode，环境seed为`42+episode_index`；模型推理seed固定42。每次请求执行ANS action denoise 10步并在动作可用后early-stop，video scheduler仍为50步；client每20个环境动作replan一次，不改变模型32步action horizon。
 - 每个episode复用M4.3原子progress、完整12D动作回放和16D state漂移检查。同一Git commit/checkpoint/eval ID重提时跳过已完成seed并恢复未完成seed。最终聚合必须收齐16份client summary、18个任务和配置声明的全部episode，缺失或失败记录不能被当作0%成功率静默吞掉。
+- 正式评测的episode、PNG帧、MP4、client/server日志、恢复状态和summary统一写入IOPS的`x-wam-eval/<eval ID>`；Capstor/Store不承载推理结果。Slurm主日志和failure report仍写Store日志目录用于作业级排错。
 
 ## Model initialization
 

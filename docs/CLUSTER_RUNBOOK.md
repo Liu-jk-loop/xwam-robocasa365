@@ -1133,10 +1133,11 @@ git status --short
 sbatch deployment/clariden/eval_m6_atomic18_xwam.sbatch
 ```
 
-`git status --short`必须为空。作业会把结果写到：
+`git status --short`必须为空。作业会在IOPS中新建并使用`x-wam-eval`目录，所有
+episode结果、视频帧、MP4、client/server日志、断点文件和最终汇总写到：
 
 ```text
-$DEPLOY_STORE/evaluations/xwam/$XWAM_EVAL_ID/
+/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/$XWAM_EVAL_ID/
 ```
 
 如果12小时先到，保持同一个commit、checkpoint、`XWAM_EVAL_ID`和episode数，再提交同一
@@ -1144,7 +1145,7 @@ $DEPLOY_STORE/evaluations/xwam/$XWAM_EVAL_ID/
 后复用旧eval ID；不同6k/9k/12k checkpoint必须使用不同ID。最终机器汇总为：
 
 ```text
-$DEPLOY_STORE/evaluations/xwam/$XWAM_EVAL_ID/summary.json
+/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/$XWAM_EVAL_ID/summary.json
 ```
 
 作业日志和失败报告分别位于：

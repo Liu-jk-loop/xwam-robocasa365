@@ -60,7 +60,7 @@ test -z "$(git status --porcelain)" || {
   xwam_fail "Git worktree must be clean before M6 evaluation"
 }
 
-EVAL_ROOT="$DEPLOY_STORE/evaluations/xwam/$EVAL_ID"
+EVAL_ROOT="$DEPLOY_IOPS/x-wam-eval/$EVAL_ID"
 RESULT_ROOT="$EVAL_ROOT/results"
 JOB_ROOT="$EVAL_ROOT/jobs/$SLURM_JOB_ID"
 CONTROL_ROOT="$JOB_ROOT/control"

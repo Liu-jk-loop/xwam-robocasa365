@@ -69,7 +69,7 @@
 - 根据实测约0.131 step/s，原每1,000步主动退出只使用约2.1小时，已不再符合12小时allocation。按用户接受最多重跑500步的取舍，正式planner目标改为始终指向最终step 16,390；12小时超时后重新提交同一脚本，从最新完整滚动/永久checkpoint恢复。中间超时Job不要求chunk audit PASS，最终正常到达16,390的Job仍执行完整final audit。
 - 正式sbatch内置`#SBATCH --export=ALL`，不再依赖每次提交命令手工补该选项；隐藏读取并`export`的W&B API key随提交环境继承，脚本仍在preflight阻止缺失key，提交后立即`unset`的安全流程不变。
 - 新增独立8卡正式路径：`train_m6_formal_xwam_8gpu.sbatch`申请2节点、每节点4张GH200，以torchrun建立8-rank world；硬件层为`8×batch16×accum1=GBS128`、ZeRO-1和full gradient checkpointing。实验名固定为`robocasa365_m6_atomic_seen18_rgb_seed42_8gpu`，不会扫描或复用4卡实验checkpoint；后续同一8卡脚本的12小时重提只恢复自己的rank 0～7完整checkpoint。真实跨节点NCCL和首个八分片checkpoint为`cluster-pending`。
-- 新增M6正式评测路径：单节点4×GH200启动8个独立X-WAM policy server（每卡2个）及16个RoboCasa simulator client，通过8对固定broker端口严格实现用户给定任务分配。`client6/client7`各串行两个任务，18任务完整覆盖；默认50 episode/task、环境seed 42起、模型seed 42、replan20、ANS action denoise 10。评测器使用M6 global stats和多任务checkpoint，支持同eval ID按episode恢复并最终聚合per-task/overall成功率。真实并行模型显存、EGL、吞吐和恢复为`cluster-pending`。
+- 新增M6正式评测路径：单节点4×GH200启动8个独立X-WAM policy server（每卡2个）及16个RoboCasa simulator client，通过8对固定broker端口严格实现用户给定任务分配。`client6/client7`各串行两个任务，18任务完整覆盖；默认50 episode/task、环境seed 42起、模型seed 42、replan20、ANS action denoise 10。评测器使用M6 global stats和多任务checkpoint，支持同eval ID按episode恢复并最终聚合per-task/overall成功率；全部推理结果和视频写IOPS `x-wam-eval`，不写Capstor/Store。真实并行模型显存、EGL、吞吐和恢复为`cluster-pending`。
 
 ## 已确认资源
 

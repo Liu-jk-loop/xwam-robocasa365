@@ -37,6 +37,8 @@ X-WAM server，共8个固定server/broker对；16个RoboCasa client按版本化t
 调用使用ANS `early_stop`，得到动作后在第10次模型前向停止，不继续生成完整视频。
 每个episode都沿用M4.3的动作级原子进度和确定性回放。相同Git commit、checkpoint与
 `XWAM_EVAL_ID`重新提交时，已完成episode直接跳过，中断episode从原progress恢复。
+正式评测产物统一写入IOPS的`/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/`
+目录，不把视频或逐episode推理结果写到Capstor/Store。
 
 Policy server从M6 manifest读取18个合法任务，并只使用与manifest绑定的跨任务
 normalization statistics；每个server还会拒绝topology未分配给自己的任务。最终

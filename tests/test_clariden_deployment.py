@@ -244,6 +244,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
         )
         for expected in (
             "#SBATCH --export=ALL",
+            'EVAL_ROOT="$DEPLOY_IOPS/x-wam-eval/$EVAL_ID"',
             "evaluation_contract.txt",
             'EVAL_ID="$EVAL_ID"',
             'CHECKPOINT="$CHECKPOINT"',
@@ -251,6 +252,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "--checkpoint \"$CHECKPOINT\"",
         ):
             self.assertIn(expected, eval_script)
+        self.assertNotIn('EVAL_ROOT="$DEPLOY_STORE/evaluations/xwam', eval_script)
 
     def test_debug_log_archiver_preserves_formal_logs(self) -> None:
         script = (DEPLOY_ROOT / "archive_debug_logs_xwam.sh").read_text(
