@@ -83,6 +83,14 @@ The X-WAM backbone should consume validated tensors and remain free of dataset-p
 - Policy server 对每个成功或失败请求 fsync 追加 JSONL。连续服务可在 client 完成后由 `Ctrl-C` 正常退出，并在满足最小请求数且无失败时写出 `pass`；client 进度与 server journal 由独立审计器交叉核对。
 - Client中断时可能已有一个请求在server执行；该response未进入progress，恢复后会以相同request ID和确定性seed重试。审计按request ID去重并允许多条一致的成功server记录，但任何关联失败、shape/checkpoint/seed漂移仍阻塞验收；环境动作只按progress执行一次。
 
+#### M6 Atomic-Seen 18 并行评测
+
+- Clariden单节点固定4张GH200，每卡加载两个独立X-WAM进程，共8个policy server；每个server使用独立frontend/backend broker端口，两个指定simulator client不能被动态路由到其他server。模型和模拟器继续分别运行于`xwam.toml`和`robocasa365.toml`，不得合并Python依赖树。
+- 版本化topology必须恰好包含8个server、16个client、每GPU两个server、每server两个client，并不重不漏覆盖Atomic-Seen 18。`client6/client7`各串行两个任务，其余client各一个任务；server6/server7因此各覆盖三个任务。
+- M6 policy server从正式实验`config.yaml`与DeepSpeed model state恢复模型，从不可变M6 manifest获取训练任务集合，并使用与manifest绑定的跨任务16D/12D statistics。每个server再按topology限制允许任务，禁止把单任务M4统计或未训练任务用于正式评测。
+- 默认每任务50个episode，环境seed为`42+episode_index`；模型推理seed固定42。每次请求执行ANS action denoise 10步并在动作可用后early-stop，video scheduler仍为50步；client每20个环境动作replan一次，不改变模型32步action horizon。
+- 每个episode复用M4.3原子progress、完整12D动作回放和16D state漂移检查。同一Git commit/checkpoint/eval ID重提时跳过已完成seed并恢复未完成seed。最终聚合必须收齐16份client summary、18个任务和配置声明的全部episode，缺失或失败记录不能被当作0%成功率静默吞掉。
+
 ## Model initialization
 
 Two modes remain supported:

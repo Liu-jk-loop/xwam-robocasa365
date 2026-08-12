@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""加载 M3 X-WAM checkpoint，并通过 M4.2 broker 提供 RoboCasa365 12D 动作。"""
+"""加载 M3/M6 X-WAM checkpoint，并通过 broker 提供 RoboCasa365 12D 动作。"""
 
 from __future__ import annotations
 
 import argparse
 import gc
 import importlib.metadata
+import json
 import logging
 import os
 import platform
+import random
 import sys
 import time
 import traceback
+from collections.abc import Collection
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -24,6 +27,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from data.robocasa365_contract import resolve_lerobot_root  # noqa: E402
+from data.robocasa365_multitask import (  # noqa: E402
+    load_multitask_dataset_manifest,
+)
 from data.robocasa365_schema import PandaOmronTensorCodec  # noqa: E402
 from evaluation.robocasa365_protocol import (  # noqa: E402
     PROTOCOL_NAME,
@@ -46,11 +52,18 @@ DEFAULT_REQUEST_JOURNAL = (
 )
 
 
-def validate_checkpoint_task(request_task: str, checkpoint_task: str) -> None:
-    if request_task != checkpoint_task:
+def validate_checkpoint_task(
+    request_task: str, checkpoint_tasks: str | Collection[str]
+) -> None:
+    allowed = (
+        {checkpoint_tasks}
+        if isinstance(checkpoint_tasks, str)
+        else {str(task) for task in checkpoint_tasks}
+    )
+    if request_task not in allowed:
         raise ValueError(
-            "请求任务与单任务 checkpoint 不一致："
-            f"checkpoint={checkpoint_task!r}, request={request_task!r}"
+            "请求任务不属于 checkpoint 的训练任务："
+            f"checkpoint_tasks={sorted(allowed)!r}, request={request_task!r}"
         )
 
 
@@ -88,15 +101,34 @@ def _package_version(name: str) -> str | None:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--experiment-dir", required=True, help="包含 config.yaml/checkpoints 的 M3 实验目录。")
+    parser.add_argument("--experiment-dir", required=True, help="包含 config.yaml/checkpoints 的 X-WAM 实验目录。")
     parser.add_argument("--checkpoint", help="DeepSpeed .ckpt 目录或 mp_rank_00_model_states.pt；默认 last.ckpt。")
     parser.add_argument("--wan-checkpoint-dir", help="覆盖 config 中的 Wan2.2-TI2V-5B 路径。")
     parser.add_argument("--dataset-path", help="覆盖训练配置中的 RoboCasa365 单任务数据路径，用于读取 stats。")
+    parser.add_argument(
+        "--multitask-manifest",
+        help="M6 多任务训练 manifest；覆盖训练 config 中的 dataset.multitask_manifest。",
+    )
+    parser.add_argument(
+        "--statistics-path",
+        help="M6 跨任务 normalization statistics；覆盖 dataset.statistics_path。",
+    )
+    parser.add_argument(
+        "--allowed-task",
+        action="append",
+        default=[],
+        help="限制本 server 可服务的任务；可重复。默认允许 checkpoint 中全部训练任务。",
+    )
     parser.add_argument("--schema-path", help="覆盖训练配置中的 PandaOmron schema。")
     parser.add_argument("--broker-address", default="127.0.0.1")
     parser.add_argument("--broker-port", type=int, default=10087)
     parser.add_argument("--denoise-steps", type=int, default=50)
     parser.add_argument("--action-denoise-steps", type=int, default=10)
+    parser.add_argument(
+        "--model-seed",
+        type=int,
+        help="固定每次request的模型采样seed；省略时保留M4的request-specific确定性seed。",
+    )
     parser.add_argument("--max-requests", type=int, default=0, help="0 表示持续服务；smoke 建议 1。")
     parser.add_argument("--minimum-requests", type=int, default=0)
     parser.add_argument(
@@ -118,7 +150,95 @@ def _parse_args() -> argparse.Namespace:
         parser.error("max/minimum requests 不能为负")
     if args.max_requests and args.minimum_requests > args.max_requests:
         parser.error("minimum requests 不能超过 max requests")
+    if args.model_seed is not None and (
+        args.model_seed < 0 or args.model_seed >= 2**32
+    ):
+        parser.error("model seed 必须位于 0..2^32-1")
+    if len(args.allowed_task) != len(set(args.allowed_task)):
+        parser.error("--allowed-task 不能重复")
     return args
+
+
+def _resolve_repo_path(value: str | Path) -> Path:
+    path = Path(value).expanduser()
+    return (REPO_ROOT / path).resolve() if not path.is_absolute() else path.resolve()
+
+
+def _load_checkpoint_data_contract(
+    args: argparse.Namespace,
+    config: Any,
+    schema_path: str,
+) -> tuple[PandaOmronTensorCodec, list[str], dict[str, Any]]:
+    dataset_config = config.dataset
+    raw_manifest = args.multitask_manifest or dataset_config.get("multitask_manifest")
+    if raw_manifest:
+        manifest_path = _resolve_repo_path(str(raw_manifest))
+        atomic_manifest = _resolve_repo_path(str(dataset_config.get("task_manifest")))
+        manifest = load_multitask_dataset_manifest(
+            manifest_path,
+            atomic_task_manifest=atomic_manifest,
+            expected_task_count=int(dataset_config.get("expected_task_count", 18)),
+        )
+        statistics_value = args.statistics_path or dataset_config.get("statistics_path")
+        if not statistics_value:
+            raise ValueError("M6 多任务 checkpoint 必须提供跨任务 statistics_path")
+        statistics_path = _resolve_repo_path(str(statistics_value))
+        try:
+            statistics_payload = json.loads(
+                statistics_path.read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"无法读取M6 global statistics：{statistics_path}: {exc}") from exc
+        if not isinstance(statistics_payload, dict):
+            raise ValueError("M6 global statistics 顶层必须为对象")
+        if statistics_payload.get("ok") is not True or statistics_payload.get("result") != "pass":
+            raise ValueError("M6 global statistics 尚未通过数据门禁")
+        if statistics_payload.get("manifest_digest") != manifest.manifest_digest:
+            raise ValueError(
+                "M6 global statistics与训练manifest digest不一致："
+                f"stats={statistics_payload.get('manifest_digest')}, "
+                f"manifest={manifest.manifest_digest}"
+            )
+        checkpoint_tasks = [entry.task_name for entry in manifest.tasks]
+        allowed_tasks = list(args.allowed_task) or checkpoint_tasks
+        unknown = sorted(set(allowed_tasks) - set(checkpoint_tasks))
+        if unknown:
+            raise ValueError(f"--allowed-task 不属于 checkpoint manifest：{unknown}")
+        # All entries have already passed the immutable M6 manifest contract.  One
+        # real dataset is sufficient to revalidate the shared PandaOmron modality;
+        # normalization itself always comes from the manifest-bound global stats.
+        codec = PandaOmronTensorCodec.from_dataset(
+            manifest.tasks[0].dataset_path,
+            schema_path,
+            statistics_path=statistics_path,
+        )
+        return codec, allowed_tasks, {
+            "mode": "multitask",
+            "multitask_manifest": str(manifest_path),
+            "manifest_digest": manifest.manifest_digest,
+            "statistics_path": str(statistics_path),
+            "checkpoint_tasks": checkpoint_tasks,
+        }
+
+    if args.statistics_path:
+        raise ValueError("单任务 checkpoint 不能单独覆盖 --statistics-path")
+    if args.allowed_task:
+        raise ValueError("单任务 checkpoint 不需要 --allowed-task")
+    if args.dataset_path is not None:
+        dataset_config.dataset_path = str(Path(args.dataset_path).expanduser().resolve())
+    dataset_path = dataset_config.get("dataset_path")
+    if not dataset_path:
+        raise ValueError("必须通过训练 config 或 --dataset-path 提供 RoboCasa365 数据路径")
+    task_name = dataset_config.get("task_name")
+    if not isinstance(task_name, str) or not task_name:
+        raise ValueError("单任务 checkpoint config 必须包含 dataset.task_name")
+    codec = PandaOmronTensorCodec.from_dataset(dataset_path, schema_path)
+    return codec, [task_name], {
+        "mode": "single_task",
+        "dataset_path": str(Path(dataset_path).expanduser().resolve()),
+        "stats_path": str((resolve_lerobot_root(dataset_path) / "meta" / "stats.json").resolve()),
+        "checkpoint_tasks": [task_name],
+    }
 
 
 def _load_runtime(
@@ -130,24 +250,25 @@ def _load_runtime(
 
     from runners.xwam_runner import XWAMRunner
 
+    if args.model_seed is not None:
+        random.seed(args.model_seed)
+        np.random.seed(args.model_seed)
+        torch.manual_seed(args.model_seed)
+        torch.cuda.manual_seed_all(args.model_seed)
+
     experiment_dir = Path(args.experiment_dir).expanduser().resolve()
     config_path = experiment_dir / "config.yaml"
     if not config_path.is_file():
-        raise FileNotFoundError(f"M3 实验缺少 config.yaml：{config_path}")
+        raise FileNotFoundError(f"X-WAM 实验缺少 config.yaml：{config_path}")
     config = OmegaConf.load(config_path)
     if args.wan_checkpoint_dir is not None:
         config.wan_checkpoint_dir = str(Path(args.wan_checkpoint_dir).expanduser().resolve())
     if not config.get("wan_checkpoint_dir"):
         raise ValueError("必须通过 config 或 --wan-checkpoint-dir 提供 Wan2.2 路径")
-    if args.dataset_path is not None:
-        config.dataset.dataset_path = str(Path(args.dataset_path).expanduser().resolve())
-    dataset_path = config.dataset.get("dataset_path")
-    if not dataset_path:
-        raise ValueError("必须通过训练 config 或 --dataset-path 提供 RoboCasa365 数据路径")
     schema_path = args.schema_path or config.get("checkpoint_schema_path") or config.dataset.get("schema_path")
     if not schema_path:
         raise ValueError("必须提供 PandaOmron schema path")
-    schema_path = str((REPO_ROOT / schema_path).resolve()) if not Path(schema_path).is_absolute() else str(Path(schema_path).resolve())
+    schema_path = str(_resolve_repo_path(schema_path))
 
     if str(config.dataset.get("format")) != "robocasa365_lerobot_v21":
         raise ValueError(f"M4.2 只允许 RoboCasa365 v2.1 dataset config：{config.dataset.get('format')!r}")
@@ -155,9 +276,6 @@ def _load_runtime(
         raise ValueError("M4.2 首轮只允许 RGB-only / use_depth=false")
     if int(config.get("action_dim")) != 12 or int(config.get("proprio_dim")) != 16:
         raise ValueError("M4.2 要求 model action_dim=12、proprio_dim=16")
-    task_name = config.dataset.get("task_name")
-    if not isinstance(task_name, str) or not task_name:
-        raise ValueError("M4.2 单任务 checkpoint config 必须包含 dataset.task_name")
     frame_skip = int(config.dataset.frame_skip)
     action_skip = int(config.dataset.action_skip)
     if frame_skip <= 0 or action_skip <= 0 or frame_skip % action_skip != 0:
@@ -168,8 +286,9 @@ def _load_runtime(
     config.use_decoupled_inference = True
     config.use_gradient_checkpointing = False
 
-    codec = PandaOmronTensorCodec.from_dataset(dataset_path, schema_path)
-    stats_path = resolve_lerobot_root(dataset_path) / "meta" / "stats.json"
+    codec, allowed_tasks, data_contract = _load_checkpoint_data_contract(
+        args, config, schema_path
+    )
     checkpoint_path = resolve_model_state_checkpoint(experiment_dir, args.checkpoint)
 
     runner = XWAMRunner(config=config, run_depth=False).cuda().bfloat16()
@@ -196,11 +315,15 @@ def _load_runtime(
     runtime = {
         "protocol": PROTOCOL_NAME,
         "config_path": str(config_path),
+        # 保留 M4 单任务审计依赖的顶层字段；M6 完整记录在 data_contract 中。
+        "task": allowed_tasks[0] if len(allowed_tasks) == 1 else None,
+        "dataset_path": data_contract.get("dataset_path"),
+        "stats_path": data_contract.get("stats_path") or data_contract.get("statistics_path"),
         "checkpoint": str(checkpoint_path),
         "checkpoint_bytes": checkpoint_path.stat().st_size,
-        "dataset_path": str(Path(dataset_path).expanduser().resolve()),
-        "stats_path": str(stats_path.resolve()),
-        "task": task_name,
+        "data_contract": data_contract,
+        "tasks": allowed_tasks,
+        "model_seed": int(args.model_seed) if args.model_seed is not None else None,
         "schema_path": schema_path,
         "schema_sha256": codec.schema.canonical_sha256,
         "action_num": int(config.action_num),
@@ -284,9 +407,16 @@ def _serve(args: argparse.Namespace, report: dict[str, Any]) -> int:
                 request = decode_message(wire)
                 if request["kind"] != "policy_request":
                     raise ValueError(f"server 收到非 request kind：{request['kind']}")
-                validate_checkpoint_task(request["task"], runtime["task"])
-                inference_seed = deterministic_inference_seed(
-                    request["task"], request["episode_id"], request["step_id"]
+                validate_checkpoint_task(request["task"], runtime["tasks"])
+                # The formal comparison fixes model-side sampling to seed 42 for
+                # every replan.  Environment diversity remains controlled by the
+                # per-episode RoboCasa seed carried in the request.
+                inference_seed = (
+                    int(args.model_seed)
+                    if args.model_seed is not None
+                    else deterministic_inference_seed(
+                        request["task"], request["episode_id"], request["step_id"]
+                    )
                 )
                 rgb, proprio, prompt = _prepare_inputs(request, codec, runner.config)
                 torch.cuda.synchronize()

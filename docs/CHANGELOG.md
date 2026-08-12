@@ -1,5 +1,15 @@
 # 变更记录
 
+## 2026-08-12 — Clariden M6 Atomic-Seen 18 并行评测
+
+- 新增版本化`8 server / 16 client / 4 GPU`topology，逐项冻结用户给定的client→server→GPU→task映射及FastWAM参考成功率。每卡两个policy server，每server两个client；`client6`串行`OpenStandMixerHead → CloseToasterOvenDoor`，`client7`串行`SlideDishwasherRack → TurnOnElectricKettle`，最终18个Atomic-Seen任务不重不漏。默认每任务50个episode，环境seed从42开始，模型seed固定42，replan为20，ANS action去噪10步并保留50步video scheduler。
+- 扩展RoboCasa365 policy server以严格支持M6多任务checkpoint：从不可变训练manifest解析合法任务，使用manifest绑定的跨任务global statistics，并允许每个server进一步限制topology分配任务。单任务M4 checkpoint行为保持兼容；任务越界、统计缺失、manifest/schema漂移仍立即失败。每个server在构造模型前固定Python/NumPy/Torch/CUDA seed，且每次replan显式使用模型seed42。
+- 新增可恢复M6 client：每个任务按seed `42..91`逐episode运行既有M4.3完整horizon evaluator；已完成seed跳过，中断seed使用原Git commit和原子progress执行确定性动作回放后继续。每完成一个episode便原子更新client/task成功率，Slurm超时后可用同一eval ID重提。
+- 新增八个固定broker/server池、十六client池和最终聚合器。server按顺序加载以避免八份checkpoint同时读取造成Store/主机内存峰值；client按映射设置EGL GPU。聚合必须收齐16份PASS client summary、18任务和每任务完整episode数，才生成overall成功率。
+- 新增`eval_m6_atomic18_xwam.sbatch`：单节点4×GH200、450G主机内存、12小时、`#SBATCH --export=ALL`，分别用既有X-WAM与RoboCasa EDF运行policy/simulator并通过Store控制文件协调。评测checkpoint、实验目录和eval ID必须由提交环境显式提供；外层/子进程日志和failure report均持久化。真实8份模型同时加载、16个EGL client、吞吐、12小时中断恢复和成功率聚合均为`cluster-pending`。
+- 同一eval ID额外冻结checkpoint、commit、topology、manifest、global stats和episode数；任一字段变化都会在启动client前拒绝，避免断点续评混入另一模型的episode。最终summary显式记录eval ID和checkpoint路径。
+- 本地完成topology/聚合/CLI/协议/Slurm shell语法、Python编译、JSON和既有M4回归测试；本地没有Torch、RoboCasa或Clariden runtime，不能据此宣称正式评测可运行。回滚本次变更不会删除Store评测结果、checkpoint或日志；若已开始评测，外部目录需单独确认后处理。
+
 ## 2026-08-11 — Clariden 四卡恢复门禁关闭与 M6 数据预检
 
 - Job `3053264`在干净commit `a2787ded5106f5178c21010d8378a0d2070e7f88`上完成4×GH200全新step 2保存和严格恢复到step 4。两阶段result均为pass，四rank FP32 optimizer实态、有限RGB-only loss、step 2/4完整checkpoint、恢复源一致性及clean Git provenance全部通过；联合audit为`ok=true/result=pass`，最终输出四卡恢复PASS。每rank峰值显存allocated/reserved为30.677/33.039 GiB，Clariden多卡checkpoint/resume工程门禁关闭。

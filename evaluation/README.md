@@ -24,6 +24,26 @@ M4.2 已提供三条 RoboCasa365 专用入口：
 
 M4.3 完整 horizon 使用 `configs/evaluation/robocasa365_close_fridge_m4_full.json` 和 `run_robocasa365_policy_rollout_resumable.py`。它每个 step 原子保存恢复进度；使用 `--resume-run-dir /path/to/existing/run` 时会从相同 seed 重建环境、回放已执行动作并校验16D state，然后继续未完成的 action chunk。`scripts/audit_robocasa365_policy_rollout.py` 负责把 client 证据与 server request JSONL 交叉审计。精确命令仍以 `docs/CLUSTER_RUNBOOK.md` 为准。
 
+## M6 Atomic-Seen 18 正式评测
+
+Clariden 正式评测使用
+`configs/evaluation/robocasa365_m6_atomic18_8server_16client.json` 和
+`deployment/clariden/eval_m6_atomic18_xwam.sbatch`：单节点4张GH200，每卡两个独立
+X-WAM server，共8个固定server/broker对；16个RoboCasa client按版本化topology固定路由。
+`client6`与`client7`各自串行执行两个任务，因此16个client恰好覆盖18个Atomic-Seen任务。
+
+默认每任务50个episode，环境seed为`42..91`，模型侧每次replan固定seed 42；
+`replan_steps=20`、action denoise 10步。X-WAM仍保留50步video scheduler，但policy
+调用使用ANS `early_stop`，得到动作后在第10次模型前向停止，不继续生成完整视频。
+每个episode都沿用M4.3的动作级原子进度和确定性回放。相同Git commit、checkpoint与
+`XWAM_EVAL_ID`重新提交时，已完成episode直接跳过，中断episode从原progress恢复。
+
+Policy server从M6 manifest读取18个合法任务，并只使用与manifest绑定的跨任务
+normalization statistics；每个server还会拒绝topology未分配给自己的任务。最终
+`scripts/aggregate_robocasa365_m6_evaluation.py`要求16份client summary、18个任务和
+每任务完整episode数全部存在，才写出总体PASS和成功率。完整提交命令见
+`docs/CLUSTER_RUNBOOK.md`。
+
 ## Installation
 
 Please clone the whole repository with submodules:

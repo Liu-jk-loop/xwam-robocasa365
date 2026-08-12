@@ -1101,6 +1101,63 @@ python scripts/audit_robocasa365_m6_formal_training.py \
 
 如果正式训练经历多次resume，传给审计器的log应为本次最终调用的完整log；metadata/result/events/optimizer目录必须来自同一个run prefix。最终反馈commit、preflight、门禁audit、正式audit、两段门禁日志、正式日志、`nvidia-smi`和实验checkpoint目录清单。所有`logs/`与实验产物保持在Git之外。
 
+## Clariden M6 Atomic-Seen 18 正式评测
+
+该入口使用单节点4张GH200，同时运行8个X-WAM server和16个RoboCasa client。模型与
+simulator仍使用两个独立EDF。默认每任务50个episode；环境seed为42～91，模型seed
+固定42，replan为20，action denoise为10步。`client6/client7`按topology各自串行两个
+任务，其余client各一个任务。
+
+先选择一个完整M6 checkpoint。以下示例评测8卡训练的step 6000；step 9000/12000只需
+替换`EVAL_STEP`。永久checkpoint位于Store，因此优先从该目录选择：
+
+```bash
+DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
+DEPLOY_CAPSCR=/capstor/scratch/cscs/zjingchen/terry_nys
+REPO="$DEPLOY_STORE/src/xwam-robocasa365"
+FORMAL_NAME=robocasa365_m6_atomic_seen18_rgb_seed42_8gpu
+EVAL_STEP=6000
+
+export XWAM_EVAL_EXPERIMENT_DIR="$DEPLOY_CAPSCR/experiments/xwam/$FORMAL_NAME"
+export XWAM_EVAL_CHECKPOINT="$(find \
+  "$DEPLOY_STORE/checkpoints/xwam/$FORMAL_NAME/checkpoints" \
+  -maxdepth 1 -type d -name "*step=${EVAL_STEP}.ckpt" -print -quit)"
+export XWAM_EVAL_ID="${FORMAL_NAME}-step${EVAL_STEP}-seed42-50ep"
+export XWAM_EVAL_EPISODES=50
+
+test -s "$XWAM_EVAL_EXPERIMENT_DIR/config.yaml"
+test -s "$XWAM_EVAL_CHECKPOINT/checkpoint/mp_rank_00_model_states.pt"
+
+cd "$REPO"
+git status --short
+sbatch deployment/clariden/eval_m6_atomic18_xwam.sbatch
+```
+
+`git status --short`必须为空。作业会把结果写到：
+
+```text
+$DEPLOY_STORE/evaluations/xwam/$XWAM_EVAL_ID/
+```
+
+如果12小时先到，保持同一个commit、checkpoint、`XWAM_EVAL_ID`和episode数，再提交同一
+条`sbatch`即可。已完成seed会跳过，中断seed从原子progress回放恢复。不要换checkpoint
+后复用旧eval ID；不同6k/9k/12k checkpoint必须使用不同ID。最终机器汇总为：
+
+```text
+$DEPLOY_STORE/evaluations/xwam/$XWAM_EVAL_ID/summary.json
+```
+
+作业日志和失败报告分别位于：
+
+```text
+$DEPLOY_STORE/logs/xwam/m6-eval-<JOB_ID>.log
+$DEPLOY_STORE/logs/xwam/m6-eval-<JOB_ID>-failure.txt
+```
+
+`summary.json`只有在16个client、18个任务及每任务50个episode全部收齐时才会写
+`ok=true/result=pass`。任务失败本身记入成功率，不等同于工程失败；缺失episode、
+server异常、checkpoint/statistics漂移或模拟器异常会阻止最终PASS。
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：

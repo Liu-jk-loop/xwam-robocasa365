@@ -57,6 +57,10 @@ class ClaridenDeploymentTest(unittest.TestCase):
             contract["validation"]["wandb_runtime_overlay"],
             "pass",
         )
+        self.assertEqual(
+            contract["validation"]["m6_atomic_seen18_evaluation"],
+            "cluster-pending",
+        )
         self.assertEqual(contract["cluster_evidence"]["training_smoke_result"], "pass")
         self.assertIsNone(contract["cluster_evidence"]["training_smoke_job_id"])
         self.assertIsNone(contract["cluster_evidence"]["training_source_commit"])
@@ -218,6 +222,8 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "prepare_m6_data_xwam.sbatch",
             "smoke_m6_gate_xwam.sbatch",
             "train_m6_formal_xwam.sbatch",
+            "train_m6_formal_xwam_8gpu.sbatch",
+            "eval_m6_atomic18_xwam.sbatch",
         ):
             result = subprocess.run(
                 ["bash", "-n", str(DEPLOY_ROOT / script)],
@@ -232,6 +238,19 @@ class ClaridenDeploymentTest(unittest.TestCase):
         build_script = (DEPLOY_ROOT / "build_xwam.sbatch").read_text(encoding="utf-8")
         self.assertIn("unsquashfs -s", build_script)
         self.assertIn("ENROOT_STATUS", build_script)
+
+        eval_script = (DEPLOY_ROOT / "eval_m6_atomic18_xwam.sbatch").read_text(
+            encoding="utf-8"
+        )
+        for expected in (
+            "#SBATCH --export=ALL",
+            "evaluation_contract.txt",
+            'EVAL_ID="$EVAL_ID"',
+            'CHECKPOINT="$CHECKPOINT"',
+            "--eval-id \"$EVAL_ID\"",
+            "--checkpoint \"$CHECKPOINT\"",
+        ):
+            self.assertIn(expected, eval_script)
 
     def test_debug_log_archiver_preserves_formal_logs(self) -> None:
         script = (DEPLOY_ROOT / "archive_debug_logs_xwam.sh").read_text(

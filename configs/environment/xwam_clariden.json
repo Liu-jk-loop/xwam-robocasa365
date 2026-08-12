@@ -65,7 +65,8 @@
     "m6_atomic_seen18_preflight": "pass",
     "m6_gh200_formal_profile_gate": "cluster-pending",
     "wandb_runtime_overlay": "pass",
-    "m6_formal_training": "retry-pending"
+    "m6_formal_training": "retry-pending",
+    "m6_atomic_seen18_evaluation": "cluster-pending"
   },
   "cluster_evidence": {
     "source_commit": "6594d898a87145101afe5f8a45fa6ba907b2b3c3",

@@ -1,13 +1,13 @@
 # 项目进度
 
-更新时间：2026-08-11
+更新时间：2026-08-12
 
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：Clariden 迁移——独立 X-WAM aarch64/GH200 policy 容器部署
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划，Job `3053436`已关闭4×GH200 `mb16/ZeRO-1` 正式profile门禁；现有4卡实验保留。新增独立2节点×4卡、BS16/累积1/GBS128/ZeRO-1入口，按用户决定从公开pretrained的step 0开始，真实跨节点运行仍为`cluster-pending`
+- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划，Job `3053436`已关闭4×GH200 `mb16/ZeRO-1` 正式profile门禁；现有4卡实验保留。新增独立2节点×4卡训练入口及单节点8-server/16-client Atomic-Seen 18评测入口；真实跨节点训练和并行评测均为`cluster-pending`
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
-| M6 Atomic 正式训练与评测 | 保留4卡BS16/累积2实验；新增独立8卡BS16/累积1实验 | 8卡跨节点启动、八分片保存/恢复为`cluster-pending` | 8卡从step 0运行；每500步滚动、每3,000步永久保存，最终完成16,390步final audit |
+| M6 Atomic 正式训练与评测 | 保留4卡BS16/累积2实验；新增独立8卡BS16/累积1实验和8-server/16-client评测 | 8卡训练及18任务并行评测为`cluster-pending` | 对选定6k/9k/12k checkpoint逐个运行50 seeds闭环评测并比较成功率 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
 ## Clariden 部署状态
@@ -69,6 +69,7 @@
 - 根据实测约0.131 step/s，原每1,000步主动退出只使用约2.1小时，已不再符合12小时allocation。按用户接受最多重跑500步的取舍，正式planner目标改为始终指向最终step 16,390；12小时超时后重新提交同一脚本，从最新完整滚动/永久checkpoint恢复。中间超时Job不要求chunk audit PASS，最终正常到达16,390的Job仍执行完整final audit。
 - 正式sbatch内置`#SBATCH --export=ALL`，不再依赖每次提交命令手工补该选项；隐藏读取并`export`的W&B API key随提交环境继承，脚本仍在preflight阻止缺失key，提交后立即`unset`的安全流程不变。
 - 新增独立8卡正式路径：`train_m6_formal_xwam_8gpu.sbatch`申请2节点、每节点4张GH200，以torchrun建立8-rank world；硬件层为`8×batch16×accum1=GBS128`、ZeRO-1和full gradient checkpointing。实验名固定为`robocasa365_m6_atomic_seen18_rgb_seed42_8gpu`，不会扫描或复用4卡实验checkpoint；后续同一8卡脚本的12小时重提只恢复自己的rank 0～7完整checkpoint。真实跨节点NCCL和首个八分片checkpoint为`cluster-pending`。
+- 新增M6正式评测路径：单节点4×GH200启动8个独立X-WAM policy server（每卡2个）及16个RoboCasa simulator client，通过8对固定broker端口严格实现用户给定任务分配。`client6/client7`各串行两个任务，18任务完整覆盖；默认50 episode/task、环境seed 42起、模型seed 42、replan20、ANS action denoise 10。评测器使用M6 global stats和多任务checkpoint，支持同eval ID按episode恢复并最终聚合per-task/overall成功率。真实并行模型显存、EGL、吞吐和恢复为`cluster-pending`。
 
 ## 已确认资源
 
@@ -301,7 +302,7 @@ M3.2 12-step 训练反馈与 audit 修正：
 - M4.1 不再需要重跑；本地 `log/` 证据只读保留并由根级 ignore 排除，机器日志、视频、模型和评测产物继续位于 Git 之外。
 - M4.2 不再需要补充输入或重跑；原始日志与视频保持在 Git ignore 目录，不上传仓库。
 - M4.3 不再需要重跑；900-step、225 次请求、故意中断恢复和视频证据已通过机器审计。
-- 下一步由用户在新commit上生成M6 18任务manifest/global stats和preflight JSON，再运行4×H100 step 2→4门禁；depth试点暂不混入首轮H100 RGB基线。
+- 下一步从已有的 M6 8×GH200 RGB-only 正式训练产物中选择完整 checkpoint，运行单节点 8 server/16 client 的 Atomic-Seen 18 任务评测并回传聚合 summary；depth 试点仍不混入首轮 RGB 基线。
 
 ## 当前执行过程
 
