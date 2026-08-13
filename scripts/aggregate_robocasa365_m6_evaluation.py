@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Aggregate and validate all M6 client summaries."""
+"""Aggregate and validate the eighteen lean M6 task results."""
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
+import math
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,6 +29,14 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _expected_task_entries(topology: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        task
+        for client in topology["clients"].values()
+        for task in client["tasks"]
+    ]
+
+
 def aggregate(
     *,
     topology_path: str | Path,
@@ -39,54 +49,69 @@ def aggregate(
     root = Path(output_root).expanduser().resolve()
     errors: list[str] = []
     task_rows: list[dict[str, Any]] = []
-    seen_tasks: set[str] = set()
-    for client_id in range(16):
-        summary_path = root / f"client_{client_id:02d}" / "client_summary.json"
-        if not summary_path.is_file():
-            errors.append(f"缺少 client summary：{summary_path}")
+    expected_entries = _expected_task_entries(topology)
+    for task_entry in expected_entries:
+        task = str(task_entry["name"])
+        result_path = root / task / "result.json"
+        if not result_path.is_file():
+            errors.append(f"缺少 task result：{result_path}")
             continue
-        summary = _read_json(summary_path)
-        if summary.get("result") != "pass":
-            errors.append(f"client {client_id} 尚未完成：{summary.get('result')}")
-        expected_client = topology["clients"][client_id]
-        expected_task_names = [row["name"] for row in expected_client["tasks"]]
-        actual_task_names = [str(row.get("task")) for row in summary.get("tasks", [])]
-        if summary.get("client_id") != client_id:
-            errors.append(f"client summary id不匹配：expected={client_id}")
-        if summary.get("server_id") != expected_client["server_id"]:
-            errors.append(f"client {client_id} server映射漂移")
-        if actual_task_names != expected_task_names:
-            errors.append(
-                f"client {client_id} task顺序漂移："
-                f"expected={expected_task_names}, actual={actual_task_names}"
-            )
-        if summary.get("model_seed") != topology["model_seed"]:
-            errors.append(f"client {client_id} model seed漂移")
-        if summary.get("seed_start") != topology["seed_start"]:
-            errors.append(f"client {client_id} task seed漂移")
-        for row in summary.get("tasks", []):
-            task = str(row.get("task"))
-            if task in seen_tasks:
-                errors.append(f"task summary 重复：{task}")
-                continue
-            seen_tasks.add(task)
-            completed = int(row.get("episodes_completed", -1))
-            if completed != episodes_per_task:
+        result = _read_json(result_path)
+        expected_fields = {
+            "task": task,
+            "result": "pass",
+            "split": topology["scene"]["split"],
+            "model_seed": topology["model_seed"],
+            "seed_start": topology["seed_start"],
+            "episodes_expected": episodes_per_task,
+            "episodes_completed": episodes_per_task,
+            "max_steps": topology["max_steps_per_episode"],
+            "replan_steps": topology["replan_steps"],
+            "action_denoise_steps": topology["action_denoise_steps"],
+            "video_fps": topology["video"]["fps"],
+        }
+        for key, expected in expected_fields.items():
+            actual = result.get(key)
+            if actual != expected:
                 errors.append(
-                    f"{task} episode不完整：{completed}/{episodes_per_task}"
+                    f"{task} {key}漂移：expected={expected!r}, actual={actual!r}"
                 )
-            task_rows.append(dict(row))
-    expected_tasks = set(topology["task_horizons"])
-    if seen_tasks != expected_tasks:
-        errors.append(
-            f"task覆盖不完整：missing={sorted(expected_tasks - seen_tasks)}, "
-            f"extra={sorted(seen_tasks - expected_tasks)}"
+        episodes = result.get("episodes")
+        if not isinstance(episodes, list) or len(episodes) != episodes_per_task:
+            errors.append(f"{task} episode列表不完整")
+        successes = int(result.get("n_success", -1))
+        if successes < 0 or successes > episodes_per_task:
+            errors.append(f"{task} n_success非法：{successes}")
+        success_rate = float(result.get("success_rate", -1.0))
+        expected_rate = successes / episodes_per_task
+        if not math.isclose(success_rate, expected_rate, rel_tol=0.0, abs_tol=1e-12):
+            errors.append(
+                f"{task} success_rate与计数不一致："
+                f"expected={expected_rate}, actual={success_rate}"
+            )
+        task_rows.append(
+            {
+                "task": task,
+                "episodes": int(result.get("episodes_completed", 0)),
+                "successes": successes,
+                "success_rate": success_rate,
+                "mean_inference_time_s": result.get("mean_inference_time_s"),
+                "fastwam_reference_success_percent": task_entry[
+                    "fastwam_reference_success_percent"
+                ],
+                "result_path": str(result_path),
+            }
         )
-    total_episodes = sum(int(row.get("episodes_completed", 0)) for row in task_rows)
-    total_successes = sum(int(row.get("successes", 0)) for row in task_rows)
+    total_episodes = sum(row["episodes"] for row in task_rows)
+    total_successes = sum(row["successes"] for row in task_rows)
+    macro_rate = (
+        sum(row["success_rate"] for row in task_rows) / len(task_rows)
+        if task_rows
+        else 0.0
+    )
     ok = not errors and len(task_rows) == 18
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "result": "pass" if ok else "fail",
         "ok": ok,
         "scope": "atomic_only",
@@ -100,19 +125,45 @@ def aggregate(
         "model_seed": topology["model_seed"],
         "seed_start": topology["seed_start"],
         "episodes_per_task": episodes_per_task,
+        "split": topology["scene"]["split"],
+        "max_steps_per_episode": topology["max_steps_per_episode"],
         "replan_steps": topology["replan_steps"],
         "video_denoise_steps": topology["video_denoise_steps"],
         "action_denoise_steps": topology["action_denoise_steps"],
-        "tasks": sorted(task_rows, key=lambda row: str(row["task"])),
+        "video_fps": topology["video"]["fps"],
+        "tasks": sorted(task_rows, key=lambda row: row["task"]),
         "overall": {
             "tasks": len(task_rows),
             "episodes": total_episodes,
             "successes": total_successes,
-            "success_rate": total_successes / total_episodes if total_episodes else 0.0,
+            "micro_success_rate": (
+                total_successes / total_episodes if total_episodes else 0.0
+            ),
+            "macro_success_rate": macro_rate,
         },
         "errors": errors,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def _write_csv(path: str | Path, report: dict[str, Any]) -> None:
+    destination = Path(path).expanduser().resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.tmp")
+    fieldnames = [
+        "task",
+        "episodes",
+        "successes",
+        "success_rate",
+        "mean_inference_time_s",
+        "fastwam_reference_success_percent",
+    ]
+    with temporary.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in report["tasks"]:
+            writer.writerow({key: row.get(key) for key in fieldnames})
+    temporary.replace(destination)
 
 
 def main() -> int:
@@ -123,6 +174,7 @@ def main() -> int:
     parser.add_argument("--eval-id")
     parser.add_argument("--checkpoint")
     parser.add_argument("--output", required=True)
+    parser.add_argument("--csv-output", required=True)
     args = parser.parse_args()
     if args.episodes_per_task <= 0:
         parser.error("episodes per task 必须为正")
@@ -134,6 +186,7 @@ def main() -> int:
         checkpoint=args.checkpoint,
     )
     write_json_atomic(args.output, report)
+    _write_csv(args.csv_output, report)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report["ok"] else 1
 

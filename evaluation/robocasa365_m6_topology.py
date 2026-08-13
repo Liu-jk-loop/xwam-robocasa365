@@ -39,11 +39,12 @@ def load_m6_evaluation_topology(
         video_steps = int(payload["video_denoise_steps"])
         action_steps = int(payload["action_denoise_steps"])
         replan_steps = int(payload["replan_steps"])
+        max_steps = int(payload["max_steps_per_episode"])
         timeout = float(payload["request_timeout_seconds"])
         cfg = float(payload["cfg"])
     except (KeyError, TypeError, ValueError) as exc:
         raise BenchmarkContractError("M6 topology seed/episode/inference 参数非法") from exc
-    if model_seed < 0 or seed_start < 0 or episodes <= 0:
+    if model_seed < 0 or seed_start < 0 or episodes <= 0 or max_steps <= 0:
         raise BenchmarkContractError("M6 topology seed 不能为负且 episodes 必须为正")
     if not 0 < action_steps <= video_steps or not 0 < replan_steps <= 32:
         raise BenchmarkContractError("M6 topology 要求 0 < action_steps <= video_steps 且 replan<=32")
@@ -136,6 +137,7 @@ def load_m6_evaluation_topology(
         video_denoise_steps=video_steps,
         action_denoise_steps=action_steps,
         replan_steps=replan_steps,
+        max_steps_per_episode=max_steps,
         request_timeout_seconds=timeout,
         cfg=cfg,
         servers=servers,

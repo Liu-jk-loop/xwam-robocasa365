@@ -1,23 +1,36 @@
 #!/usr/bin/env python3
-"""Run one client queue from the M6 8-server/16-client evaluation topology."""
+"""Run one lean FastWAM-compatible M6 client task queue."""
 
 from __future__ import annotations
 
 import argparse
 import json
-import subprocess
+import os
 import sys
-from datetime import datetime, timezone
+import time
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
+from evaluation.robocasa365_benchmark import (  # noqa: E402
+    BenchmarkContractError,
+    flat_action_to_gym_dict,
+    load_configured_schema,
+    pack_online_cameras,
+    pack_online_state,
+    tile_camera_views,
+    validate_gym_action_space,
+)
 from evaluation.robocasa365_m6_topology import (  # noqa: E402
     load_m6_evaluation_topology,
 )
+from evaluation.robocasa365_protocol import make_request  # noqa: E402
+from evaluation.run_robocasa365_policy_rollout import _request_policy  # noqa: E402
 from project_tools.training_run import write_json_atomic  # noqa: E402
 
 
@@ -32,169 +45,270 @@ DEFAULT_TOPOLOGY = (
 def _read_json(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
-        raise ValueError(f"JSON 顶层必须为对象：{path}")
+        raise BenchmarkContractError(f"JSON 顶层必须为对象：{path}")
     return payload
 
 
-def _completed_summary(episode_root: Path) -> tuple[Path, dict[str, Any]] | None:
-    candidates = sorted(
-        episode_root.glob("*/summary.json"),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
+def _create_environment(task: str, split: str) -> Any:
+    import gymnasium as gym
+    import robocasa  # noqa: F401 -- registers gym environments
+
+    # Match the validated FastWAM formal evaluation: target split, seeded reset,
+    # and no fixed M4 smoke layout/style.
+    return gym.make(
+        f"robocasa/{task}",
+        split=split,
     )
-    for path in candidates:
-        payload = _read_json(path)
-        if payload.get("result") == "pass":
-            return path.parent, payload
-    return None
 
 
-def _resumable_run(episode_root: Path) -> Path | None:
-    candidates = sorted(
-        episode_root.glob("*/**/progress.json"),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    )
-    # progress.json lives under <run>/<task>/<episode>; recover the run root.
-    for progress_path in candidates:
-        episode_dir = progress_path.parent
-        run_dir = episode_dir.parents[1]
-        summary_path = run_dir / "summary.json"
-        if not summary_path.is_file() or _read_json(summary_path).get("result") != "pass":
-            return run_dir
-    return None
+def _open_policy_socket(frontend_port: int) -> tuple[Any, Any, Any]:
+    import zmq
+
+    context = zmq.Context()
+    socket = context.socket(zmq.REQ)
+    socket.setsockopt(zmq.LINGER, 0)
+    socket.setsockopt(zmq.IDENTITY, f"xwam-m6-client-{os.getpid()}".encode())
+    socket.connect(f"tcp://127.0.0.1:{frontend_port}")
+    poller = zmq.Poller()
+    poller.register(socket, zmq.POLLIN)
+    return context, socket, poller
 
 
-def _episode_config(
-    topology: dict[str, Any], *, task: str, seed: int, frontend_port: int
+def _episode_prompt(observation: dict[str, Any], env: Any) -> tuple[str, str | None]:
+    prompt = str(observation.get("annotation.human.task_description", "")).strip()
+    if not prompt:
+        raise BenchmarkContractError("observation 缺少 annotation.human.task_description")
+    meta_prompt = str(env.unwrapped.get_ep_meta().get("lang", "")).strip() or None
+    if meta_prompt is not None and meta_prompt != prompt:
+        print(
+            "[WARN] observation/meta prompts differ: "
+            f"observation={prompt!r} meta={meta_prompt!r}",
+            flush=True,
+        )
+    return prompt, meta_prompt
+
+
+def _open_video(path: Path, fps: int, initial_cameras: np.ndarray) -> Any:
+    import imageio.v2 as imageio
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(f".{path.stem}.partial.mp4")
+    partial.unlink(missing_ok=True)
+    writer = imageio.get_writer(partial, fps=fps, codec="libx264", quality=8)
+    writer.append_data(tile_camera_views(initial_cameras))
+    return writer
+
+
+def _finish_video(writer: Any, path: Path) -> None:
+    writer.close()
+    partial = path.with_name(f".{path.stem}.partial.mp4")
+    if not partial.is_file() or partial.stat().st_size <= 0:
+        raise BenchmarkContractError(f"视频编码没有生成非空MP4：{partial}")
+    os.replace(partial, path)
+
+
+def _run_episode(
+    *,
+    env: Any,
+    socket: Any,
+    poller: Any,
+    topology: dict[str, Any],
+    schema: Any,
+    task: str,
+    episode_index: int,
+    seed: int,
+    video_path: Path,
 ) -> dict[str, Any]:
+    observation, _ = env.reset(seed=seed)
+    prompt, meta_prompt = _episode_prompt(observation, env)
+    camera_keys = list(topology["video"]["camera_keys"])
+    camera_shape = list(topology["video"]["camera_shape"])
+    cameras = pack_online_cameras(observation, camera_keys, camera_shape)
+    writer = _open_video(video_path, int(topology["video"]["fps"]), cameras)
+    started = time.monotonic()
+    steps = 0
+    replans = 0
+    inference_seconds = 0.0
+    clipped_actions = 0
+    clipped_scalars = 0
+    max_abs_raw_action = 0.0
+    success = False
+    terminated = False
+    truncated = False
+    end_reason = "running"
+    try:
+        while steps < int(topology["max_steps_per_episode"]):
+            state = pack_online_state(observation, schema)
+            cameras = pack_online_cameras(observation, camera_keys, camera_shape)
+            request = make_request(
+                request_id=f"{task}-seed{seed}-step{steps:06d}",
+                task=task,
+                episode_id=f"episode_{episode_index:03d}_seed{seed}",
+                seed=seed,
+                step_id=steps,
+                prompt=prompt,
+                video=cameras,
+                state=state,
+                cfg=float(topology["cfg"]),
+            )
+            response = _request_policy(
+                socket,
+                poller,
+                request,
+                float(topology["request_timeout_seconds"]),
+            )
+            actions = np.asarray(response["actions"], dtype=np.float32)
+            if actions.shape != (32, 12):
+                raise BenchmarkContractError(
+                    f"X-WAM必须返回[32,12] action，实际={actions.shape}"
+                )
+            replans += 1
+            inference_seconds += float(response["inference_seconds"])
+            execute_count = min(
+                int(topology["replan_steps"]),
+                int(topology["max_steps_per_episode"]) - steps,
+            )
+            print(
+                f"[REPLAN] task={task} seed={seed} step={steps} "
+                f"infer={response['inference_seconds']:.3f}s",
+                flush=True,
+            )
+            for raw_action in actions[:execute_count]:
+                outside = (raw_action < -1.0) | (raw_action > 1.0)
+                outside_count = int(np.count_nonzero(outside))
+                if outside_count:
+                    clipped_actions += 1
+                    clipped_scalars += outside_count
+                max_abs_raw_action = max(
+                    max_abs_raw_action, float(np.max(np.abs(raw_action)))
+                )
+                flat_action = np.clip(raw_action, -1.0, 1.0).astype(np.float32)
+                gym_action = flat_action_to_gym_dict(flat_action, schema)
+                validate_gym_action_space(gym_action, env.action_space)
+                observation, reward, terminated, truncated, info = env.step(gym_action)
+                steps += 1
+                cameras = pack_online_cameras(observation, camera_keys, camera_shape)
+                writer.append_data(tile_camera_views(cameras))
+                success = bool(info.get("success", False) or reward > 0)
+                if success:
+                    end_reason = "success"
+                elif terminated:
+                    end_reason = "terminated"
+                elif truncated:
+                    end_reason = "truncated"
+                elif steps >= int(topology["max_steps_per_episode"]):
+                    end_reason = "max_steps"
+                if end_reason != "running":
+                    break
+            if end_reason != "running":
+                break
+        _finish_video(writer, video_path)
+        writer = None
+    finally:
+        if writer is not None:
+            writer.close()
+            video_path.with_name(f".{video_path.stem}.partial.mp4").unlink(
+                missing_ok=True
+            )
     return {
-        "schema_version": 1,
-        "name": f"robocasa365_m6_{task}_seed{seed}",
-        "scope": "atomic_only",
-        "policy": "xwam_broker_named_12d",
-        "protocol": "xwam.robocasa365.atomic.v1",
-        "task_manifest": topology["task_manifest"],
-        "panda_omron_schema": topology["panda_omron_schema"],
-        "task": task,
-        "episodes": 1,
-        "seed_start": int(seed),
-        "scene": dict(topology["scene"]),
-        "rollout": {
-            "max_steps": int(topology["task_horizons"][task]),
-            "action_chunk_length": int(topology["replan_steps"]),
-            "minimum_policy_requests": 1,
-            "stop_on_success": True,
-            "depth_mode": "disabled",
-        },
-        "recovery": {
-            "enabled": True,
-            "mode": "deterministic_action_replay",
-            "state_replay_atol": 0.00001,
-        },
-        "network": {
-            "broker_address": "127.0.0.1",
-            "broker_frontend_port": int(frontend_port),
-            "request_timeout_seconds": float(topology["request_timeout_seconds"]),
-        },
-        "inference": {"cfg": float(topology["cfg"])},
-        "video": dict(topology["video"]),
+        "episode_idx": episode_index,
+        "seed": seed,
+        "success": success,
+        "steps": steps,
+        "replans": replans,
+        "max_steps": int(topology["max_steps_per_episode"]),
+        "replan_steps": int(topology["replan_steps"]),
+        "end_reason": end_reason,
+        "terminated": terminated,
+        "truncated": truncated,
+        "instruction": prompt,
+        "meta_instruction": meta_prompt,
+        "inference_time_s": inference_seconds,
+        "mean_inference_time_s": inference_seconds / replans if replans else None,
+        "clipped_actions": clipped_actions,
+        "clipped_action_scalars": clipped_scalars,
+        "max_abs_raw_action": max_abs_raw_action,
+        "elapsed_seconds": time.monotonic() - started,
+        "video": str(video_path),
     }
 
 
-def _run_one_episode(
+def _load_completed_episodes(
+    path: Path,
     *,
-    topology: dict[str, Any],
     task: str,
-    seed: int,
-    frontend_port: int,
-    episode_root: Path,
-) -> tuple[Path, dict[str, Any]]:
-    episode_root.mkdir(parents=True, exist_ok=True)
-    completed = _completed_summary(episode_root)
-    if completed is not None:
-        print(f"[SKIP] completed task={task} seed={seed} run={completed[0]}", flush=True)
-        return completed
-
-    command = [
-        sys.executable,
-        str(REPO_ROOT / "evaluation" / "run_robocasa365_policy_rollout_resumable.py"),
-    ]
-    resumable = _resumable_run(episode_root)
-    if resumable is not None:
-        command.extend(["--resume-run-dir", str(resumable)])
-        print(f"[RESUME] task={task} seed={seed} run={resumable}", flush=True)
-    else:
-        config_path = episode_root / "episode_config.json"
-        write_json_atomic(
-            config_path,
-            _episode_config(
-                topology,
-                task=task,
-                seed=seed,
-                frontend_port=frontend_port,
-            ),
-        )
-        command.extend(
-            ["--config", str(config_path), "--output-root", str(episode_root)]
-        )
-        print(f"[START] task={task} seed={seed}", flush=True)
-    subprocess.run(command, cwd=REPO_ROOT, check=True)
-    completed = _completed_summary(episode_root)
-    if completed is None:
-        raise RuntimeError(f"episode 命令成功但缺少 pass summary：{episode_root}")
-    return completed
-
-
-def _write_client_summary(
-    *,
-    output_root: Path,
-    client: dict[str, Any],
-    server: dict[str, Any],
     topology: dict[str, Any],
-    episode_rows: list[dict[str, Any]],
     expected_episodes: int,
-) -> Path:
-    task_rows = []
-    for task_entry in client["tasks"]:
-        task = task_entry["name"]
-        rows = [row for row in episode_rows if row["task"] == task]
-        successes = sum(bool(row["success"]) for row in rows)
-        task_rows.append(
-            {
-                "task": task,
-                "episodes_expected": expected_episodes,
-                "episodes_completed": len(rows),
-                "successes": successes,
-                "success_rate": successes / len(rows) if rows else 0.0,
-                "fastwam_reference_success_percent": task_entry[
-                    "fastwam_reference_success_percent"
-                ],
-            }
-        )
-    complete = all(row["episodes_completed"] == expected_episodes for row in task_rows)
-    path = output_root / f"client_{client['client_id']:02d}" / "client_summary.json"
+) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    payload = _read_json(path)
+    expected = {
+        "task": task,
+        "split": topology["scene"]["split"],
+        "seed_start": topology["seed_start"],
+        "episodes_expected": expected_episodes,
+        "max_steps": topology["max_steps_per_episode"],
+        "replan_steps": topology["replan_steps"],
+        "model_seed": topology["model_seed"],
+    }
+    for key, value in expected.items():
+        if payload.get(key) != value:
+            raise BenchmarkContractError(
+                f"已有{task} result与本次配置不一致：{key} "
+                f"expected={value!r} actual={payload.get(key)!r}"
+            )
+    episodes = payload.get("episodes")
+    if not isinstance(episodes, list):
+        raise BenchmarkContractError(f"已有{task} result缺少episodes")
+    expected_seeds = [int(topology["seed_start"]) + i for i in range(len(episodes))]
+    actual_seeds = [int(row["seed"]) for row in episodes]
+    if actual_seeds != expected_seeds or len(episodes) > expected_episodes:
+        raise BenchmarkContractError(f"已有{task} episode seed不是合法连续前缀")
+    return [dict(row) for row in episodes]
+
+
+def _write_task_result(
+    *,
+    path: Path,
+    topology: dict[str, Any],
+    client: dict[str, Any],
+    task_entry: dict[str, Any],
+    episodes: list[dict[str, Any]],
+    expected_episodes: int,
+) -> None:
+    successes = sum(bool(row["success"]) for row in episodes)
+    total_inference = sum(float(row["inference_time_s"]) for row in episodes)
+    total_replans = sum(int(row["replans"]) for row in episodes)
+    complete = len(episodes) == expected_episodes
     write_json_atomic(
         path,
         {
             "schema_version": 1,
             "result": "pass" if complete else "running",
-            "scope": "atomic_only",
-            "topology": topology["name"],
+            "task": task_entry["name"],
             "client_id": client["client_id"],
             "server_id": client["server_id"],
-            "gpu": server["gpu"],
-            "model_seed": topology["model_seed"],
+            "split": topology["scene"]["split"],
             "seed_start": topology["seed_start"],
-            "episodes_per_task": expected_episodes,
+            "model_seed": topology["model_seed"],
+            "episodes_expected": expected_episodes,
+            "episodes_completed": len(episodes),
+            "n_success": successes,
+            "success_rate": successes / len(episodes) if episodes else 0.0,
+            "mean_inference_time_s": (
+                total_inference / total_replans if total_replans else None
+            ),
+            "max_steps": topology["max_steps_per_episode"],
             "replan_steps": topology["replan_steps"],
             "action_denoise_steps": topology["action_denoise_steps"],
-            "tasks": task_rows,
-            "episodes": episode_rows,
-            "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "video_fps": topology["video"]["fps"],
+            "fastwam_reference_success_percent": task_entry[
+                "fastwam_reference_success_percent"
+            ],
+            "episodes": episodes,
         },
     )
-    return path
 
 
 def _parse_args() -> argparse.Namespace:
@@ -216,63 +330,66 @@ def main() -> int:
     topology = load_m6_evaluation_topology(args.topology, REPO_ROOT)
     client = topology["clients"][args.client_id]
     server = topology["servers"][client["server_id"]]
-    episodes_per_task = int(
-        args.episodes_per_task or topology["episodes_per_task"]
-    )
+    expected_episodes = int(args.episodes_per_task or topology["episodes_per_task"])
     output_root = Path(args.output_root).expanduser().resolve()
-    episode_rows: list[dict[str, Any]] = []
-    for task_entry in client["tasks"]:
-        task = task_entry["name"]
-        for episode_index in range(episodes_per_task):
-            seed = int(topology["seed_start"]) + episode_index
-            episode_root = (
-                output_root
-                / f"client_{args.client_id:02d}"
-                / task
-                / f"seed_{seed:06d}"
-            )
-            run_dir, summary = _run_one_episode(
-                topology=topology,
-                task=task,
-                seed=seed,
-                frontend_port=server["frontend_port"],
-                episode_root=episode_root,
-            )
-            aggregate = summary["aggregate"]
-            episode_rows.append(
-                {
-                    "task": task,
-                    "episode_index": episode_index,
-                    "seed": seed,
-                    "success": int(aggregate["successes"]) == 1,
-                    "steps": int(aggregate["total_steps"]),
-                    "run_dir": str(run_dir),
-                    "summary": str(run_dir / "summary.json"),
-                }
-            )
-            path = _write_client_summary(
-                output_root=output_root,
-                client=client,
-                server=server,
-                topology=topology,
-                episode_rows=episode_rows,
-                expected_episodes=episodes_per_task,
-            )
-            print(
-                f"[PROGRESS] client={args.client_id} task={task} "
-                f"episode={episode_index + 1}/{episodes_per_task} summary={path}",
-                flush=True,
-            )
-    path = _write_client_summary(
-        output_root=output_root,
-        client=client,
-        server=server,
-        topology=topology,
-        episode_rows=episode_rows,
-        expected_episodes=episodes_per_task,
+    schema = load_configured_schema(
+        {"resolved_panda_omron_schema": str(REPO_ROOT / topology["panda_omron_schema"])}
     )
-    print(f"[PASS] client {args.client_id} completed: {path}", flush=True)
-    return 0
+    context, socket, poller = _open_policy_socket(server["frontend_port"])
+    try:
+        for task_entry in client["tasks"]:
+            task = task_entry["name"]
+            task_root = output_root / task
+            video_root = task_root / "videos"
+            result_path = task_root / "result.json"
+            task_root.mkdir(parents=True, exist_ok=True)
+            episodes = _load_completed_episodes(
+                result_path,
+                task=task,
+                topology=topology,
+                expected_episodes=expected_episodes,
+            )
+            if len(episodes) == expected_episodes:
+                print(f"[SKIP] task complete: {task}", flush=True)
+                continue
+            env = _create_environment(task, str(topology["scene"]["split"]))
+            try:
+                for episode_index in range(len(episodes), expected_episodes):
+                    seed = int(topology["seed_start"]) + episode_index
+                    video_path = video_root / f"episode_{episode_index:03d}_seed{seed}.mp4"
+                    print(f"[START] task={task} seed={seed}", flush=True)
+                    row = _run_episode(
+                        env=env,
+                        socket=socket,
+                        poller=poller,
+                        topology=topology,
+                        schema=schema,
+                        task=task,
+                        episode_index=episode_index,
+                        seed=seed,
+                        video_path=video_path,
+                    )
+                    episodes.append(row)
+                    _write_task_result(
+                        path=result_path,
+                        topology=topology,
+                        client=client,
+                        task_entry=task_entry,
+                        episodes=episodes,
+                        expected_episodes=expected_episodes,
+                    )
+                    print(
+                        f"[DONE] task={task} episode={episode_index + 1}/"
+                        f"{expected_episodes} success={row['success']} steps={row['steps']}",
+                        flush=True,
+                    )
+            finally:
+                env.close()
+        print(f"[PASS] client {args.client_id} completed", flush=True)
+        return 0
+    finally:
+        socket.close()
+        context.term()
 
 
 if __name__ == "__main__":

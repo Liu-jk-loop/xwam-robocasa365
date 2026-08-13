@@ -35,10 +35,13 @@ X-WAM server，共8个固定server/broker对；16个RoboCasa client按版本化t
 默认每任务50个episode，环境seed为`42..91`，模型侧每次replan固定seed 42；
 `replan_steps=20`、action denoise 10步。X-WAM仍保留50步video scheduler，但policy
 调用使用ANS `early_stop`，得到动作后在第10次模型前向停止，不继续生成完整视频。
-每个episode都沿用M4.3的动作级原子进度和确定性回放。相同Git commit、checkpoint与
-`XWAM_EVAL_ID`重新提交时，已完成episode直接跳过，中断episode从原progress恢复。
-正式评测产物统一写入IOPS的`/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/`
-目录，不把视频或逐episode推理结果写到Capstor/Store。
+Simulator与FastWAM正式配置一致：使用`target` split，不固定layout/style；每个episode
+最多1000个环境step，每步录制三相机拼图并以20 FPS编码，因此跑满失败episode约50秒。
+相同Git commit、checkpoint与`XWAM_EVAL_ID`重新提交时，已完成episode直接跳过；中断
+episode从头重跑，最多损失一个episode，不再调用M4.3逐episode Git门禁或保存动作回放。
+正式评测产物统一写入IOPS的
+`/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/atomic18/<eval ID>/`。
+目录仅保留`logs/`、`results/`、JSON/CSV汇总；不保存PNG帧或逐request journal。
 Simulator client与FastWAM正式评测使用同一已验证来源：EDF内将Store的
 `src/robocasa`和`src/robosuite`放在`PYTHONPATH`最前，复用此前下载的完整assets，
 而不使用SQSH内不完整的`/opt/robocasa`。在加载policy前会写出
@@ -47,8 +50,8 @@ EGL device，所有client固定device 0，policy server的四卡映射保持不�
 
 Policy server从M6 manifest读取18个合法任务，并只使用与manifest绑定的跨任务
 normalization statistics；每个server还会拒绝topology未分配给自己的任务。最终
-`scripts/aggregate_robocasa365_m6_evaluation.py`要求16份client summary、18个任务和
-每任务完整episode数全部存在，才写出总体PASS和成功率。完整提交命令见
+`scripts/aggregate_robocasa365_m6_evaluation.py`要求18份task result和每任务完整episode
+数全部存在，才写出总体PASS、逐任务成功率及总体成功率。完整提交命令见
 `docs/CLUSTER_RUNBOOK.md`。
 
 ## Installation

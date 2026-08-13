@@ -79,7 +79,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--wan-checkpoint-dir", required=True)
     parser.add_argument("--multitask-manifest", required=True)
     parser.add_argument("--statistics-path", required=True)
-    parser.add_argument("--output-root", required=True)
+    parser.add_argument("--log-root", required=True)
     parser.add_argument("--ready-file", required=True)
     parser.add_argument("--stop-file", required=True)
     parser.add_argument("--startup-timeout-seconds", type=float, default=1200)
@@ -92,11 +92,9 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     topology = load_m6_evaluation_topology(args.topology, REPO_ROOT)
-    output_root = Path(args.output_root).expanduser().resolve()
-    log_root = output_root / "logs" / "policy"
-    report_root = output_root / "policy_reports"
-    log_root.mkdir(parents=True, exist_ok=True)
-    report_root.mkdir(parents=True, exist_ok=True)
+    log_root = Path(args.log_root).expanduser().resolve()
+    server_root = log_root / "servers"
+    server_root.mkdir(parents=True, exist_ok=True)
     ready_file = Path(args.ready_file).expanduser().resolve()
     stop_file = Path(args.stop_file).expanduser().resolve()
     ready_file.unlink(missing_ok=True)
@@ -116,7 +114,7 @@ def main() -> int:
     try:
         for server_id in range(8):
             server = topology["servers"][server_id]
-            broker_log = (log_root / f"broker_{server_id}.log").open(
+            broker_log = (server_root / f"broker_{server_id}.log").open(
                 "a", encoding="utf-8"
             )
             log_handles.append(broker_log)
@@ -144,9 +142,8 @@ def main() -> int:
         for server_id in range(8):
             server = topology["servers"][server_id]
             assigned_tasks = tasks_for_server(topology, server_id)
-            report_path = report_root / f"server_{server_id}_startup.json"
-            journal_path = report_root / f"server_{server_id}_requests.jsonl"
-            server_log = (log_root / f"server_{server_id}.log").open(
+            report_path = server_root / f"server_{server_id}_status.json"
+            server_log = (server_root / f"server_{server_id}.log").open(
                 "a", encoding="utf-8"
             )
             log_handles.append(server_log)
@@ -176,8 +173,8 @@ def main() -> int:
                 "--graceful-stop-is-pass",
                 "--startup-report",
                 str(report_path),
-                "--request-journal",
-                str(journal_path),
+                "--disable-request-journal",
+                "--compact-report",
             ]
             for task in assigned_tasks:
                 command.extend(["--allowed-task", task])
@@ -200,7 +197,6 @@ def main() -> int:
                     "gpu": server["gpu"],
                     "tasks": assigned_tasks,
                     "report": str(report_path),
-                    "journal": str(journal_path),
                     "checkpoint": report["checkpoint"],
                     "model_seed": report["model_seed"],
                 }
@@ -242,11 +238,11 @@ def main() -> int:
             "return_codes": return_codes,
             "finished_at_utc": datetime.now(timezone.utc).isoformat(),
         }
-        write_json_atomic(report_root / "policy_pool_summary.json", summary)
+        write_json_atomic(server_root / "policy_pool_summary.json", summary)
         return 0 if ok else 1
     except Exception as exc:
         write_json_atomic(
-            report_root / "policy_pool_summary.json",
+            server_root / "policy_pool_summary.json",
             {
                 "schema_version": 1,
                 "result": "fail",

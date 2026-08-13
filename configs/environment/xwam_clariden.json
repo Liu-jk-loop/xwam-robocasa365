@@ -268,6 +268,33 @@
         "validation": "cluster-pending"
       },
       "result": "fail"
+    },
+    "m6_atomic_seen18_evaluation_inner_git_gate_failure": {
+      "job_id": null,
+      "checkpoint_global_step": 15000,
+      "client_id": 15,
+      "task": "TurnOnSinkFaucet",
+      "environment_seed": 44,
+      "error": "BenchmarkContractError: M4.3 new run required a clean Git worktree",
+      "non_blocking_warnings": [
+        "robosuite_models unavailable",
+        "Mink whole-body IK unavailable",
+        "mimicgen unavailable"
+      ],
+      "root_cause": "The M6 client redundantly invoked the M4.3 per-episode new-run Git gate after the outer job had already frozen clean Git provenance",
+      "corrective_evaluation_contract": {
+        "split": "target",
+        "fixed_layout_style": false,
+        "max_steps_per_episode": 1000,
+        "replan_steps": 20,
+        "action_denoise_steps": 10,
+        "video_frame_stride": 1,
+        "video_fps": 20,
+        "durable_png_frames": false,
+        "request_journal": false,
+        "validation": "cluster-pending"
+      },
+      "result": "fail"
     }
   }
 }

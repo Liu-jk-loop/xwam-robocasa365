@@ -139,6 +139,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--compile-model", action="store_true", help="启用 torch.compile；首轮 smoke 默认关闭。")
     parser.add_argument("--startup-report", default=str(DEFAULT_REPORT))
     parser.add_argument("--request-journal", default=str(DEFAULT_REQUEST_JOURNAL))
+    parser.add_argument(
+        "--disable-request-journal",
+        action="store_true",
+        help="不写逐request JSONL；用于正式长评估以避免无用小记录。",
+    )
+    parser.add_argument(
+        "--compact-report",
+        action="store_true",
+        help="最终server报告只保留失败request，不嵌入全部成功request。",
+    )
     args = parser.parse_args()
     if not 1 <= args.broker_port <= 65535:
         parser.error("broker port 必须位于 1..65535")
@@ -453,20 +463,22 @@ def _serve(args: argparse.Namespace, report: dict[str, Any]) -> int:
                     tuple(environment_actions.shape),
                     inference_seconds,
                 )
-                request_records.append(
-                    {
-                        "request_id": request["request_id"],
-                        "task": request["task"],
-                        "step_id": request["step_id"],
-                        "result": "pass",
-                        "inference_seed": inference_seed,
-                        "inference_seconds": inference_seconds,
-                        "action_shape": list(environment_actions.shape),
-                    }
-                )
-                append_jsonl_fsync(
-                    args.request_journal,
-                    {
+                if not args.compact_report:
+                    request_records.append(
+                        {
+                            "request_id": request["request_id"],
+                            "task": request["task"],
+                            "step_id": request["step_id"],
+                            "result": "pass",
+                            "inference_seed": inference_seed,
+                            "inference_seconds": inference_seconds,
+                            "action_shape": list(environment_actions.shape),
+                        }
+                    )
+                if not args.disable_request_journal:
+                    append_jsonl_fsync(
+                        args.request_journal,
+                        {
                         "schema_version": 1,
                         "event": "policy_request_complete",
                         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
@@ -481,8 +493,8 @@ def _serve(args: argparse.Namespace, report: dict[str, Any]) -> int:
                         "inference_seconds": inference_seconds,
                         "action_shape": list(environment_actions.shape),
                         "checkpoint": str(checkpoint_path),
-                    },
-                )
+                        },
+                    )
             except Exception as exc:
                 logging.exception("policy request failed")
                 failed_requests += 1
@@ -497,9 +509,10 @@ def _serve(args: argparse.Namespace, report: dict[str, Any]) -> int:
                         "error": f"{type(exc).__name__}: {exc}",
                     }
                 )
-                append_jsonl_fsync(
-                    args.request_journal,
-                    {
+                if not args.disable_request_journal:
+                    append_jsonl_fsync(
+                        args.request_journal,
+                        {
                         "schema_version": 1,
                         "event": "policy_request_complete",
                         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
@@ -516,8 +529,8 @@ def _serve(args: argparse.Namespace, report: dict[str, Any]) -> int:
                         "result": "fail",
                         "error": f"{type(exc).__name__}: {exc}",
                         "checkpoint": str(checkpoint_path),
-                    },
-                )
+                        },
+                    )
                 response = make_error_response(
                     request,
                     error_type=type(exc).__name__,
@@ -570,7 +583,11 @@ def main() -> int:
         "git": collect_git_state(REPO_ROOT),
         "command": sys.argv,
         "broker": f"tcp://{args.broker_address}:{args.broker_port}",
-        "request_journal": str(Path(args.request_journal).expanduser().resolve()),
+        "request_journal": (
+            None
+            if args.disable_request_journal
+            else str(Path(args.request_journal).expanduser().resolve())
+        ),
     }
     write_json_atomic(args.startup_report, report)
     try:

@@ -24,6 +24,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--topology", required=True)
     parser.add_argument("--output-root", required=True)
+    parser.add_argument("--log-root", required=True)
     parser.add_argument("--episodes-per-task", type=int)
     args = parser.parse_args()
     if args.episodes_per_task is not None and args.episodes_per_task <= 0:
@@ -35,7 +36,7 @@ def main() -> int:
     args = _parse_args()
     topology = load_m6_evaluation_topology(args.topology, REPO_ROOT)
     output_root = Path(args.output_root).expanduser().resolve()
-    log_root = output_root / "logs" / "clients"
+    log_root = Path(args.log_root).expanduser().resolve() / "clients"
     log_root.mkdir(parents=True, exist_ok=True)
     processes: list[subprocess.Popen[Any]] = []
     handles: list[Any] = []
@@ -96,7 +97,7 @@ def main() -> int:
         return_codes = [process.wait() for process in processes]
         failed = [index for index, code in enumerate(return_codes) if code != 0]
         if stopping:
-            print("[STOP] client pool interrupted; per-episode progress is resumable")
+            print("[STOP] client pool interrupted; the interrupted episode will restart")
             return 130
         if failed:
             print(f"[FAIL] clients exited nonzero: {failed}", file=sys.stderr)

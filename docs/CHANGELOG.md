@@ -1,5 +1,13 @@
 # 变更记录
 
+## 2026-08-13 — M6正式评测与FastWAM配置及产物对齐
+
+- 修复首次可运行评测在`TurnOnSinkFaucet/seed44`被`M4.3 新 run 必须从干净 Git 工作区启动`中断的问题。该错误不是robosuite模型、Mink或mimicgen warning导致，而是M6 client逐episode嵌套M4.3 runner后重复执行Git门禁；外层作业已经冻结clean commit、checkpoint、RoboCasa/robosuite commit、assets与配置，因此M6改为独立task client，不再重复逐episode门禁。
+- 对照用户下载的FastWAM正式client，将RoboCasa场景改为`target` split且不固定layout/style，prompt直接取当前observation的`annotation.human.task_description`；固定环境/模型seed 42起、1000 step、replan20、action denoise10和12D动作裁剪保持一致。原配置`layout=1/style=1`与FastWAM不是同一场景合同。
+- 修正视频时间轴：原M6配置每20个环境step录1帧且以5 FPS播放，1000步失败episode只有约10秒并呈现约4倍动作加速；现改为初始帧加每个环境step一帧、20 FPS，跑满1000步约50秒。视频直接流式写MP4，不保存PNG帧。
+- 正式结果根目录改为IOPS `x-wam-eval/atomic18/<eval ID>`，结构收敛为`logs/clients`、`logs/servers`、`logs/server_launcher.log`、`results/<Task>/videos`、`results/<Task>/result.json`和根目录`aggregate.json/summary_atomic18.csv`。移除client深层seed/run/progress目录、逐request JSONL和server状态中全部成功request数组；中断重提跳过已完成seed，中断episode从头执行，最多损失一个episode。
+- 本地静态验证覆盖Python编译、Ruff、Slurm shell语法、topology与聚合回归；Clariden上新的1000-step时长、target split轨迹、8 server/16 client并发及最终成功率仍为`cluster-pending`。配置与原评测合同不同，必须使用新eval ID，不能把旧目录中的episode混入。
+
 ## 2026-08-12 — Clariden M6 Atomic-Seen 18 并行评测
 
 - 新增版本化`8 server / 16 client / 4 GPU`topology，逐项冻结用户给定的client→server→GPU→task映射及FastWAM参考成功率。每卡两个policy server，每server两个client；`client6`串行`OpenStandMixerHead → CloseToasterOvenDoor`，`client7`串行`SlideDishwasherRack → TurnOnElectricKettle`，最终18个Atomic-Seen任务不重不漏。默认每任务50个episode，环境seed从42开始，模型seed固定42，replan为20，ANS action去噪10步并保留50步video scheduler。

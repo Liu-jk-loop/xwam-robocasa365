@@ -1108,7 +1108,7 @@ simulator仍使用两个独立EDF。默认每任务50个episode；环境seed为4
 固定42，replan为20，action denoise为10步。`client6/client7`按topology各自串行两个
 任务，其余client各一个任务。
 
-先选择一个完整M6 checkpoint。以下示例评测8卡训练的step 6000；step 9000/12000只需
+先选择一个完整M6 checkpoint。以下示例评测8卡训练的step 15000；其他step只需
 替换`EVAL_STEP`。永久checkpoint位于Store，因此优先从该目录选择：
 
 ```bash
@@ -1116,13 +1116,13 @@ DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
 DEPLOY_CAPSCR=/capstor/scratch/cscs/zjingchen/terry_nys
 REPO="$DEPLOY_STORE/src/xwam-robocasa365"
 FORMAL_NAME=robocasa365_m6_atomic_seen18_rgb_seed42_8gpu
-EVAL_STEP=6000
+EVAL_STEP=15000
 
 export XWAM_EVAL_EXPERIMENT_DIR="$DEPLOY_CAPSCR/experiments/xwam/$FORMAL_NAME"
 export XWAM_EVAL_CHECKPOINT="$(find \
   "$DEPLOY_STORE/checkpoints/xwam/$FORMAL_NAME/checkpoints" \
   -maxdepth 1 -type d -name "*step=${EVAL_STEP}.ckpt" -print -quit)"
-export XWAM_EVAL_ID="${FORMAL_NAME}-step${EVAL_STEP}-seed42-50ep"
+export XWAM_EVAL_ID="step_015000_target_50ep_envseed42_policyseed42_replan20_8s16c"
 export XWAM_EVAL_EPISODES=50
 
 test -s "$XWAM_EVAL_EXPERIMENT_DIR/config.yaml"
@@ -1133,11 +1133,23 @@ git status --short
 sbatch deployment/clariden/eval_m6_atomic18_xwam.sbatch
 ```
 
-`git status --short`必须为空。作业会在IOPS中新建并使用`x-wam-eval`目录，所有
-episode结果、视频帧、MP4、client/server日志、断点文件和最终汇总写到：
+`git status --short`必须为空。正式场景为`target` split且不固定layout/style；每个
+episode最多1000 step，replan20，action denoise10。每个环境step录一帧并以20 FPS
+编码，所以跑满的失败episode约50秒。作业不会保存PNG帧或逐request流水。
+
+结果使用与FastWAM一致的扁平结构：
 
 ```text
-/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/$XWAM_EVAL_ID/
+/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/atomic18/$XWAM_EVAL_ID/
+├── logs/
+│   ├── clients/client_00.log ... client_15.log
+│   ├── servers/broker_0.log ... broker_7.log
+│   ├── servers/server_0.log ... server_7.log
+│   └── server_launcher.log
+├── results/<Task>/videos/*.mp4
+├── results/<Task>/result.json
+├── aggregate.json
+└── summary_atomic18.csv
 ```
 
 作业先在RoboCasa EDF中验证实际import来自Store的`src/robocasa`/`src/robosuite`，并
@@ -1145,22 +1157,25 @@ episode结果、视频帧、MP4、client/server日志、断点文件和最终汇
 旧commit且0 step/0 request失败的eval目录，不复用旧ID；为修复后的运行设置新ID，
 例如在末尾追加`-store-assets-v2`。
 
-如果12小时先到，保持同一个commit、checkpoint、`XWAM_EVAL_ID`和episode数，再提交同一
-条`sbatch`即可。已完成seed会跳过，中断seed从原子progress回放恢复。不要换checkpoint
-后复用旧eval ID；不同6k/9k/12k checkpoint必须使用不同ID。最终机器汇总为：
+这次推理配置与旧`store-assets-v2`运行不同，必须使用全新eval ID。若12小时先到，保持
+同一个commit、checkpoint、`XWAM_EVAL_ID`和episode数，再提交同一条`sbatch`即可；已完成
+seed会跳过，中断seed从头重跑，最多损失一个episode。不要换checkpoint后复用旧eval ID。
+最终机器汇总为：
 
 ```text
-/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/$XWAM_EVAL_ID/summary.json
+/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/atomic18/$XWAM_EVAL_ID/aggregate.json
+/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/atomic18/$XWAM_EVAL_ID/summary_atomic18.csv
 ```
 
-作业日志和失败报告分别位于：
+作业主日志、错误日志和失败报告也位于本次run的`logs/`：
 
 ```text
-$DEPLOY_STORE/logs/xwam/m6-eval-<JOB_ID>.log
-$DEPLOY_STORE/logs/xwam/m6-eval-<JOB_ID>-failure.txt
+logs/job.log
+logs/job.err
+logs/failure.txt
 ```
 
-`summary.json`只有在16个client、18个任务及每任务50个episode全部收齐时才会写
+`aggregate.json`只有在18个任务及每任务50个episode全部收齐时才会写
 `ok=true/result=pass`。任务失败本身记入成功率，不等同于工程失败；缺失episode、
 server异常、checkpoint/statistics漂移或模拟器异常会阻止最终PASS。
 

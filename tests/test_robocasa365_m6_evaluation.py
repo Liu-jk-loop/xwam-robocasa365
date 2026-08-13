@@ -31,6 +31,13 @@ class RoboCasa365M6EvaluationTest(unittest.TestCase):
         self.assertEqual(topology["replan_steps"], 20)
         self.assertEqual(topology["action_denoise_steps"], 10)
         self.assertEqual(topology["video_denoise_steps"], 50)
+        self.assertEqual(topology["max_steps_per_episode"], 1000)
+        self.assertEqual(topology["scene"]["split"], "target")
+        self.assertIsNone(topology["scene"]["layout_id"])
+        self.assertIsNone(topology["scene"]["style_id"])
+        self.assertEqual(topology["video"]["stride"], 1)
+        self.assertEqual(topology["video"]["fps"], 20)
+        self.assertFalse(topology["video"]["durable_frames"])
         self.assertEqual(len(topology["servers"]), 8)
         self.assertEqual(len(topology["clients"]), 16)
         self.assertEqual(
@@ -62,35 +69,33 @@ class RoboCasa365M6EvaluationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             for client_id, client in topology["clients"].items():
-                tasks = []
                 for task in client["tasks"]:
-                    tasks.append(
-                        {
-                            "task": task["name"],
-                            "episodes_expected": 1,
-                            "episodes_completed": 1,
-                            "successes": 1,
-                            "success_rate": 1.0,
-                            "fastwam_reference_success_percent": task[
-                                "fastwam_reference_success_percent"
-                            ],
-                        }
+                    path = root / task["name"] / "result.json"
+                    path.parent.mkdir(parents=True)
+                    path.write_text(
+                        json.dumps(
+                            {
+                                "result": "pass",
+                                "task": task["name"],
+                                "client_id": client_id,
+                                "server_id": client["server_id"],
+                                "split": "target",
+                                "model_seed": 42,
+                                "seed_start": 42,
+                                "episodes_expected": 1,
+                                "episodes_completed": 1,
+                                "n_success": 1,
+                                "success_rate": 1.0,
+                                "mean_inference_time_s": 1.0,
+                                "max_steps": 1000,
+                                "replan_steps": 20,
+                                "action_denoise_steps": 10,
+                                "video_fps": 20,
+                                "episodes": [{"seed": 42, "success": True}],
+                            }
+                        ),
+                        encoding="utf-8",
                     )
-                path = root / f"client_{client_id:02d}" / "client_summary.json"
-                path.parent.mkdir(parents=True)
-                path.write_text(
-                    json.dumps(
-                        {
-                            "result": "pass",
-                            "client_id": client_id,
-                            "server_id": client["server_id"],
-                            "model_seed": topology["model_seed"],
-                            "seed_start": topology["seed_start"],
-                            "tasks": tasks,
-                        }
-                    ),
-                    encoding="utf-8",
-                )
             report = aggregate(
                 topology_path=TOPOLOGY,
                 output_root=root,
@@ -105,15 +110,15 @@ class RoboCasa365M6EvaluationTest(unittest.TestCase):
             )
             self.assertEqual(report["overall"]["tasks"], 18)
             self.assertEqual(report["overall"]["episodes"], 18)
-            self.assertEqual(report["overall"]["success_rate"], 1.0)
-            (root / "client_15/client_summary.json").unlink()
+            self.assertEqual(report["overall"]["micro_success_rate"], 1.0)
+            (root / "TurnOnSinkFaucet/result.json").unlink()
             failed = aggregate(
                 topology_path=TOPOLOGY,
                 output_root=root,
                 episodes_per_task=1,
             )
             self.assertFalse(failed["ok"])
-            self.assertTrue(any("client summary" in error for error in failed["errors"]))
+            self.assertTrue(any("task result" in error for error in failed["errors"]))
 
     def test_new_entrypoints_have_dependency_light_help(self) -> None:
         scripts = (
@@ -133,6 +138,21 @@ class RoboCasa365M6EvaluationTest(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
             self.assertEqual(result.returncode, 0, f"{script}: {result.stderr}")
+
+    def test_formal_client_is_lean_and_does_not_reenter_m43(self) -> None:
+        client = (REPO_ROOT / "evaluation/run_robocasa365_m6_client.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("run_robocasa365_policy_rollout_resumable.py", client)
+        self.assertNotIn("progress.json", client)
+        self.assertIn("writer.append_data", client)
+        self.assertNotIn("imageio.imwrite", client)
+
+        policy_pool = (
+            REPO_ROOT / "evaluation/launch_robocasa365_m6_policy_pool.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"--disable-request-journal"', policy_pool)
+        self.assertIn('"--compact-report"', policy_pool)
 
 
 if __name__ == "__main__":

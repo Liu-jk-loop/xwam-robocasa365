@@ -9,6 +9,7 @@
 #SBATCH --time=12:00:00
 #SBATCH --job-name=xwam_m6_eval
 #SBATCH --output=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/m6-eval-%j.log
+#SBATCH --error=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/m6-eval-%j.err
 #SBATCH --export=ALL
 
 set -Eeuo pipefail
@@ -30,8 +31,23 @@ EXPERIMENT_DIR="${XWAM_EVAL_EXPERIMENT_DIR:-}"
 CHECKPOINT="${XWAM_EVAL_CHECKPOINT:-}"
 EPISODES_PER_TASK="${XWAM_EVAL_EPISODES:-50}"
 
-MAIN_LOG="$DEPLOY_STORE/logs/xwam/m6-eval-${SLURM_JOB_ID}.log"
-FAILURE_REPORT="$DEPLOY_STORE/logs/xwam/m6-eval-${SLURM_JOB_ID}-failure.txt"
+if [[ -z "$EVAL_ID" || ! "$EVAL_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "[FAIL] XWAM_EVAL_ID must be nonempty and contain only A-Za-z0-9._-" >&2
+  exit 2
+fi
+EVAL_ROOT="$DEPLOY_IOPS/x-wam-eval/atomic18/$EVAL_ID"
+RESULT_ROOT="$EVAL_ROOT/results"
+LOG_ROOT="$EVAL_ROOT/logs"
+CONTROL_ROOT="$EVAL_ROOT/.runtime/$SLURM_JOB_ID"
+READY_FILE="$CONTROL_ROOT/policy-ready.json"
+STOP_FILE="$CONTROL_ROOT/stop-policy"
+SUMMARY_JSON="$EVAL_ROOT/aggregate.json"
+SUMMARY_CSV="$EVAL_ROOT/summary_atomic18.csv"
+mkdir -p "$RESULT_ROOT" "$LOG_ROOT/clients" "$LOG_ROOT/servers"
+exec > >(tee -a "$LOG_ROOT/job.log") 2> >(tee -a "$LOG_ROOT/job.err" >&2)
+
+MAIN_LOG="$LOG_ROOT/job.log"
+FAILURE_REPORT="$LOG_ROOT/failure.txt"
 export XWAM_FAILURE_REPORT="$FAILURE_REPORT"
 export XWAM_MAIN_LOG="$MAIN_LOG"
 export XWAM_TRAIN_LOG=not-applicable
@@ -41,8 +57,6 @@ source "$REPO/deployment/clariden/error_trap.sh"
 xwam_install_err_trap
 
 cd "$REPO"
-[[ -n "$EVAL_ID" ]] || xwam_fail "XWAM_EVAL_ID must identify this checkpoint evaluation"
-[[ "$EVAL_ID" =~ ^[A-Za-z0-9._-]+$ ]] || xwam_fail "XWAM_EVAL_ID contains unsafe characters"
 [[ -n "$EXPERIMENT_DIR" ]] || xwam_fail "XWAM_EVAL_EXPERIMENT_DIR must name the formal experiment directory"
 [[ -n "$CHECKPOINT" ]] || xwam_fail "XWAM_EVAL_CHECKPOINT must name a complete DeepSpeed checkpoint"
 [[ "$EPISODES_PER_TASK" =~ ^[1-9][0-9]*$ ]] || xwam_fail "XWAM_EVAL_EPISODES must be a positive integer"
@@ -65,20 +79,13 @@ test -z "$(git status --porcelain)" || {
   xwam_fail "Git worktree must be clean before M6 evaluation"
 }
 
-EVAL_ROOT="$DEPLOY_IOPS/x-wam-eval/$EVAL_ID"
-RESULT_ROOT="$EVAL_ROOT/results"
-JOB_ROOT="$EVAL_ROOT/jobs/$SLURM_JOB_ID"
-CONTROL_ROOT="$JOB_ROOT/control"
-READY_FILE="$CONTROL_ROOT/policy-ready.json"
-STOP_FILE="$CONTROL_ROOT/stop-policy"
-SUMMARY="$EVAL_ROOT/summary.json"
-mkdir -p "$RESULT_ROOT" "$JOB_ROOT" "$CONTROL_ROOT"
-exec 9>"$EVAL_ROOT/.evaluation.lock"
+mkdir -p "$CONTROL_ROOT" "$DEPLOY_IOPS/x-wam-eval/.locks"
+exec 9>"$DEPLOY_IOPS/x-wam-eval/.locks/atomic18-$EVAL_ID.lock"
 flock -n 9 || xwam_fail "Another evaluation job is already writing $EVAL_ROOT"
 
 # 同一 eval ID 可以续跑，但不能混入另一 checkpoint/topology/commit 的 episode。
-CONTRACT="$EVAL_ROOT/evaluation_contract.txt"
-EXPECTED_CONTRACT="$JOB_ROOT/evaluation_contract.expected.txt"
+CONTRACT="$LOG_ROOT/evaluation_contract.txt"
+EXPECTED_CONTRACT="$CONTROL_ROOT/evaluation_contract.expected.txt"
 {
   printf 'eval_id=%s\n' "$EVAL_ID"
   printf 'experiment_dir=%s\n' "$(realpath "$EXPERIMENT_DIR")"
@@ -115,7 +122,7 @@ echo "failure_report=$FAILURE_REPORT"
 
 # FastWAM 的已验证 simulator 路径通过 PYTHONPATH 使用 Store 中带完整
 # assets 的 RoboCasa/robosuite 源码，而不是 SQSH 内不完整的 /opt 副本。
-SIMULATOR_PROBE="$JOB_ROOT/robocasa_eval_runtime_probe.json"
+SIMULATOR_PROBE="$LOG_ROOT/robocasa_eval_runtime_probe.json"
 XWAM_PHASE=eval_simulator_runtime_probe
 srun --nodes=1 --ntasks=1 --cpus-per-task=1 \
   --environment="$ROBOCASA_EDF" \
@@ -139,6 +146,8 @@ cleanup_policy() {
   if [[ -n "$POLICY_STEP_PID" ]] && kill -0 "$POLICY_STEP_PID" 2>/dev/null; then
     wait "$POLICY_STEP_PID" 2>/dev/null || true
   fi
+  rm -f "$STOP_FILE" "$READY_FILE" "$EXPECTED_CONTRACT"
+  rmdir "$CONTROL_ROOT" "$EVAL_ROOT/.runtime" 2>/dev/null || true
 }
 trap cleanup_policy EXIT INT TERM
 
@@ -154,7 +163,7 @@ srun --overlap --nodes=1 --ntasks=1 --gpus-per-node=4 --cpus-per-task=16 \
     WAN_DIR="$WAN_DIR" \
     MANIFEST="$MANIFEST" \
     STATS="$STATS" \
-    JOB_ROOT="$JOB_ROOT" \
+    LOG_ROOT="$LOG_ROOT" \
     READY_FILE="$READY_FILE" \
     STOP_FILE="$STOP_FILE" \
   bash -lc '
@@ -170,10 +179,10 @@ python evaluation/launch_robocasa365_m6_policy_pool.py \
   --wan-checkpoint-dir "$WAN_DIR" \
   --multitask-manifest "$MANIFEST" \
   --statistics-path "$STATS" \
-  --output-root "$JOB_ROOT" \
+  --log-root "$LOG_ROOT" \
   --ready-file "$READY_FILE" \
   --stop-file "$STOP_FILE"
-' &
+' >"$LOG_ROOT/server_launcher.log" 2>&1 &
 POLICY_STEP_PID=$!
 
 XWAM_PHASE=eval_policy_pool_readiness
@@ -200,6 +209,7 @@ srun --overlap --nodes=1 --ntasks=1 --gpus-per-node=4 --cpus-per-task=48 \
     ROBOSUITE_ROOT="$ROBOSUITE_ROOT" \
     TOPOLOGY="$TOPOLOGY" \
     RESULT_ROOT="$RESULT_ROOT" \
+    LOG_ROOT="$LOG_ROOT" \
     EPISODES_PER_TASK="$EPISODES_PER_TASK" \
   bash -lc '
 set -Eeuo pipefail
@@ -212,6 +222,7 @@ export PYTHONPATH="$ROBOCASA_ROOT:$ROBOSUITE_ROOT:$REPO${PYTHONPATH:+:$PYTHONPAT
 python evaluation/launch_robocasa365_m6_client_pool.py \
   --topology "$TOPOLOGY" \
   --output-root "$RESULT_ROOT" \
+  --log-root "$LOG_ROOT" \
   --episodes-per-task "$EPISODES_PER_TASK"
 '
 CLIENT_RC=$?
@@ -237,7 +248,8 @@ srun --overlap --nodes=1 --ntasks=1 --cpus-per-task=1 \
   --environment="$XWAM_EDF" \
   env REPO="$REPO" TOPOLOGY="$TOPOLOGY" RESULT_ROOT="$RESULT_ROOT" \
     EPISODES_PER_TASK="$EPISODES_PER_TASK" EVAL_ID="$EVAL_ID" \
-    CHECKPOINT="$CHECKPOINT" SUMMARY="$SUMMARY" \
+    CHECKPOINT="$CHECKPOINT" SUMMARY_JSON="$SUMMARY_JSON" \
+    SUMMARY_CSV="$SUMMARY_CSV" \
   bash -lc '
 set -Eeuo pipefail
 cd "$REPO"
@@ -247,10 +259,13 @@ python scripts/aggregate_robocasa365_m6_evaluation.py \
   --episodes-per-task "$EPISODES_PER_TASK" \
   --eval-id "$EVAL_ID" \
   --checkpoint "$CHECKPOINT" \
-  --output "$SUMMARY"
+  --output "$SUMMARY_JSON" \
+  --csv-output "$SUMMARY_CSV"
 '
 
-grep -q '"ok": true' "$SUMMARY"
-grep -q '"result": "pass"' "$SUMMARY"
+grep -q '"ok": true' "$SUMMARY_JSON"
+grep -q '"result": "pass"' "$SUMMARY_JSON"
+rm -f "$STOP_FILE" "$READY_FILE" "$EXPECTED_CONTRACT"
+rmdir "$CONTROL_ROOT" "$EVAL_ROOT/.runtime" 2>/dev/null || true
 trap - EXIT INT TERM
-echo "[PASS] X-WAM M6 Atomic-Seen 18 evaluation completed: $SUMMARY"
+echo "[PASS] X-WAM M6 Atomic-Seen 18 evaluation completed: $SUMMARY_JSON"
