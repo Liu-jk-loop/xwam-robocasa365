@@ -1,8 +1,8 @@
-# Clariden CloseFridge A/B：2节点×4 GH200，8×batch16×accum1=GBS128。
+# Clariden CloseFridge A/B：单节点4 GH200，4×batch16×accum2=GBS128。
 precision: bf16-mixed
 devices: 4
 batch_size_per_gpu: 16
-accumulate_grad_batches: 1
+accumulate_grad_batches: 2
 global_batch_size: 128
 num_workers_per_gpu: 4
 prefetch_factor: 2

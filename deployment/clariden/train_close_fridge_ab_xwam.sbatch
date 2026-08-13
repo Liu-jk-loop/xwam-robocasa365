@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --account=aa004
 #SBATCH --partition=normal
-#SBATCH --nodes=2
+#SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=64
@@ -22,7 +22,7 @@ WANDB_OVERLAY="$DEPLOY_IOPS/python/xwam-wandb-0.23.1"
 DATASET="$DEPLOY_STORE/datasets/robocasa/v1.0/pretrain/atomic/CloseFridge/20250819/lerobot"
 WAN_DIR="$DEPLOY_STORE/checkpoints/xwam/wan22_5b"
 PRETRAINED="$DEPLOY_STORE/checkpoints/xwam/pretrained/checkpoints/last.ckpt"
-HARDWARE_CONFIG=configs/hardware/gh200x8_96gb_gbs128_single_task.yaml
+HARDWARE_CONFIG=configs/hardware/gh200x4_96gb_gbs128_single_task.yaml
 DATA_CONFIG=configs/data/robocasa365_close_fridge_rgb.yaml
 
 VARIANT="${XWAM_CF_VARIANT:-}"
@@ -30,12 +30,12 @@ case "$VARIANT" in
   ratio05)
     CLEAN_ACTION_RATIO=0.5
     EXPERIMENT_CONFIG=configs/experiment/robocasa365_close_fridge_ratio05.yaml
-    EXP_NAME=close_fridge_rgb_ratio05_seed42_8gpu
+    EXP_NAME=close_fridge_rgb_ratio05_seed42_4gpu
     ;;
   ratio00)
     CLEAN_ACTION_RATIO=0.0
     EXPERIMENT_CONFIG=configs/experiment/robocasa365_close_fridge_ratio00.yaml
-    EXP_NAME=close_fridge_rgb_ratio00_seed42_8gpu
+    EXP_NAME=close_fridge_rgb_ratio00_seed42_4gpu
     ;;
   *)
     echo "XWAM_CF_VARIANT must be ratio05 or ratio00" >&2
@@ -81,7 +81,7 @@ source "$REPO/deployment/clariden/error_trap.sh"
 xwam_install_err_trap
 
 cd "$REPO"
-test "${SLURM_NNODES:-0}" == 2
+test "${SLURM_NNODES:-0}" == 1
 test -s "$EDF"
 test -d "$RUNTIME_OVERLAY"
 test -d "$WANDB_OVERLAY"
@@ -160,7 +160,7 @@ python scripts/plan_robocasa365_m6_formal_chunk.py \
   --checkpoint-root "$FINAL_CHECKPOINT_ROOT" \
   --total-steps "$TARGET_STEPS" \
   --chunk-steps "$TARGET_STEPS" \
-  --expected-world-size 8 \
+  --expected-world-size 4 \
   --output-json "$PLAN_JSON" \
   --output-env "$PLAN_ENV" \
   --quarantine-incomplete-root "$HOT_QUARANTINE_ROOT" \
@@ -183,13 +183,9 @@ METADATA="$RUN_DIR/${RUN_ID}_metadata.json"
 RESULT="$RUN_DIR/${RUN_ID}_result.json"
 EVENTS="$RUN_DIR/${RUN_ID}_checkpoint_events.jsonl"
 OPTIMIZER_DIR="$RUN_DIR/${RUN_ID}_optimizer_state"
-MASTER_ADDR="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | sed -n '1p')"
-MASTER_PORT="$((22000 + SLURM_JOB_ID % 20000))"
-test -n "$MASTER_ADDR"
-
 XWAM_PHASE=close_fridge_ab_training_srun
-srun --nodes=2 \
-  --ntasks=2 \
+srun --nodes=1 \
+  --ntasks=1 \
   --ntasks-per-node=1 \
   --kill-on-bad-exit=1 \
   --environment="$EDF" \
@@ -218,20 +214,13 @@ srun --nodes=2 \
     WANDB_CACHE_DIR="$WANDB_CACHE_DIR" \
     WANDB_MODE=online \
     WANDB_RESUME=allow \
-    MASTER_ADDR="$MASTER_ADDR" \
-    MASTER_PORT="$MASTER_PORT" \
     XWAM_FAILURE_REPORT="$FAILURE_REPORT" \
     XWAM_MAIN_LOG="$MAIN_LOG" \
     XWAM_TRAIN_LOG="$TRAIN_LOG" \
   bash -lc '
 set -Eeuo pipefail
-NODE_RANK="${SLURM_NODEID:?SLURM_NODEID is required}"
 NODE_TRAIN_LOG="$TRAIN_LOG"
 NODE_FAILURE_REPORT="$XWAM_FAILURE_REPORT"
-if [[ "$NODE_RANK" != 0 ]]; then
-  NODE_TRAIN_LOG="${TRAIN_LOG%.log}-node${NODE_RANK}.log"
-  NODE_FAILURE_REPORT="${XWAM_FAILURE_REPORT%.txt}-node${NODE_RANK}.txt"
-fi
 export XWAM_FAILURE_REPORT="$NODE_FAILURE_REPORT"
 export XWAM_TRAIN_LOG="$NODE_TRAIN_LOG"
 export XWAM_PHASE=close_fridge_ab_training_shell
@@ -256,9 +245,8 @@ assert all("GH200" in name.upper() for name in names), names
 print("CloseFridge A/B node GPU preflight:", names)
 PY
 
-if [[ "$NODE_RANK" == 0 ]]; then
-  XWAM_PHASE=close_fridge_ab_wandb_preflight
-  python - <<"PY"
+XWAM_PHASE=close_fridge_ab_wandb_preflight
+python - <<"PY"
 import importlib.metadata
 import os
 from pathlib import Path
@@ -273,7 +261,6 @@ assert os.environ.get("WANDB_API_KEY")
 assert wandb.login(verify=True)
 print("wandb authentication: api_key_env pass")
 PY
-fi
 
 export SLURM_JOB_NAME=interactive
 unset SLURM_NTASKS SLURM_NTASKS_PER_NODE SLURM_PROCID SLURM_LOCALID SLURM_NODEID
@@ -303,13 +290,7 @@ git rev-parse HEAD
 test -z "$(git status --porcelain)"
 nvidia-smi
 free -h
-python -m torch.distributed.run \
-  --nnodes 2 \
-  --nproc-per-node 4 \
-  --node-rank "$NODE_RANK" \
-  --master-addr "$MASTER_ADDR" \
-  --master-port "$MASTER_PORT" \
-  "${TRAIN_ARGS[@]}" 2>&1 | tee "$NODE_TRAIN_LOG"
+python "${TRAIN_ARGS[@]}" 2>&1 | tee "$NODE_TRAIN_LOG"
 '
 
 XWAM_PHASE=close_fridge_ab_artifact_check
@@ -338,7 +319,7 @@ assert result["result"] == "pass", result
 assert int(result["global_step"]) == expected_step, result
 assert metadata["git"]["dirty"] is False, metadata["git"]
 assert metadata["dataset"]["task_name"] == "CloseFridge", metadata["dataset"]
-assert int(metadata["topology"]["world_size"]) == 8, metadata["topology"]
+assert int(metadata["topology"]["world_size"]) == 4, metadata["topology"]
 assert int(metadata["training"]["num_training_steps"]) == 3000, metadata["training"]
 wandb = metadata["tracking"]["wandb"]
 assert wandb["run_id"] == os.environ["EXPECTED_WANDB_RUN_ID"], wandb

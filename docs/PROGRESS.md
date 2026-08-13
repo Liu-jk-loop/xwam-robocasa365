@@ -74,7 +74,7 @@
 - Store assets修复后的运行已进入真实episode，但在`TurnOnSinkFaucet/seed44`被内层M4.3“新run要求clean Git”合同中断；robosuite_models、Mink和mimicgen提示不是退出原因。M6现使用独立task client，外层仍严格冻结clean Git与完整provenance，内层不再重复脆弱门禁。同期发现旧配置固定layout/style且视频`stride=20/fps=5`，与FastWAM target split及每步20 FPS不一致，已一并纠正；新合同集群运行仍为`cluster-pending`。
 - 新client首次集群启动后broker两次报告frontend `frame_count=3`并丢弃请求；这是REQ socket添加空delimiter与既有ROUTER/DEALER两帧协议不匹配，client实际上已启动但policy未收到请求。client已改回项目M4入口一致的DEALER，并增加回归检查；修复后的真实policy request仍为`cluster-pending`。
 - 18任务闭环结果明显低于FastWAM，NavigateKitchen底盘诊断进一步确认policy虽持续输出非零base命令且环境数值上响应，但1000步净位移仅约5.6 cm，主要问题不是评测端静默丢弃底盘动作。按用户决定暂不把Navi标签审计作为阻塞项，先运行CloseFridge单任务A/B。
-- 新增CloseFridge专用单任务RGB配置、8×GH200 GBS128/ZeRO-1硬件层及`clean_action_ratio=0.5/0.0`两份严格对照实验。两组均从公开pretrained以seed42开始，固定3000-step scheduler，首轮只运行到step 1000；IOPS每250步滚动保留5个，Store保存step 1000 final，W&B run与checkpoint目录按组隔离。真实训练为`cluster-pending`。
+- 新增CloseFridge专用单任务RGB配置、单节点4×GH200 `batch16/accum2` GBS128/ZeRO-1硬件层及`clean_action_ratio=0.5/0.0`两份严格对照实验。两组均从公开pretrained以seed42开始，固定3000-step scheduler，首轮只运行到step 1000；IOPS每250步滚动保留5个，Store保存step 1000 final，W&B run与checkpoint目录按组隔离。真实训练为`cluster-pending`。
 
 ## 已确认资源
 

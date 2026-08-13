@@ -672,7 +672,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         hardware = (
             REPO_ROOT
-            / "configs/hardware/gh200x8_96gb_gbs128_single_task.yaml"
+            / "configs/hardware/gh200x4_96gb_gbs128_single_task.yaml"
         ).read_text(encoding="utf-8")
         data = (
             REPO_ROOT / "configs/data/robocasa365_close_fridge_rgb.yaml"
@@ -682,12 +682,12 @@ class ClaridenDeploymentTest(unittest.TestCase):
         )
 
         normalized05 = "\n".join(ratio05.splitlines()[1:]).replace(
-            "close_fridge_rgb_ratio05_seed42_8gpu",
-            "close_fridge_rgb_ratioXX_seed42_8gpu",
+            "close_fridge_rgb_ratio05_seed42_4gpu",
+            "close_fridge_rgb_ratioXX_seed42_4gpu",
         ).replace("clean_action_ratio: 0.5", "clean_action_ratio: X")
         normalized00 = "\n".join(ratio00.splitlines()[1:]).replace(
-            "close_fridge_rgb_ratio00_seed42_8gpu",
-            "close_fridge_rgb_ratioXX_seed42_8gpu",
+            "close_fridge_rgb_ratio00_seed42_4gpu",
+            "close_fridge_rgb_ratioXX_seed42_4gpu",
         ).replace("clean_action_ratio: 0.0", "clean_action_ratio: X")
         self.assertEqual(normalized05, normalized00)
 
@@ -708,7 +708,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
         for expected in (
             "devices: 4",
             "batch_size_per_gpu: 16",
-            "accumulate_grad_batches: 1",
+            "accumulate_grad_batches: 2",
             "global_batch_size: 128",
             "use_gradient_checkpointing: true",
             "deepspeed_stage: 1",
@@ -717,7 +717,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
         ):
             self.assertIn(expected, hardware)
         for expected in (
-            "#SBATCH --nodes=2",
+            "#SBATCH --nodes=1",
             "#SBATCH --gpus-per-node=4",
             "#SBATCH --time=12:00:00",
             "#SBATCH --export=ALL",
@@ -726,10 +726,8 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "ratio00)",
             'TARGET_STEPS="${XWAM_CF_TARGET_STEPS:-1000}"',
             "1000|3000",
-            "--expected-world-size 8",
-            "python -m torch.distributed.run",
-            "--nnodes 2",
-            "--nproc-per-node 4",
+            "--expected-world-size 4",
+            'srun --nodes=1 \\\n  --ntasks=1',
             'HOT_CHECKPOINT_ROOT="$DEPLOY_IOPS/xwam_run/$EXP_NAME/checkpoints"',
             'FINAL_CHECKPOINT_ROOT="$DEPLOY_STORE/checkpoints/xwam/$EXP_NAME/checkpoints"',
             "Git worktree must be clean before CloseFridge A/B training",
@@ -737,6 +735,8 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "[PASS] CloseFridge $VARIANT reached step",
         ):
             self.assertIn(expected, script)
+        self.assertNotIn("python -m torch.distributed.run", script)
+        self.assertNotIn("--nnodes 2", script)
 
 
 if __name__ == "__main__":

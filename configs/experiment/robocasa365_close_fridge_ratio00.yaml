@@ -1,6 +1,6 @@
 # CloseFridge B组：所有样本都保留action/proprio去噪监督。
 exp_root: ./experiments/
-exp_name: close_fridge_rgb_ratio00_seed42_8gpu
+exp_name: close_fridge_rgb_ratio00_seed42_4gpu
 seed: 42
 
 lr: 1e-5
@@ -22,7 +22,7 @@ enable_tensorboard: false
 enable_wandb: true
 wandb_project: xwam-robocasa365
 wandb_entity: null
-wandb_name: close_fridge_rgb_ratio00_seed42_8gpu
+wandb_name: close_fridge_rgb_ratio00_seed42_4gpu
 wandb_group: close_fridge_clean_action_ab_seed42
 wandb_mode: online
 wandb_require_api_key: true
