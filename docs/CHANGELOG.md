@@ -2,6 +2,7 @@
 
 ## 2026-08-13 — M6正式评测与FastWAM配置及产物对齐
 
+- 首次新client集群运行时，broker报告`discard malformed frontend message frame_count=3`且policy始终收不到请求。根因是M6 client误用ZeroMQ `REQ`连接现有`ROUTER` frontend，REQ自动插入空delimiter形成三帧，而项目既有broker协议要求DEALER产生的`[identity,payload]`两帧。M6 client已恢复与M4.2/M4.3相同的`DEALER`类型，并增加静态协议回归测试；该失败发生在policy执行前，不能解释为模型推理或RoboCasa环境问题。
 - 修复首次可运行评测在`TurnOnSinkFaucet/seed44`被`M4.3 新 run 必须从干净 Git 工作区启动`中断的问题。该错误不是robosuite模型、Mink或mimicgen warning导致，而是M6 client逐episode嵌套M4.3 runner后重复执行Git门禁；外层作业已经冻结clean commit、checkpoint、RoboCasa/robosuite commit、assets与配置，因此M6改为独立task client，不再重复逐episode门禁。
 - 对照用户下载的FastWAM正式client，将RoboCasa场景改为`target` split且不固定layout/style，prompt直接取当前observation的`annotation.human.task_description`；固定环境/模型seed 42起、1000 step、replan20、action denoise10和12D动作裁剪保持一致。原配置`layout=1/style=1`与FastWAM不是同一场景合同。
 - 修正视频时间轴：原M6配置每20个环境step录1帧且以5 FPS播放，1000步失败episode只有约10秒并呈现约4倍动作加速；现改为初始帧加每个环境step一帧、20 FPS，跑满1000步约50秒。视频直接流式写MP4，不保存PNG帧。

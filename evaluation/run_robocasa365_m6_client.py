@@ -65,7 +65,10 @@ def _open_policy_socket(frontend_port: int) -> tuple[Any, Any, Any]:
     import zmq
 
     context = zmq.Context()
-    socket = context.socket(zmq.REQ)
+    # The broker frontend is ROUTER and expects [identity, payload]. DEALER
+    # produces exactly those two frames; REQ inserts an empty delimiter and the
+    # broker correctly rejects the resulting three-frame message.
+    socket = context.socket(zmq.DEALER)
     socket.setsockopt(zmq.LINGER, 0)
     socket.setsockopt(zmq.IDENTITY, f"xwam-m6-client-{os.getpid()}".encode())
     socket.connect(f"tcp://127.0.0.1:{frontend_port}")

@@ -147,6 +147,8 @@ class RoboCasa365M6EvaluationTest(unittest.TestCase):
         self.assertNotIn("progress.json", client)
         self.assertIn("writer.append_data", client)
         self.assertNotIn("imageio.imwrite", client)
+        self.assertIn("context.socket(zmq.DEALER)", client)
+        self.assertNotIn("context.socket(zmq.REQ)", client)
 
         policy_pool = (
             REPO_ROOT / "evaluation/launch_robocasa365_m6_policy_pool.py"
