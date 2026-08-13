@@ -7,12 +7,18 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
+
 from evaluation.robocasa365_m6_topology import (
     load_m6_evaluation_topology,
     tasks_for_server,
 )
+from evaluation.run_robocasa365_m6_client import _summarize_base_diagnostics
 from evaluation.robocasa365_policy_server import validate_checkpoint_task
 from scripts.aggregate_robocasa365_m6_evaluation import aggregate
+from scripts.summarize_robocasa365_base_diagnostics import (
+    summarize as summarize_base_diagnostics,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +29,57 @@ TOPOLOGY = (
 
 
 class RoboCasa365M6EvaluationTest(unittest.TestCase):
+    def test_base_action_diagnostics_separate_policy_and_execution(self) -> None:
+        report = _summarize_base_diagnostics(
+            [
+                np.asarray([0.5, 0.0, 0.0, 0.0], dtype=np.float32),
+                np.zeros(4, dtype=np.float32),
+                np.asarray([0.0, -0.25, 0.0, 0.0], dtype=np.float32),
+            ],
+            [-1.0, 1.0, -1.0],
+            [
+                np.asarray([0.1, 0.0, 0.0], dtype=np.float32),
+                np.zeros(3, dtype=np.float32),
+                np.zeros(3, dtype=np.float32),
+            ],
+        )
+        self.assertEqual(report["steps"], 3)
+        self.assertEqual(report["base_command_nonzero_steps"], 2)
+        self.assertEqual(report["base_position_delta_nonzero_steps"], 1)
+        self.assertEqual(report["commanded_but_stationary_steps"], 1)
+        self.assertEqual(
+            report["control_mode_counts"],
+            {"-1": 2, "+1": 1, "other": 0},
+        )
+        self.assertAlmostEqual(report["base_position_total_displacement"], 0.1)
+
+    def test_base_diagnostic_summary_classifies_near_zero_policy(self) -> None:
+        report = summarize_base_diagnostics(
+            {
+                "task": "NavigateKitchen",
+                "episodes": [
+                    {
+                        "seed": 42,
+                        "base_action_diagnostics": {
+                            "steps": 100,
+                            "base_command_nonzero_fraction": 0.0,
+                            "base_command_rms_per_dim": [0.0, 0.0, 0.0, 0.0],
+                            "control_mode_counts": {
+                                "-1": 100,
+                                "+1": 0,
+                                "other": 0,
+                            },
+                            "base_position_delta_nonzero_fraction": 0.0,
+                            "base_position_delta_rms_per_dim": [0.0, 0.0, 0.0],
+                            "base_position_total_displacement": 0.0,
+                            "commanded_but_stationary_steps": 0,
+                        },
+                    }
+                ],
+            }
+        )
+        self.assertEqual(report["verdict"], "policy_base_output_near_zero")
+
     def test_topology_exactly_matches_requested_assignment(self) -> None:
         topology = load_m6_evaluation_topology(TOPOLOGY, REPO_ROOT)
         self.assertEqual(topology["model_seed"], 42)
@@ -138,6 +195,34 @@ class RoboCasa365M6EvaluationTest(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
             self.assertEqual(result.returncode, 0, f"{script}: {result.stderr}")
+
+    def test_launchers_accept_single_server_and_client_selection(self) -> None:
+        policy = subprocess.run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "evaluation/launch_robocasa365_m6_policy_pool.py"),
+                "--help",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        client = subprocess.run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "evaluation/launch_robocasa365_m6_client_pool.py"),
+                "--help",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertIn("--server-id SERVER_IDS", policy.stdout)
+        self.assertIn("--client-id CLIENT_IDS", client.stdout)
 
     def test_formal_client_is_lean_and_does_not_reenter_m43(self) -> None:
         client = (REPO_ROOT / "evaluation/run_robocasa365_m6_client.py").read_text(

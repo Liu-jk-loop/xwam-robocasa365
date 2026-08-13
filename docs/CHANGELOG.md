@@ -1,5 +1,16 @@
 # 变更记录
 
+## 2026-08-13 — NavigateKitchen底盘动作诊断
+
+- M6 client的task result新增紧凑的物理量诊断，分别记录base_motion、
+  离散后的control_mode和环境实际产生的base-position delta，不保存逐步
+  action trace或额外图片。
+- Policy/client pool支持重复传入--server-id与--client-id，可以只加载
+  server0并运行client8，不必为了一个NavigateKitchen诊断启动8 server /
+  16 client。
+- 新增单GPU Clariden诊断job与summary脚本，用一个或多个episode区分
+  “模型底盘输出接近0”和“存在底盘命令但环境不移动”。
+
 ## 2026-08-13 — M6正式评测与FastWAM配置及产物对齐
 
 - 首次新client集群运行时，broker报告`discard malformed frontend message frame_count=3`且policy始终收不到请求。根因是M6 client误用ZeroMQ `REQ`连接现有`ROUTER` frontend，REQ自动插入空delimiter形成三帧，而项目既有broker协议要求DEALER产生的`[identity,payload]`两帧。M6 client已恢复与M4.2/M4.3相同的`DEALER`类型，并增加静态协议回归测试；该失败发生在policy执行前，不能解释为模型推理或RoboCasa环境问题。

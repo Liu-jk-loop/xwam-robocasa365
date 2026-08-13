@@ -110,6 +110,80 @@ def _finish_video(writer: Any, path: Path) -> None:
     os.replace(partial, path)
 
 
+def _summarize_base_diagnostics(
+    base_commands: list[np.ndarray],
+    control_modes: list[float],
+    base_position_deltas: list[np.ndarray],
+) -> dict[str, Any]:
+    """Return compact physical-unit diagnostics without retaining step traces."""
+
+    if not (
+        len(base_commands) == len(control_modes) == len(base_position_deltas)
+    ):
+        raise BenchmarkContractError("base诊断序列长度不一致")
+    if not base_commands:
+        return {
+            "steps": 0,
+            "base_command_nonzero_steps": 0,
+            "base_command_nonzero_fraction": 0.0,
+            "base_command_rms_per_dim": [],
+            "base_command_min_per_dim": [],
+            "base_command_max_per_dim": [],
+            "control_mode_counts": {},
+            "base_position_delta_nonzero_steps": 0,
+            "base_position_delta_nonzero_fraction": 0.0,
+            "base_position_delta_rms_per_dim": [],
+            "base_position_total_displacement": 0.0,
+            "commanded_but_stationary_steps": 0,
+        }
+
+    commands = np.asarray(base_commands, dtype=np.float32)
+    modes = np.asarray(control_modes, dtype=np.float32)
+    deltas = np.asarray(base_position_deltas, dtype=np.float32)
+    if commands.ndim != 2 or commands.shape[1] != 4:
+        raise BenchmarkContractError(f"base command诊断应为[N,4]，实际={commands.shape}")
+    if modes.shape != (commands.shape[0],):
+        raise BenchmarkContractError(f"control mode诊断应为[N]，实际={modes.shape}")
+    if deltas.ndim != 2 or deltas.shape != (commands.shape[0], 3):
+        raise BenchmarkContractError(f"base position delta诊断应为[N,3]，实际={deltas.shape}")
+    if not (
+        np.isfinite(commands).all()
+        and np.isfinite(modes).all()
+        and np.isfinite(deltas).all()
+    ):
+        raise BenchmarkContractError("base诊断包含NaN/Inf")
+
+    command_norms = np.linalg.norm(commands, axis=1)
+    delta_norms = np.linalg.norm(deltas, axis=1)
+    command_nonzero = command_norms > 1e-6
+    delta_nonzero = delta_norms > 1e-8
+    mode_counts = {
+        "-1": int(np.count_nonzero(modes == -1.0)),
+        "+1": int(np.count_nonzero(modes == 1.0)),
+        "other": int(np.count_nonzero((modes != -1.0) & (modes != 1.0))),
+    }
+    return {
+        "steps": int(commands.shape[0]),
+        "base_command_nonzero_steps": int(np.count_nonzero(command_nonzero)),
+        "base_command_nonzero_fraction": float(command_nonzero.mean()),
+        "base_command_rms_per_dim": np.sqrt(np.mean(commands**2, axis=0)).tolist(),
+        "base_command_min_per_dim": commands.min(axis=0).tolist(),
+        "base_command_max_per_dim": commands.max(axis=0).tolist(),
+        "control_mode_counts": mode_counts,
+        "base_position_delta_nonzero_steps": int(np.count_nonzero(delta_nonzero)),
+        "base_position_delta_nonzero_fraction": float(delta_nonzero.mean()),
+        "base_position_delta_rms_per_dim": np.sqrt(
+            np.mean(deltas**2, axis=0)
+        ).tolist(),
+        "base_position_total_displacement": float(
+            np.linalg.norm(deltas.sum(axis=0))
+        ),
+        "commanded_but_stationary_steps": int(
+            np.count_nonzero(command_nonzero & ~delta_nonzero)
+        ),
+    }
+
+
 def _run_episode(
     *,
     env: Any,
@@ -135,6 +209,18 @@ def _run_episode(
     clipped_actions = 0
     clipped_scalars = 0
     max_abs_raw_action = 0.0
+    action_components = {
+        component.name: component for component in schema.action.components
+    }
+    state_components = {
+        component.name: component for component in schema.state.components
+    }
+    base_action_component = action_components["base_motion"]
+    control_mode_component = action_components["control_mode"]
+    base_state_component = state_components["base_position"]
+    base_commands: list[np.ndarray] = []
+    control_modes: list[float] = []
+    base_position_deltas: list[np.ndarray] = []
     success = False
     terminated = False
     truncated = False
@@ -177,6 +263,9 @@ def _run_episode(
                 flush=True,
             )
             for raw_action in actions[:execute_count]:
+                base_position_before = pack_online_state(observation, schema)[
+                    base_state_component.start : base_state_component.end
+                ].copy()
                 outside = (raw_action < -1.0) | (raw_action > 1.0)
                 outside_count = int(np.count_nonzero(outside))
                 if outside_count:
@@ -188,7 +277,24 @@ def _run_episode(
                 flat_action = np.clip(raw_action, -1.0, 1.0).astype(np.float32)
                 gym_action = flat_action_to_gym_dict(flat_action, schema)
                 validate_gym_action_space(gym_action, env.action_space)
+                base_commands.append(
+                    flat_action[
+                        base_action_component.start : base_action_component.end
+                    ].copy()
+                )
+                control_modes.append(
+                    float(flat_action[control_mode_component.start])
+                )
                 observation, reward, terminated, truncated, info = env.step(gym_action)
+                base_position_after = pack_online_state(observation, schema)[
+                    base_state_component.start : base_state_component.end
+                ]
+                base_position_deltas.append(
+                    np.asarray(
+                        base_position_after - base_position_before,
+                        dtype=np.float32,
+                    )
+                )
                 steps += 1
                 cameras = pack_online_cameras(observation, camera_keys, camera_shape)
                 writer.append_data(tile_camera_views(cameras))
@@ -231,6 +337,11 @@ def _run_episode(
         "clipped_actions": clipped_actions,
         "clipped_action_scalars": clipped_scalars,
         "max_abs_raw_action": max_abs_raw_action,
+        "base_action_diagnostics": _summarize_base_diagnostics(
+            base_commands,
+            control_modes,
+            base_position_deltas,
+        ),
         "elapsed_seconds": time.monotonic() - started,
         "video": str(video_path),
     }

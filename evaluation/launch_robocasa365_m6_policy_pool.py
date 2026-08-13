@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch eight fixed broker/server pairs for one M6 evaluation allocation."""
+"""Launch selected fixed broker/server pairs for one M6 evaluation allocation."""
 
 from __future__ import annotations
 
@@ -83,15 +83,28 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--ready-file", required=True)
     parser.add_argument("--stop-file", required=True)
     parser.add_argument("--startup-timeout-seconds", type=float, default=1200)
+    parser.add_argument(
+        "--server-id",
+        type=int,
+        action="append",
+        dest="server_ids",
+        help="只启动指定server；可重复。默认启动0..7。",
+    )
     args = parser.parse_args()
     if args.startup_timeout_seconds <= 0:
         parser.error("startup timeout 必须为正")
+    if args.server_ids is not None:
+        if len(set(args.server_ids)) != len(args.server_ids):
+            parser.error("server id不允许重复")
+        if any(server_id not in range(8) for server_id in args.server_ids):
+            parser.error("server id必须位于0..7")
     return args
 
 
 def main() -> int:
     args = _parse_args()
     topology = load_m6_evaluation_topology(args.topology, REPO_ROOT)
+    server_ids = sorted(args.server_ids or range(8))
     log_root = Path(args.log_root).expanduser().resolve()
     server_root = log_root / "servers"
     server_root.mkdir(parents=True, exist_ok=True)
@@ -112,7 +125,7 @@ def main() -> int:
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
     try:
-        for server_id in range(8):
+        for server_id in server_ids:
             server = topology["servers"][server_id]
             broker_log = (server_root / f"broker_{server_id}.log").open(
                 "a", encoding="utf-8"
@@ -139,7 +152,7 @@ def main() -> int:
 
         # Load one server at a time so eight mmap/checkpoint initializations do not
         # create an avoidable Store or host-memory spike.
-        for server_id in range(8):
+        for server_id in server_ids:
             server = topology["servers"][server_id]
             assigned_tasks = tasks_for_server(topology, server_id)
             report_path = server_root / f"server_{server_id}_status.json"
@@ -215,6 +228,7 @@ def main() -> int:
                 "topology": topology["name"],
                 "model_seed": topology["model_seed"],
                 "checkpoint": str(Path(args.checkpoint).expanduser().resolve()),
+                "server_ids": server_ids,
                 "servers": server_reports,
                 "created_at_utc": datetime.now(timezone.utc).isoformat(),
             },

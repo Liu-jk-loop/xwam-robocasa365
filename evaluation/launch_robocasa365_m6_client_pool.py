@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch all sixteen RoboCasa simulator clients from the M6 topology."""
+"""Launch selected RoboCasa simulator clients from the M6 topology."""
 
 from __future__ import annotations
 
@@ -26,15 +26,28 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--log-root", required=True)
     parser.add_argument("--episodes-per-task", type=int)
+    parser.add_argument(
+        "--client-id",
+        type=int,
+        action="append",
+        dest="client_ids",
+        help="只启动指定client；可重复。默认启动0..15。",
+    )
     args = parser.parse_args()
     if args.episodes_per_task is not None and args.episodes_per_task <= 0:
         parser.error("episodes per task 必须为正")
+    if args.client_ids is not None:
+        if len(set(args.client_ids)) != len(args.client_ids):
+            parser.error("client id不允许重复")
+        if any(client_id not in range(16) for client_id in args.client_ids):
+            parser.error("client id必须位于0..15")
     return args
 
 
 def main() -> int:
     args = _parse_args()
     topology = load_m6_evaluation_topology(args.topology, REPO_ROOT)
+    client_ids = sorted(args.client_ids or range(16))
     output_root = Path(args.output_root).expanduser().resolve()
     log_root = Path(args.log_root).expanduser().resolve() / "clients"
     log_root.mkdir(parents=True, exist_ok=True)
@@ -52,7 +65,7 @@ def main() -> int:
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
     try:
-        for client_id in range(16):
+        for client_id in client_ids:
             client = topology["clients"][client_id]
             log_handle = (log_root / f"client_{client_id:02d}.log").open(
                 "a", encoding="utf-8"
