@@ -53,7 +53,6 @@ def main() -> int:
     try:
         for client_id in range(16):
             client = topology["clients"][client_id]
-            server = topology["servers"][client["server_id"]]
             log_handle = (log_root / f"client_{client_id:02d}.log").open(
                 "a", encoding="utf-8"
             )
@@ -74,8 +73,13 @@ def main() -> int:
                 )
             environment = dict(os.environ)
             environment["MUJOCO_GL"] = "egl"
-            environment["MUJOCO_EGL_DEVICE_ID"] = str(server["gpu"])
-            environment.pop("CUDA_VISIBLE_DEVICES", None)
+            environment["PYOPENGL_PLATFORM"] = "egl"
+            # The validated RoboCasa EDF exposes one EGL device even when the
+            # Slurm step owns four GPUs. Match the working FastWAM client path.
+            environment["MUJOCO_EGL_DEVICE_ID"] = "0"
+            environment["EGL_DEVICE_ID"] = "0"
+            environment["ROBOSUITE_RENDER_GPU_DEVICE_ID"] = "0"
+            environment["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
             process = subprocess.Popen(
                 command,
                 cwd=REPO_ROOT,
@@ -86,7 +90,7 @@ def main() -> int:
             processes.append(process)
             print(
                 f"[START] client={client_id} server={client['server_id']} "
-                f"render_gpu={server['gpu']} tasks={[row['name'] for row in client['tasks']]}",
+                f"egl_device=0 tasks={[row['name'] for row in client['tasks']]}",
                 flush=True,
             )
         return_codes = [process.wait() for process in processes]

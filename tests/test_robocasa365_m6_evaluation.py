@@ -121,6 +121,7 @@ class RoboCasa365M6EvaluationTest(unittest.TestCase):
             REPO_ROOT / "evaluation/launch_robocasa365_m6_policy_pool.py",
             REPO_ROOT / "evaluation/launch_robocasa365_m6_client_pool.py",
             REPO_ROOT / "scripts/aggregate_robocasa365_m6_evaluation.py",
+            REPO_ROOT / "scripts/probe_robocasa365_eval_runtime.py",
         )
         for script in scripts:
             result = subprocess.run(

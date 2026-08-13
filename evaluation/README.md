@@ -39,6 +39,11 @@ X-WAM server，共8个固定server/broker对；16个RoboCasa client按版本化t
 `XWAM_EVAL_ID`重新提交时，已完成episode直接跳过，中断episode从原progress恢复。
 正式评测产物统一写入IOPS的`/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/`
 目录，不把视频或逐episode推理结果写到Capstor/Store。
+Simulator client与FastWAM正式评测使用同一已验证来源：EDF内将Store的
+`src/robocasa`和`src/robosuite`放在`PYTHONPATH`最前，复用此前下载的完整assets，
+而不使用SQSH内不完整的`/opt/robocasa`。在加载policy前会写出
+`robocasa_eval_runtime_probe.json`并检查模块来源和`Sink025`；当前容器只枚举一个
+EGL device，所有client固定device 0，policy server的四卡映射保持不变。
 
 Policy server从M6 manifest读取18个合法任务，并只使用与manifest绑定的跨任务
 normalization statistics；每个server还会拒绝topology未分配给自己的任务。最终

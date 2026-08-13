@@ -16,6 +16,8 @@ set -Eeuo pipefail
 DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
 DEPLOY_IOPS=/iopsstor/scratch/cscs/zjingchen/terry_nys
 REPO="$DEPLOY_STORE/src/xwam-robocasa365"
+ROBOCASA_ROOT="$DEPLOY_STORE/src/robocasa"
+ROBOSUITE_ROOT="$DEPLOY_STORE/src/robosuite"
 XWAM_EDF="$DEPLOY_STORE/containers/edf/xwam.toml"
 ROBOCASA_EDF="$DEPLOY_STORE/containers/edf/robocasa365.toml"
 RUNTIME_OVERLAY="$DEPLOY_IOPS/python/xwam-nvtx-0.2.15"
@@ -46,6 +48,9 @@ cd "$REPO"
 [[ "$EPISODES_PER_TASK" =~ ^[1-9][0-9]*$ ]] || xwam_fail "XWAM_EVAL_EPISODES must be a positive integer"
 test -s "$XWAM_EDF"
 test -s "$ROBOCASA_EDF"
+test -d "$ROBOCASA_ROOT/robocasa"
+test -d "$ROBOSUITE_ROOT/robosuite"
+test -s "$ROBOCASA_ROOT/robocasa/models/assets/fixtures/sinks/Sink025/model.xml"
 test -d "$RUNTIME_OVERLAY"
 test -d "$EXPERIMENT_DIR"
 test -s "$EXPERIMENT_DIR/config.yaml"
@@ -80,6 +85,11 @@ EXPECTED_CONTRACT="$JOB_ROOT/evaluation_contract.expected.txt"
   printf 'checkpoint=%s\n' "$(realpath "$CHECKPOINT")"
   printf 'episodes_per_task=%s\n' "$EPISODES_PER_TASK"
   printf 'repo_commit=%s\n' "$(git rev-parse HEAD)"
+  printf 'robocasa_commit=%s\n' "$(git -C "$ROBOCASA_ROOT" rev-parse HEAD)"
+  printf 'robocasa_tracked_diff_sha256=%s\n' "$(git -C "$ROBOCASA_ROOT" diff --binary HEAD | sha256sum | awk '{print $1}')"
+  printf 'robosuite_commit=%s\n' "$(git -C "$ROBOSUITE_ROOT" rev-parse HEAD)"
+  printf 'robosuite_tracked_diff_sha256=%s\n' "$(git -C "$ROBOSUITE_ROOT" diff --binary HEAD | sha256sum | awk '{print $1}')"
+  printf 'sink025_sha256=%s\n' "$(sha256sum "$ROBOCASA_ROOT/robocasa/models/assets/fixtures/sinks/Sink025/model.xml" | awk '{print $1}')"
   printf 'topology_sha256=%s\n' "$(sha256sum "$TOPOLOGY" | awk '{print $1}')"
   printf 'manifest_sha256=%s\n' "$(sha256sum "$MANIFEST" | awk '{print $1}')"
   printf 'stats_sha256=%s\n' "$(sha256sum "$STATS" | awk '{print $1}')"
@@ -102,6 +112,26 @@ echo "topology=8 servers / 16 clients / 4 GPUs"
 echo "model_seed=42 task_seed_start=42 replan=20 action_denoise_steps=10"
 echo "result_root=$RESULT_ROOT"
 echo "failure_report=$FAILURE_REPORT"
+
+# FastWAM 的已验证 simulator 路径通过 PYTHONPATH 使用 Store 中带完整
+# assets 的 RoboCasa/robosuite 源码，而不是 SQSH 内不完整的 /opt 副本。
+SIMULATOR_PROBE="$JOB_ROOT/robocasa_eval_runtime_probe.json"
+XWAM_PHASE=eval_simulator_runtime_probe
+srun --nodes=1 --ntasks=1 --cpus-per-task=1 \
+  --environment="$ROBOCASA_EDF" \
+  env REPO="$REPO" ROBOCASA_ROOT="$ROBOCASA_ROOT" \
+    ROBOSUITE_ROOT="$ROBOSUITE_ROOT" SIMULATOR_PROBE="$SIMULATOR_PROBE" \
+  bash -lc '
+set -Eeuo pipefail
+cd "$REPO"
+export PYTHONPATH="$ROBOCASA_ROOT:$ROBOSUITE_ROOT:$REPO${PYTHONPATH:+:$PYTHONPATH}"
+python scripts/probe_robocasa365_eval_runtime.py \
+  --robocasa-root "$ROBOCASA_ROOT" \
+  --robosuite-root "$ROBOSUITE_ROOT" \
+  --output "$SIMULATOR_PROBE"
+'
+grep -q '"ok": true' "$SIMULATOR_PROBE"
+grep -q '"result": "pass"' "$SIMULATOR_PROBE"
 
 POLICY_STEP_PID=""
 cleanup_policy() {
@@ -166,6 +196,8 @@ srun --overlap --nodes=1 --ntasks=1 --gpus-per-node=4 --cpus-per-task=48 \
   --environment="$ROBOCASA_EDF" \
   env \
     REPO="$REPO" \
+    ROBOCASA_ROOT="$ROBOCASA_ROOT" \
+    ROBOSUITE_ROOT="$ROBOSUITE_ROOT" \
     TOPOLOGY="$TOPOLOGY" \
     RESULT_ROOT="$RESULT_ROOT" \
     EPISODES_PER_TASK="$EPISODES_PER_TASK" \
@@ -175,7 +207,8 @@ cd "$REPO"
 export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
-export PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}"
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+export PYTHONPATH="$ROBOCASA_ROOT:$ROBOSUITE_ROOT:$REPO${PYTHONPATH:+:$PYTHONPATH}"
 python evaluation/launch_robocasa365_m6_client_pool.py \
   --topology "$TOPOLOGY" \
   --output-root "$RESULT_ROOT" \

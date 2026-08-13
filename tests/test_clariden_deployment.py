@@ -245,6 +245,11 @@ class ClaridenDeploymentTest(unittest.TestCase):
         for expected in (
             "#SBATCH --export=ALL",
             'EVAL_ROOT="$DEPLOY_IOPS/x-wam-eval/$EVAL_ID"',
+            'ROBOCASA_ROOT="$DEPLOY_STORE/src/robocasa"',
+            'ROBOSUITE_ROOT="$DEPLOY_STORE/src/robosuite"',
+            "fixtures/sinks/Sink025/model.xml",
+            "probe_robocasa365_eval_runtime.py",
+            'PYTHONPATH="$ROBOCASA_ROOT:$ROBOSUITE_ROOT:$REPO',
             "evaluation_contract.txt",
             'EVAL_ID="$EVAL_ID"',
             'CHECKPOINT="$CHECKPOINT"',
@@ -253,6 +258,17 @@ class ClaridenDeploymentTest(unittest.TestCase):
         ):
             self.assertIn(expected, eval_script)
         self.assertNotIn('EVAL_ROOT="$DEPLOY_STORE/evaluations/xwam', eval_script)
+
+        client_pool = (
+            REPO_ROOT / "evaluation/launch_robocasa365_m6_client_pool.py"
+        ).read_text(encoding="utf-8")
+        for expected in (
+            'environment["MUJOCO_EGL_DEVICE_ID"] = "0"',
+            'environment["EGL_DEVICE_ID"] = "0"',
+            'environment["ROBOSUITE_RENDER_GPU_DEVICE_ID"] = "0"',
+            'environment["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"',
+        ):
+            self.assertIn(expected, client_pool)
 
     def test_debug_log_archiver_preserves_formal_logs(self) -> None:
         script = (DEPLOY_ROOT / "archive_debug_logs_xwam.sh").read_text(

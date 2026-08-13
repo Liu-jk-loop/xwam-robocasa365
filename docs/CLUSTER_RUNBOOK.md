@@ -1140,6 +1140,11 @@ episode结果、视频帧、MP4、client/server日志、断点文件和最终汇
 /iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/$XWAM_EVAL_ID/
 ```
 
+作业先在RoboCasa EDF中验证实际import来自Store的`src/robocasa`/`src/robosuite`，并
+检查此前下载的`Sink025`资产；probe失败发生在八份X-WAM模型加载前。若此前已有使用
+旧commit且0 step/0 request失败的eval目录，不复用旧ID；为修复后的运行设置新ID，
+例如在末尾追加`-store-assets-v2`。
+
 如果12小时先到，保持同一个commit、checkpoint、`XWAM_EVAL_ID`和episode数，再提交同一
 条`sbatch`即可。已完成seed会跳过，中断seed从原子progress回放恢复。不要换checkpoint
 后复用旧eval ID；不同6k/9k/12k checkpoint必须使用不同ID。最终机器汇总为：
