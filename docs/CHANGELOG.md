@@ -10,6 +10,9 @@
   16 client。
 - 新增单GPU Clariden诊断job与summary脚本，用一个或多个episode区分
   “模型底盘输出接近0”和“存在底盘命令但环境不移动”。
+- 修复诊断episode完成后summary阶段在裸计算节点调用不存在的python而以
+  exit 127退出；summary现在通过X-WAM EDF中的Python执行。该错误发生在
+  result.json写完之后，不会使已完成的NavigateKitchen episode失效。
 
 ## 2026-08-13 — M6正式评测与FastWAM配置及产物对齐
 

@@ -163,9 +163,16 @@ POLICY_STEP_PID=""
 test -s "$RESULT_JSON"
 
 export XWAM_PHASE=base_diagnostic_summary
+srun --overlap --nodes=1 --ntasks=1 --cpus-per-task=1 \
+  --environment="$XWAM_EDF" \
+  env REPO="$REPO" RESULT_JSON="$RESULT_JSON" SUMMARY_JSON="$SUMMARY_JSON" \
+  bash -lc '
+set -Eeuo pipefail
+cd "$REPO"
 python scripts/summarize_robocasa365_base_diagnostics.py \
   --result "$RESULT_JSON" \
   --output "$SUMMARY_JSON"
+'
 grep -q '"verdict":' "$SUMMARY_JSON"
 
 rm -f "$STOP_FILE" "$READY_FILE"
