@@ -1,5 +1,13 @@
 # 变更记录
 
+## 2026-08-13 — CloseFridge单任务clean-action ratio A/B
+
+- 新增CloseFridge单任务RGB数据层，使用真实任务自己的`meta/stats.json`、三路相机、`256×320`画面和与18任务正式训练一致的RGB增强；不读取多任务manifest或跨任务global statistics。
+- 新增独立8×GH200单任务硬件层：2节点×4卡、单卡batch16、无梯度累积、GBS128、ZeRO-1 GPU AdamW、FP32 optimizer state、4 workers/GPU和完整gradient checkpointing。它不启用M6五epochformal guard，但保留8-rank generator state与optimizer dtype记录。
+- 新增严格对照的两份实验配置。除实验/W&B名称与`clean_action_ratio=0.5`（A）或`0.0`（B）外配置完全相同：公开X-WAM初始化、seed42、LR `1e-5`、warmup200、3000-step scheduler、首轮trainer目标1000及每250步保存。
+- 新增Clariden提交脚本，`XWAM_CF_VARIANT=ratio05|ratio00`选择组别。两组分别使用IOPS `xwam_run/<实验名>`滚动checkpoint、Store `checkpoints/xwam/<实验名>` final checkpoint、独立W&B run ID、日志和文件锁；重提会从本组最新完整8-rank checkpoint恢复。`XWAM_CF_TARGET_STEPS=3000`只用于闭环比较后继续胜出组，不能改变scheduler或从另一组恢复。
+- 作业继承`#SBATCH --export=ALL`并继续只接受提交环境的W&B API key；outer/container错误trap保留完整phase、命令和日志路径。真实两组step 0→1000训练、checkpoint和闭环成功率均为`cluster-pending`。
+
 ## 2026-08-13 — NavigateKitchen底盘动作诊断
 
 - M6 client的task result新增紧凑的物理量诊断，分别记录base_motion、

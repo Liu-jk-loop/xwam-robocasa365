@@ -1,13 +1,13 @@
 # 项目进度
 
-更新时间：2026-08-12
+更新时间：2026-08-13
 
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：Clariden 迁移——独立 X-WAM aarch64/GH200 policy 容器部署
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划，Job `3053436`已关闭4×GH200 `mb16/ZeRO-1` 正式profile门禁；现有4卡实验保留。新增独立2节点×4卡训练入口及单节点8-server/16-client Atomic-Seen 18评测入口；真实跨节点训练和并行评测均为`cluster-pending`
+- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划，Job `3053436`已关闭4×GH200 `mb16/ZeRO-1` 正式profile门禁；18任务8卡训练和评测已完成首轮。现转入CloseFridge单任务clean-action ratio A/B：两组8卡训练入口已准备，真实step 0→1000运行和闭环比较为`cluster-pending`
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
-| M6 Atomic 正式训练与评测 | 保留4卡BS16/累积2实验；新增独立8卡BS16/累积1实验和8-server/16-client评测 | 8卡训练及18任务并行评测为`cluster-pending` | 对选定6k/9k/12k checkpoint逐个运行50 seeds闭环评测并比较成功率 |
+| M6 Atomic 正式训练与评测 | 18任务首轮完成；进入CloseFridge单任务A/B诊断 | `clean_action_ratio=0.5/0.0`两组step 1000为`cluster-pending` | 两组固定seed闭环评测后，只把胜出组恢复到step 3000 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
 ## Clariden 部署状态
@@ -73,6 +73,8 @@
 - step-15000首次评测在client02创建`PickPlaceCounterToCabinet/seed42`时因SQSH内`/opt/robocasa`缺少`Sink025/model.xml`中断，尚未执行环境step或policy request，`resumable=false`。FastWAM已验证脚本表明正式simulator应通过`PYTHONPATH`使用Store的`src/robocasa`及`src/robosuite`完整资产；X-WAM已改为同源并新增模型加载前的模块来源/asset probe，同时按该容器已验证合同将所有client的EGL设备固定为0。修复后须使用新eval ID复测，状态为`cluster-pending`。
 - Store assets修复后的运行已进入真实episode，但在`TurnOnSinkFaucet/seed44`被内层M4.3“新run要求clean Git”合同中断；robosuite_models、Mink和mimicgen提示不是退出原因。M6现使用独立task client，外层仍严格冻结clean Git与完整provenance，内层不再重复脆弱门禁。同期发现旧配置固定layout/style且视频`stride=20/fps=5`，与FastWAM target split及每步20 FPS不一致，已一并纠正；新合同集群运行仍为`cluster-pending`。
 - 新client首次集群启动后broker两次报告frontend `frame_count=3`并丢弃请求；这是REQ socket添加空delimiter与既有ROUTER/DEALER两帧协议不匹配，client实际上已启动但policy未收到请求。client已改回项目M4入口一致的DEALER，并增加回归检查；修复后的真实policy request仍为`cluster-pending`。
+- 18任务闭环结果明显低于FastWAM，NavigateKitchen底盘诊断进一步确认policy虽持续输出非零base命令且环境数值上响应，但1000步净位移仅约5.6 cm，主要问题不是评测端静默丢弃底盘动作。按用户决定暂不把Navi标签审计作为阻塞项，先运行CloseFridge单任务A/B。
+- 新增CloseFridge专用单任务RGB配置、8×GH200 GBS128/ZeRO-1硬件层及`clean_action_ratio=0.5/0.0`两份严格对照实验。两组均从公开pretrained以seed42开始，固定3000-step scheduler，首轮只运行到step 1000；IOPS每250步滚动保留5个，Store保存step 1000 final，W&B run与checkpoint目录按组隔离。真实训练为`cluster-pending`。
 
 ## 已确认资源
 

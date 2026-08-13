@@ -223,6 +223,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "smoke_m6_gate_xwam.sbatch",
             "train_m6_formal_xwam.sbatch",
             "train_m6_formal_xwam_8gpu.sbatch",
+            "train_close_fridge_ab_xwam.sbatch",
             "eval_m6_atomic18_xwam.sbatch",
         ):
             result = subprocess.run(
@@ -659,6 +660,83 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "formal_devices_per_node: 4",
         ):
             self.assertIn(expected, hardware)
+
+    def test_close_fridge_ab_changes_only_the_clean_action_ratio(self) -> None:
+        ratio05 = (
+            REPO_ROOT
+            / "configs/experiment/robocasa365_close_fridge_ratio05.yaml"
+        ).read_text(encoding="utf-8")
+        ratio00 = (
+            REPO_ROOT
+            / "configs/experiment/robocasa365_close_fridge_ratio00.yaml"
+        ).read_text(encoding="utf-8")
+        hardware = (
+            REPO_ROOT
+            / "configs/hardware/gh200x8_96gb_gbs128_single_task.yaml"
+        ).read_text(encoding="utf-8")
+        data = (
+            REPO_ROOT / "configs/data/robocasa365_close_fridge_rgb.yaml"
+        ).read_text(encoding="utf-8")
+        script = (DEPLOY_ROOT / "train_close_fridge_ab_xwam.sbatch").read_text(
+            encoding="utf-8"
+        )
+
+        normalized05 = "\n".join(ratio05.splitlines()[1:]).replace(
+            "close_fridge_rgb_ratio05_seed42_8gpu",
+            "close_fridge_rgb_ratioXX_seed42_8gpu",
+        ).replace("clean_action_ratio: 0.5", "clean_action_ratio: X")
+        normalized00 = "\n".join(ratio00.splitlines()[1:]).replace(
+            "close_fridge_rgb_ratio00_seed42_8gpu",
+            "close_fridge_rgb_ratioXX_seed42_8gpu",
+        ).replace("clean_action_ratio: 0.0", "clean_action_ratio: X")
+        self.assertEqual(normalized05, normalized00)
+
+        for config, expected_ratio in ((ratio05, "0.5"), (ratio00, "0.0")):
+            self.assertIn(f"clean_action_ratio: {expected_ratio}", config)
+            self.assertIn("num_training_steps: 3000", config)
+            self.assertIn("trainer_max_steps: 1000", config)
+            self.assertIn("save_interval: 250", config)
+            self.assertIn("save_top_k: 5", config)
+            self.assertIn("enable_wandb: true", config)
+
+        for expected in (
+            "task_name: CloseFridge",
+            "augment: true",
+            "normalization: panda_omron_v1",
+        ):
+            self.assertIn(expected, data)
+        for expected in (
+            "devices: 4",
+            "batch_size_per_gpu: 16",
+            "accumulate_grad_batches: 1",
+            "global_batch_size: 128",
+            "use_gradient_checkpointing: true",
+            "deepspeed_stage: 1",
+            "deepspeed_fp32_optimizer_states: true",
+            "m6_formal_guard: false",
+        ):
+            self.assertIn(expected, hardware)
+        for expected in (
+            "#SBATCH --nodes=2",
+            "#SBATCH --gpus-per-node=4",
+            "#SBATCH --time=12:00:00",
+            "#SBATCH --export=ALL",
+            'VARIANT="${XWAM_CF_VARIANT:-}"',
+            "ratio05)",
+            "ratio00)",
+            'TARGET_STEPS="${XWAM_CF_TARGET_STEPS:-1000}"',
+            "1000|3000",
+            "--expected-world-size 8",
+            "python -m torch.distributed.run",
+            "--nnodes 2",
+            "--nproc-per-node 4",
+            'HOT_CHECKPOINT_ROOT="$DEPLOY_IOPS/xwam_run/$EXP_NAME/checkpoints"',
+            'FINAL_CHECKPOINT_ROOT="$DEPLOY_STORE/checkpoints/xwam/$EXP_NAME/checkpoints"',
+            "Git worktree must be clean before CloseFridge A/B training",
+            "WANDB_API_KEY must be exported before sbatch submission",
+            "[PASS] CloseFridge $VARIANT reached step",
+        ):
+            self.assertIn(expected, script)
 
 
 if __name__ == "__main__":

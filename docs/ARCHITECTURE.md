@@ -170,6 +170,12 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - H100门禁使用完整正式scheduler和数据，仅把本次上限设为step 2，保存后从同一checkpoint恢复到step 4；机器审计联合验证四rank FP32 state、H100拓扑、有限loss、RGB-only depth loss为0、保存完成及resume来源。门禁通过后正式训练必须从公开 X-WAM pretrained权重新建实验，不能接着门禁checkpoint训练。
 - 公共 metadata/result/checkpoint事件只由rank 0写入；四个rank共享父进程生成的run ID。正式结束额外保存一个明确的 `final-step=*.ckpt`，审计要求global step等于自动计算的5-epoch总步数。
 
+### CloseFridge clean-action单任务A/B合同
+
+- A/B都从同一个公开X-WAM cross-embodiment checkpoint重新初始化，不允许从18任务正式checkpoint或另一组A/B checkpoint开始。两组使用相同CloseFridge日期目录、task-local `meta/stats.json`、RGB增强、seed42、两节点8×GH200、GBS128、ZeRO-1、FP32 optimizer state、完整gradient checkpointing、学习率和3000-step scheduler；唯一实验变量是`clean_action_ratio=0.5`或`0.0`。
+- 首轮两组都训练到global step 1000并每250步向IOPS滚动保存，最多保留5个；step 1000额外把完整final checkpoint写入Store。比较闭环成功率后，胜出组可以保持原scheduler、W&B run ID、world size和optimizer state恢复到step 3000，不能只加载model weights创建新的优化器轨迹。
+- 单任务A/B不使用M6 18任务manifest、跨任务statistics或五epochformal guard。它验证CloseFridge机械臂/夹爪动作学习以及clean-action采样语义，不能单独证明NavigateKitchen底盘动作已经恢复。
+
 ## Current external paths
 
 These paths are cluster deployment facts, not portable defaults:

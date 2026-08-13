@@ -1,0 +1,26 @@
+# Clariden CloseFridge A/B：2节点×4 GH200，8×batch16×accum1=GBS128。
+precision: bf16-mixed
+devices: 4
+batch_size_per_gpu: 16
+accumulate_grad_batches: 1
+global_batch_size: 128
+num_workers_per_gpu: 4
+prefetch_factor: 2
+use_gradient_checkpointing: true
+enable_segment_timing: true
+segment_timing_interval_steps: 20
+
+# 与M6正式训练保持相同的ZeRO-1、GPU AdamW和FP32 optimizer state。
+deepspeed_stage: 1
+deepspeed_offload_optimizer: false
+deepspeed_offload_optimizer_device: cpu
+deepspeed_pin_memory: false
+deepspeed_overlap_comm: true
+deepspeed_bucket_size: 500000000
+deepspeed_fp32_optimizer_states: true
+deepspeed_exclude_frozen_parameters: false
+
+# 单任务A/B不是M6五epochmanifest实验，不启用M6 formal guard。
+m6_formal_guard: false
+audit_optimizer_state_dtype: true
+allow_distributed_generator_state: true
