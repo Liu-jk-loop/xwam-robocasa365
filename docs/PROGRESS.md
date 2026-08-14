@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：Clariden 迁移——独立 X-WAM aarch64/GH200 policy 容器部署
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划，Job `3053436`已关闭4×GH200 `mb16/ZeRO-1` 正式profile门禁；18任务8卡训练和评测已完成首轮。现转入CloseFridge单任务clean-action ratio A/B：两组8卡训练入口已准备，真实step 0→1000运行和闭环比较为`cluster-pending`
+- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Job `3053322`已冻结18任务manifest、global stats和16,390-step正式计划，Job `3053436`已关闭4×GH200 `mb16/ZeRO-1` 正式profile门禁；18任务8卡训练和评测已完成首轮。现转入CloseFridge单任务clean-action ratio A/B：ratio05单节点4卡已到step 1000，ratio00在step 500 checkpoint后的rank同步阶段超时；修复后从现有step 500恢复为`cluster-pending`。
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
-| M6 Atomic 正式训练与评测 | 18任务首轮完成；进入CloseFridge单任务A/B诊断 | `clean_action_ratio=0.5/0.0`两组step 1000为`cluster-pending` | 两组固定seed闭环评测后，只把胜出组恢复到step 3000 |
+| M6 Atomic 正式训练与评测 | 18任务首轮完成；进入CloseFridge单任务A/B诊断 | ratio05已到step 1000；ratio00待从step 500恢复 | ratio00到step 1000后做两组固定seed闭环评测，只把胜出组恢复到step 3000 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
 ## Clariden 部署状态
@@ -74,7 +74,7 @@
 - Store assets修复后的运行已进入真实episode，但在`TurnOnSinkFaucet/seed44`被内层M4.3“新run要求clean Git”合同中断；robosuite_models、Mink和mimicgen提示不是退出原因。M6现使用独立task client，外层仍严格冻结clean Git与完整provenance，内层不再重复脆弱门禁。同期发现旧配置固定layout/style且视频`stride=20/fps=5`，与FastWAM target split及每步20 FPS不一致，已一并纠正；新合同集群运行仍为`cluster-pending`。
 - 新client首次集群启动后broker两次报告frontend `frame_count=3`并丢弃请求；这是REQ socket添加空delimiter与既有ROUTER/DEALER两帧协议不匹配，client实际上已启动但policy未收到请求。client已改回项目M4入口一致的DEALER，并增加回归检查；修复后的真实policy request仍为`cluster-pending`。
 - 18任务闭环结果明显低于FastWAM，NavigateKitchen底盘诊断进一步确认policy虽持续输出非零base命令且环境数值上响应，但1000步净位移仅约5.6 cm，主要问题不是评测端静默丢弃底盘动作。按用户决定暂不把Navi标签审计作为阻塞项，先运行CloseFridge单任务A/B。
-- 新增CloseFridge专用单任务RGB配置、单节点4×GH200 `batch16/accum2` GBS128/ZeRO-1硬件层及`clean_action_ratio=0.5/0.0`两份严格对照实验。两组均从公开pretrained以seed42开始，固定3000-step scheduler，首轮只运行到step 1000；IOPS每250步滚动保留5个，Store保存step 1000 final，W&B run与checkpoint目录按组隔离。真实训练为`cluster-pending`。
+- 新增CloseFridge专用单任务RGB配置、单节点4×GH200 `batch16/accum2` GBS128/ZeRO-1硬件层及`clean_action_ratio=0.5/0.0`两份严格对照实验。两组均从公开pretrained以seed42开始，固定3000-step scheduler，首轮只运行到step 1000；IOPS现每500步滚动保留2个，Store保存step 1000 final，W&B run与checkpoint目录按组隔离。ratio05已完成step 1000；ratio00的step 500文件尺寸完整，但原作业因保存时rank间I/O漂移触发30分钟NCCL timeout。硬件层现使用90分钟分布式timeout，callback保存后执行全rank barrier；真实恢复与step 1000完成为`cluster-pending`。
 
 ## 已确认资源
 

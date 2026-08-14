@@ -5,7 +5,7 @@ import importlib.metadata
 import platform
 import resource
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from pprint import pprint
 
@@ -30,6 +30,7 @@ from data.epoch_aligned_sampler import EpochAlignedDistributedSampler
 from project_tools.training_topology import (
     resolve_cpu_adam_options,
     resolve_deepspeed_options,
+    resolve_distributed_timeout_minutes,
     resolve_optimizer_backend,
     resolve_training_topology,
 )
@@ -62,10 +63,12 @@ class ResourceAwareModelCheckpoint(ModelCheckpoint):
         *args,
         diagnostics_path: Path,
         checkpoint_tier: str = "primary",
+        synchronize_after_save: bool = False,
         **kwargs,
     ):
         self.diagnostics_path = Path(diagnostics_path)
         self.checkpoint_tier = str(checkpoint_tier)
+        self.synchronize_after_save = bool(synchronize_after_save)
         super().__init__(*args, **kwargs)
 
     def _record_checkpoint_event(self, event, trainer, filepath, error=None):
@@ -93,6 +96,8 @@ class ResourceAwareModelCheckpoint(ModelCheckpoint):
         self._record_checkpoint_event("checkpoint_save_start", trainer, filepath)
         try:
             super()._save_checkpoint(trainer, filepath)
+            if self.synchronize_after_save:
+                trainer.strategy.barrier()
         except BaseException as exc:
             self._record_checkpoint_event(
                 "checkpoint_save_error",
@@ -325,6 +330,7 @@ def main():
             "多卡 persist_generator_state 必须显式启用 allow_distributed_generator_state"
         )
     deepspeed_options = resolve_deepspeed_options(config)
+    distributed_timeout_minutes = resolve_distributed_timeout_minutes(config)
     allow_missing_frozen_resume_parameters = bool(
         resume_checkpoint is not None and deepspeed_options["exclude_frozen_parameters"]
     )
@@ -380,6 +386,9 @@ def main():
         checkpoint_callback = ResourceAwareModelCheckpoint(
             diagnostics_path=checkpoint_events_path,
             checkpoint_tier="rolling",
+            synchronize_after_save=bool(
+                config.get("checkpoint_post_save_barrier", False)
+            ),
             dirpath=checkpoint_dir,
             save_top_k=rolling_save_top_k,
             save_last=resolve_save_last(config.get("save_last", True)),
@@ -405,6 +414,9 @@ def main():
             durable_checkpoint_callback = ResourceAwareModelCheckpoint(
                 diagnostics_path=checkpoint_events_path,
                 checkpoint_tier="durable",
+                synchronize_after_save=bool(
+                    config.get("checkpoint_post_save_barrier", False)
+                ),
                 dirpath=durable_checkpoint_dir,
                 save_top_k=durable_save_top_k,
                 save_last=resolve_save_last(config.get("durable_save_last", False)),
@@ -428,6 +440,9 @@ def main():
                 "save_last": config.get("save_last", True),
                 "monitor": rolling_monitor.get("monitor"),
                 "mode": rolling_monitor.get("mode"),
+                "post_save_barrier": bool(
+                    config.get("checkpoint_post_save_barrier", False)
+                ),
             },
             "durable": (
                 {
@@ -437,6 +452,9 @@ def main():
                     "save_last": config.get("durable_save_last", False),
                     "monitor": durable_monitor.get("monitor"),
                     "mode": durable_monitor.get("mode"),
+                    "post_save_barrier": bool(
+                        config.get("checkpoint_post_save_barrier", False)
+                    ),
                 }
                 if durable_checkpoint_callback is not None
                 else None
@@ -661,6 +679,7 @@ def main():
                 "training": schedule,
                 "resume_checkpoint": resume_checkpoint,
                 "deepspeed": deepspeed_options,
+                "distributed_timeout_minutes": distributed_timeout_minutes,
                 "optimizer": {
                     "backend": resolve_optimizer_backend(config),
                     **resolve_cpu_adam_options(config),
@@ -710,12 +729,18 @@ def main():
         f"trainer_devices: {topology['trainer_devices']}, "
         f"visible_devices: {topology['visible_devices']}"
     )
-    print(f"DeepSpeed options: {deepspeed_options}")
+    print(
+        "DeepSpeed options: "
+        f"{deepspeed_options}, distributed_timeout_minutes={distributed_timeout_minutes}"
+    )
 
     trainer = L.Trainer(
         accelerator="auto",
         devices=topology["trainer_devices"],
-        strategy=DeepSpeedStrategy(**deepspeed_options),
+        strategy=DeepSpeedStrategy(
+            **deepspeed_options,
+            timeout=timedelta(minutes=distributed_timeout_minutes),
+        ),
         precision=str(config.get("precision", "bf16-mixed")),
         num_nodes=topology["num_nodes"],
         max_steps=schedule["trainer_max_steps"],

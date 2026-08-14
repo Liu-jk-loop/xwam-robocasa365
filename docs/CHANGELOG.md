@@ -1,5 +1,12 @@
 # 变更记录
 
+## 2026-08-14 — CloseFridge A/B checkpoint容量与慢盘同步修复
+
+- Clariden实跑确认单份4-rank ZeRO-1完整checkpoint约78 GiB。ratio05按250/500/750/1000保存四份后，IOPS目录达到311 GiB；ratio00在step 500保存阶段出现rank间I/O完成时间漂移，随后一个rank进入ALLREDUCE并触发原30分钟NCCL timeout。该失败与`clean_action_ratio`取值无关。
+- 两组滚动保存统一改为每500 optimizer steps一次、最多保留最近2份，并继续用`last.ckpt`链接；首轮step 1000只保留500/1000，后续扩展到step 3000也不会在IOPS累计5份约390 GiB的完整状态。
+- A/B硬件层将分布式process-group timeout从默认30分钟提高到90分钟；checkpoint callback可配置保存后barrier，A/B显式开启，只有全部rank均从DeepSpeed保存返回后才记录`checkpoint_save_complete`并继续训练。
+- 现有ratio05的step 250/750及ratio00的step 250由用户在Clariden按精确路径清理；不在训练脚本中执行通配删除。ratio00重提时planner将先验证并选择现有完整step 500，真实DeepSpeed恢复、step 1000保存及作业PASS仍为`cluster-pending`。
+
 ## 2026-08-13 — CloseFridge单任务clean-action ratio A/B
 
 - 新增CloseFridge单任务RGB数据层，使用真实任务自己的`meta/stats.json`、三路相机、`256×320`画面和与18任务正式训练一致的RGB增强；不读取多任务manifest或跨任务global statistics。

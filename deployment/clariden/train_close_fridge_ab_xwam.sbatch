@@ -126,7 +126,7 @@ read -r WANDB_RUN_ID < "$WANDB_RUN_ID_FILE"
 echo "variant=$VARIANT clean_action_ratio=$CLEAN_ACTION_RATIO"
 echo "target_steps=$TARGET_STEPS scheduler_steps=3000"
 echo "experiment=$EXP_NAME"
-echo "rolling_checkpoints=$HOT_CHECKPOINT_ROOT (every 250 steps, max 5)"
+echo "rolling_checkpoints=$HOT_CHECKPOINT_ROOT (every 500 steps, max 2)"
 echo "final_checkpoints=$FINAL_CHECKPOINT_ROOT"
 echo "wandb_project=$WANDB_PROJECT"
 echo "wandb_entity=$WANDB_ENTITY"
@@ -330,7 +330,10 @@ assert f"clean_action_ratio: {expected_ratio}" in resolved
 assert "global_batch_size: 128" in resolved
 assert "deepspeed_stage: 1" in resolved
 assert "use_gradient_checkpointing: true" in resolved
-assert "save_interval: 250" in resolved
+assert "save_interval: 500" in resolved
+assert "save_top_k: 2" in resolved
+assert "checkpoint_post_save_barrier: true" in resolved
+assert "distributed_timeout_minutes: 90" in resolved
 checkpoint = Path(result["last_checkpoint"])
 assert checkpoint.is_dir(), checkpoint
 print("CloseFridge A/B artifact check: pass")

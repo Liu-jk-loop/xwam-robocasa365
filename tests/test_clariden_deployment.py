@@ -695,8 +695,9 @@ class ClaridenDeploymentTest(unittest.TestCase):
             self.assertIn(f"clean_action_ratio: {expected_ratio}", config)
             self.assertIn("num_training_steps: 3000", config)
             self.assertIn("trainer_max_steps: 1000", config)
-            self.assertIn("save_interval: 250", config)
-            self.assertIn("save_top_k: 5", config)
+            self.assertIn("save_interval: 500", config)
+            self.assertIn("save_top_k: 2", config)
+            self.assertIn("checkpoint_post_save_barrier: true", config)
             self.assertIn("enable_wandb: true", config)
 
         for expected in (
@@ -713,6 +714,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "use_gradient_checkpointing: true",
             "deepspeed_stage: 1",
             "deepspeed_fp32_optimizer_states: true",
+            "distributed_timeout_minutes: 90",
             "m6_formal_guard: false",
         ):
             self.assertIn(expected, hardware)

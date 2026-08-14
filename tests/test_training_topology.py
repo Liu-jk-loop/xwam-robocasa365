@@ -6,12 +6,25 @@ from pathlib import Path
 from project_tools.training_topology import (
     resolve_cpu_adam_options,
     resolve_deepspeed_options,
+    resolve_distributed_timeout_minutes,
     resolve_optimizer_backend,
     resolve_training_topology,
 )
 
 
 class TrainingTopologyTest(unittest.TestCase):
+    def test_distributed_timeout_defaults_to_30_and_accepts_override(self) -> None:
+        self.assertEqual(resolve_distributed_timeout_minutes({}), 30)
+        self.assertEqual(
+            resolve_distributed_timeout_minutes({"distributed_timeout_minutes": 90}),
+            90,
+        )
+        for value in (0, -1, True, "invalid"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                resolve_distributed_timeout_minutes(
+                    {"distributed_timeout_minutes": value}
+                )
+
     def test_optimizer_backend_is_cpu_adam_only_for_explicit_offload(self) -> None:
         self.assertEqual(resolve_optimizer_backend({}), "torch_adamw")
         self.assertEqual(
@@ -93,7 +106,10 @@ class TrainingTopologyTest(unittest.TestCase):
         self.assertIn("deepspeed_offload_optimizer: true", config)
         self.assertIn("deepspeed_bucket_size: 100000000", config)
         self.assertIn("resolve_deepspeed_options(config)", train_entrypoint)
-        self.assertIn("DeepSpeedStrategy(**deepspeed_options)", train_entrypoint)
+        self.assertIn(
+            "timeout=timedelta(minutes=distributed_timeout_minutes)",
+            train_entrypoint,
+        )
 
     def test_m2_smoke_disables_optional_tensorboard_logger(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]

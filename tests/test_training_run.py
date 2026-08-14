@@ -64,6 +64,7 @@ class TrainingRunTest(unittest.TestCase):
             "allow_distributed_generator_state",
             "ResourceAwareModelCheckpoint",
             "checkpoint_save_start",
+            "synchronize_after_save",
             '"memory_at_result"',
             "enable_excluded_frozen_resume_loading",
             '"resume_module_load"',

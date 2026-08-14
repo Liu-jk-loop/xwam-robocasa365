@@ -30,10 +30,11 @@ wandb_log_model: false
 
 enable_checkpointing: true
 checkpoint_dir: null
-save_interval: 250
-save_top_k: 5
+save_interval: 500
+save_top_k: 2
 save_last: link
 save_on_exception: false
+checkpoint_post_save_barrier: true
 durable_checkpoint_dir: null
 final_checkpoint_dir: null
 save_final_checkpoint: true

@@ -61,6 +61,20 @@ def resolve_deepspeed_options(config: Any) -> dict[str, Any]:
     }
 
 
+def resolve_distributed_timeout_minutes(config: Any) -> int:
+    """Resolve the process-group timeout without importing Torch/Lightning."""
+    value = config.get("distributed_timeout_minutes", 30)
+    if isinstance(value, bool):
+        raise ValueError("distributed_timeout_minutes 必须是正整数")
+    try:
+        timeout_minutes = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("distributed_timeout_minutes 必须是正整数") from exc
+    if timeout_minutes <= 0:
+        raise ValueError("distributed_timeout_minutes 必须是正整数")
+    return timeout_minutes
+
+
 def resolve_training_topology(
     *,
     visible_devices: int,

@@ -19,6 +19,7 @@ deepspeed_overlap_comm: true
 deepspeed_bucket_size: 500000000
 deepspeed_fp32_optimizer_states: true
 deepspeed_exclude_frozen_parameters: false
+distributed_timeout_minutes: 90
 
 # 单任务A/B不是M6五epochmanifest实验，不启用M6 formal guard。
 m6_formal_guard: false
