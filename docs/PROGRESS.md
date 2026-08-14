@@ -75,6 +75,7 @@
 - 新client首次集群启动后broker两次报告frontend `frame_count=3`并丢弃请求；这是REQ socket添加空delimiter与既有ROUTER/DEALER两帧协议不匹配，client实际上已启动但policy未收到请求。client已改回项目M4入口一致的DEALER，并增加回归检查；修复后的真实policy request仍为`cluster-pending`。
 - 18任务闭环结果明显低于FastWAM，NavigateKitchen底盘诊断进一步确认policy虽持续输出非零base命令且环境数值上响应，但1000步净位移仅约5.6 cm，主要问题不是评测端静默丢弃底盘动作。按用户决定暂不把Navi标签审计作为阻塞项，先运行CloseFridge单任务A/B。
 - 新增CloseFridge专用单任务RGB配置、单节点4×GH200 `batch16/accum2` GBS128/ZeRO-1硬件层及`clean_action_ratio=0.5/0.0`两份严格对照实验。两组均从公开pretrained以seed42开始，固定3000-step scheduler，首轮只运行到step 1000；IOPS现每500步滚动保留2个，Store保存step 1000 final，W&B run与checkpoint目录按组隔离。ratio05已完成step 1000；ratio00的step 500文件尺寸完整，但原作业因保存时rank间I/O漂移触发30分钟NCCL timeout。硬件层现使用90分钟分布式timeout，callback保存后执行全rank barrier；真实恢复与step 1000完成为`cluster-pending`。
+- ratio05 step 1000单任务评测入口已准备：单GPU、CloseFridge seed42起50 episodes、target split、1000步/replan20/action denoise10，视频及结果写IOPS。评测默认使用独立Git clone，避免对正在执行ratio00训练的主工作区pull/checkout；真实成功率为`cluster-pending`。
 
 ## 已确认资源
 

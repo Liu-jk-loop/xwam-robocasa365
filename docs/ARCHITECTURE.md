@@ -175,6 +175,7 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - A/B都从同一个公开X-WAM cross-embodiment checkpoint重新初始化，不允许从18任务正式checkpoint或另一组A/B checkpoint开始。两组使用相同CloseFridge日期目录、task-local `meta/stats.json`、RGB增强、seed42、单节点4×GH200、GBS128、ZeRO-1、FP32 optimizer state、完整gradient checkpointing、学习率和3000-step scheduler；唯一实验变量是`clean_action_ratio=0.5`或`0.0`。
 - 首轮两组都训练到global step 1000并每500步向IOPS滚动保存，最多保留最近2个；step 1000额外把完整final checkpoint写入Store。A/B使用90分钟分布式timeout，并在每次DeepSpeed保存后执行全rank barrier，避免慢存储造成某个rank提前进入下一次collective。比较闭环成功率后，胜出组可以保持原scheduler、W&B run ID、world size和optimizer state恢复到step 3000，不能只加载model weights创建新的优化器轨迹。
 - 单任务A/B不使用M6 18任务manifest、跨任务statistics或五epochformal guard。它验证CloseFridge机械臂/夹爪动作学习以及clean-action采样语义，不能单独证明NavigateKitchen底盘动作已经恢复。
+- 两组闭环比较复用M6已对齐FastWAM的target split和时间轴，但每次只启动一个policy server与一个CloseFridge client。每组固定模型seed42、环境seed42起50 episodes、1000-step horizon、replan20、action denoise10及20 FPS逐步视频。评测源码使用独立clean clone，训练作业所用仓库在作业结束前保持不变。
 
 ## Current external paths
 

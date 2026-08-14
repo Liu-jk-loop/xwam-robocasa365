@@ -7,6 +7,12 @@
 - A/B硬件层将分布式process-group timeout从默认30分钟提高到90分钟；checkpoint callback可配置保存后barrier，A/B显式开启，只有全部rank均从DeepSpeed保存返回后才记录`checkpoint_save_complete`并继续训练。
 - 现有ratio05的step 250/750及ratio00的step 250由用户在Clariden按精确路径清理；不在训练脚本中执行通配删除。ratio00重提时planner将先验证并选择现有完整step 500，真实DeepSpeed恢复、step 1000保存及作业PASS仍为`cluster-pending`。
 
+### A组step 1000独立单任务评测
+
+- 新增单GPU `eval_close_fridge_ab_xwam.sbatch`，默认评测ratio05的Store `final-step=1000.ckpt`。合同固定CloseFridge target split、模型/环境seed42、50 episodes、1000步、replan20、action denoise10、逐环境step视频与20 FPS，输出保持精简的`logs/`、`results/CloseFridge/{videos,result.json}`和根级`summary.json`。
+- policy pool增加显式单任务checkpoint模式：不把M6跨任务manifest/statistics/allowed-task错误传给单任务模型，并允许单server在单GPUallocation中映射到CUDA device 0；client pool也支持覆盖可见GPU。默认8-server/16-client M6行为保持不变。
+- 评测脚本默认要求独立的`src/xwam-robocasa365-eval` clone，并允许通过`XWAM_EVAL_REPO`覆盖；不要求也不建议在ratio00训练作业使用的主仓库中pull/checkout。A组50-episode真实成功率为`cluster-pending`。
+
 ## 2026-08-13 — CloseFridge单任务clean-action ratio A/B
 
 - 新增CloseFridge单任务RGB数据层，使用真实任务自己的`meta/stats.json`、三路相机、`256×320`画面和与18任务正式训练一致的RGB增强；不读取多任务manifest或跨任务global statistics。

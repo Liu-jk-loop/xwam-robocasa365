@@ -19,6 +19,9 @@ from scripts.aggregate_robocasa365_m6_evaluation import aggregate
 from scripts.summarize_robocasa365_base_diagnostics import (
     summarize as summarize_base_diagnostics,
 )
+from scripts.summarize_robocasa365_single_task_evaluation import (
+    summarize as summarize_single_task,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +32,36 @@ TOPOLOGY = (
 
 
 class RoboCasa365M6EvaluationTest(unittest.TestCase):
+    def test_single_task_summary_validates_success_rate_and_contract(self) -> None:
+        report = summarize_single_task(
+            {
+                "result": "pass",
+                "task": "CloseFridge",
+                "episodes_expected": 2,
+                "episodes_completed": 2,
+                "model_seed": 42,
+                "seed_start": 42,
+                "max_steps": 1000,
+                "replan_steps": 20,
+                "action_denoise_steps": 10,
+                "video_fps": 20,
+                "n_success": 1,
+                "success_rate": 0.5,
+                "mean_inference_time_s": 1.25,
+                "episodes": [
+                    {"video": "/tmp/episode_000.mp4"},
+                    {"video": "/tmp/episode_001.mp4"},
+                ],
+            },
+            task="CloseFridge",
+            episodes=2,
+            eval_id="ratio05-step1000",
+            checkpoint="/tmp/final-step=1000.ckpt",
+        )
+        self.assertTrue(report["ok"], report["errors"])
+        self.assertEqual(report["success_percent"], 50.0)
+        self.assertEqual(len(report["videos"]), 2)
+
     def test_base_action_diagnostics_separate_policy_and_execution(self) -> None:
         report = _summarize_base_diagnostics(
             [
@@ -184,6 +217,7 @@ class RoboCasa365M6EvaluationTest(unittest.TestCase):
             REPO_ROOT / "evaluation/launch_robocasa365_m6_client_pool.py",
             REPO_ROOT / "scripts/aggregate_robocasa365_m6_evaluation.py",
             REPO_ROOT / "scripts/probe_robocasa365_eval_runtime.py",
+            REPO_ROOT / "scripts/summarize_robocasa365_single_task_evaluation.py",
         )
         for script in scripts:
             result = subprocess.run(
@@ -222,7 +256,10 @@ class RoboCasa365M6EvaluationTest(unittest.TestCase):
             stderr=subprocess.PIPE,
         )
         self.assertIn("--server-id SERVER_IDS", policy.stdout)
+        self.assertIn("--single-task-checkpoint", policy.stdout)
+        self.assertIn("--cuda-device CUDA_DEVICE", policy.stdout)
         self.assertIn("--client-id CLIENT_IDS", client.stdout)
+        self.assertIn("--cuda-visible-devices CUDA_VISIBLE_DEVICES", client.stdout)
 
     def test_formal_client_is_lean_and_does_not_reenter_m43(self) -> None:
         client = (REPO_ROOT / "evaluation/run_robocasa365_m6_client.py").read_text(

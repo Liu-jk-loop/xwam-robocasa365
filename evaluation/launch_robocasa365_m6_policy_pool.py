@@ -77,12 +77,26 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--experiment-dir", required=True)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--wan-checkpoint-dir", required=True)
-    parser.add_argument("--multitask-manifest", required=True)
-    parser.add_argument("--statistics-path", required=True)
+    parser.add_argument("--multitask-manifest")
+    parser.add_argument("--statistics-path")
     parser.add_argument("--log-root", required=True)
     parser.add_argument("--ready-file", required=True)
     parser.add_argument("--stop-file", required=True)
     parser.add_argument("--startup-timeout-seconds", type=float, default=1200)
+    parser.add_argument(
+        "--single-task-checkpoint",
+        action="store_true",
+        help="按experiment config加载单任务checkpoint，不传M6 manifest/statistics/allowed-task。",
+    )
+    parser.add_argument(
+        "--single-task-name",
+        help="单任务checkpoint的任务名；必须属于所选server的既有任务分配。",
+    )
+    parser.add_argument(
+        "--cuda-device",
+        type=int,
+        help="单server诊断/评测时覆盖topology GPU编号，例如单GPUallocation使用0。",
+    )
     parser.add_argument(
         "--server-id",
         type=int,
@@ -98,6 +112,20 @@ def _parse_args() -> argparse.Namespace:
             parser.error("server id不允许重复")
         if any(server_id not in range(8) for server_id in args.server_ids):
             parser.error("server id必须位于0..7")
+    if args.single_task_checkpoint:
+        if not args.single_task_name:
+            parser.error("--single-task-checkpoint必须提供--single-task-name")
+        if args.server_ids is None or len(args.server_ids) != 1:
+            parser.error("单任务checkpoint必须且只能选择一个--server-id")
+    elif args.single_task_name is not None:
+        parser.error("--single-task-name只能与--single-task-checkpoint一起使用")
+    elif not args.multitask_manifest or not args.statistics_path:
+        parser.error("M6多任务checkpoint必须提供manifest和statistics")
+    if args.cuda_device is not None:
+        if args.cuda_device < 0:
+            parser.error("cuda device不能为负")
+        if args.server_ids is None or len(args.server_ids) != 1:
+            parser.error("--cuda-device只能用于单server启动")
     return args
 
 
@@ -155,6 +183,13 @@ def main() -> int:
         for server_id in server_ids:
             server = topology["servers"][server_id]
             assigned_tasks = tasks_for_server(topology, server_id)
+            if args.single_task_checkpoint:
+                if args.single_task_name not in assigned_tasks:
+                    raise ValueError(
+                        f"单任务{args.single_task_name!r}不属于server {server_id}："
+                        f"{assigned_tasks}"
+                    )
+                assigned_tasks = [args.single_task_name]
             report_path = server_root / f"server_{server_id}_status.json"
             server_log = (server_root / f"server_{server_id}.log").open(
                 "a", encoding="utf-8"
@@ -169,10 +204,6 @@ def main() -> int:
                 args.checkpoint,
                 "--wan-checkpoint-dir",
                 args.wan_checkpoint_dir,
-                "--multitask-manifest",
-                args.multitask_manifest,
-                "--statistics-path",
-                args.statistics_path,
                 "--broker-port",
                 str(server["backend_port"]),
                 "--denoise-steps",
@@ -189,10 +220,24 @@ def main() -> int:
                 "--disable-request-journal",
                 "--compact-report",
             ]
-            for task in assigned_tasks:
-                command.extend(["--allowed-task", task])
+            if not args.single_task_checkpoint:
+                command.extend(
+                    [
+                        "--multitask-manifest",
+                        args.multitask_manifest,
+                        "--statistics-path",
+                        args.statistics_path,
+                    ]
+                )
+                for task in assigned_tasks:
+                    command.extend(["--allowed-task", task])
             environment = dict(os.environ)
-            environment["CUDA_VISIBLE_DEVICES"] = str(server["gpu"])
+            cuda_device = (
+                args.cuda_device
+                if args.cuda_device is not None
+                else server["gpu"]
+            )
+            environment["CUDA_VISIBLE_DEVICES"] = str(cuda_device)
             policy = subprocess.Popen(
                 command,
                 cwd=REPO_ROOT,
@@ -207,7 +252,7 @@ def main() -> int:
             server_reports.append(
                 {
                     "server_id": server_id,
-                    "gpu": server["gpu"],
+                    "gpu": cuda_device,
                     "tasks": assigned_tasks,
                     "report": str(report_path),
                     "checkpoint": report["checkpoint"],
@@ -215,7 +260,7 @@ def main() -> int:
                 }
             )
             print(
-                f"[READY] server={server_id} gpu={server['gpu']} tasks={assigned_tasks}",
+                f"[READY] server={server_id} gpu={cuda_device} tasks={assigned_tasks}",
                 flush=True,
             )
 

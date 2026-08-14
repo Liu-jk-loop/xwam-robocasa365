@@ -27,6 +27,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--log-root", required=True)
     parser.add_argument("--episodes-per-task", type=int)
     parser.add_argument(
+        "--cuda-visible-devices",
+        default="0,1,2,3",
+        help="传给simulator client的CUDA_VISIBLE_DEVICES；单GPU评测使用0。",
+    )
+    parser.add_argument(
         "--client-id",
         type=int,
         action="append",
@@ -36,6 +41,9 @@ def _parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.episodes_per_task is not None and args.episodes_per_task <= 0:
         parser.error("episodes per task 必须为正")
+    visible_devices = args.cuda_visible_devices.split(",")
+    if not visible_devices or any(not item.isdigit() for item in visible_devices):
+        parser.error("cuda visible devices必须是逗号分隔的非负整数")
     if args.client_ids is not None:
         if len(set(args.client_ids)) != len(args.client_ids):
             parser.error("client id不允许重复")
@@ -93,7 +101,7 @@ def main() -> int:
             environment["MUJOCO_EGL_DEVICE_ID"] = "0"
             environment["EGL_DEVICE_ID"] = "0"
             environment["ROBOSUITE_RENDER_GPU_DEVICE_ID"] = "0"
-            environment["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
+            environment["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices
             process = subprocess.Popen(
                 command,
                 cwd=REPO_ROOT,

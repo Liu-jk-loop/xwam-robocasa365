@@ -224,6 +224,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "train_m6_formal_xwam.sbatch",
             "train_m6_formal_xwam_8gpu.sbatch",
             "train_close_fridge_ab_xwam.sbatch",
+            "eval_close_fridge_ab_xwam.sbatch",
             "eval_m6_atomic18_xwam.sbatch",
         ):
             result = subprocess.run(
@@ -266,6 +267,27 @@ class ClaridenDeploymentTest(unittest.TestCase):
             self.assertIn(expected, eval_script)
         self.assertNotIn('EVAL_ROOT="$DEPLOY_STORE/evaluations/xwam', eval_script)
 
+        close_fridge_eval = (
+            DEPLOY_ROOT / "eval_close_fridge_ab_xwam.sbatch"
+        ).read_text(encoding="utf-8")
+        for expected in (
+            "#SBATCH --gpus-per-node=1",
+            "#SBATCH --export=ALL",
+            'REPO="${XWAM_EVAL_REPO:-$DEPLOY_STORE/src/xwam-robocasa365-eval}"',
+            'EVAL_ROOT="$DEPLOY_IOPS/x-wam-eval/close-fridge-ab/$EVAL_ID"',
+            "final-step=1000.ckpt",
+            "--server-id 5",
+            "--client-id 5",
+            "--cuda-visible-devices 0",
+            "--single-task-checkpoint",
+            "--single-task-name CloseFridge",
+            "--cuda-device 0",
+            "--episodes \"$EPISODES\"",
+            "summary.json",
+            "Independent evaluation repo must be clean",
+        ):
+            self.assertIn(expected, close_fridge_eval)
+
         client_pool = (
             REPO_ROOT / "evaluation/launch_robocasa365_m6_client_pool.py"
         ).read_text(encoding="utf-8")
@@ -273,7 +295,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             'environment["MUJOCO_EGL_DEVICE_ID"] = "0"',
             'environment["EGL_DEVICE_ID"] = "0"',
             'environment["ROBOSUITE_RENDER_GPU_DEVICE_ID"] = "0"',
-            'environment["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"',
+            'environment["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices',
         ):
             self.assertIn(expected, client_pool)
 
