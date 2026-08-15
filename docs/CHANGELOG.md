@@ -1,5 +1,12 @@
 # 变更记录
 
+## 2026-08-15 — 共享评测物理GPU/EGL编号修复
+
+- Clariden Job `3085477`的X-WAM-B policy已到READY，但CloseFridge simulator client在外层`srun`返回1。同期FastWAM只有GPU 0上的三个client能导入RoboCasa，GPU 1/2 client均在旧版robosuite `binding_utils.py`断言退出：固定的`MUJOCO_EGL_DEVICE_ID=0`不属于各自的`CUDA_VISIBLE_DEVICES=1|2`；X-WAM的`CUDA_VISIBLE_DEVICES=3/EGL=0`属于同一根因。
+- X-WAM单任务sbatch现把`MUJOCO_EGL_DEVICE_ID`设置为选中的物理GPU编号；client launcher不再二次覆盖为0，而是取`CUDA_VISIBLE_DEVICES`第一个物理编号。`EGL_DEVICE_ID`和`ROBOSUITE_RENDER_GPU_DEVICE_ID`仍保持单卡namespace中的逻辑0。独立GPU 0评测行为不变，共享GPU 3评测解析为`CUDA=3/MUJOCO_EGL=3/local_EGL=0`。
+- client和policy非零返回现在使用条件分支捕获，避免已安装的`ERR` trap在预期收集返回码之前直接退出；这样会先停止并等待policy，再由明确的client/policy阶段生成failure report。每个client的内部Python traceback仍保存在`logs/clients/client_05.log`。
+- 本地验收覆盖Python语法、sbatch shell语法、GPU 3物理/逻辑编号合同、错误返回码捕获及完整dependency-light测试。真实GPU 3 EGL初始化、FastWAM GPU 1/2修复和两侧完整50-episode运行仍为`cluster-pending`。回滚本次commit会恢复固定EGL 0和原错误捕获，不会删除Job `3085477`日志或结果。
+
 ## 2026-08-15 — FastWAM Atomic9与X-WAM-B共享4卡评测
 
 - 用户已有FastWAM Atomic9脚本申请单节点4卡，但只在逻辑GPU 0/1/2运行6个policy server和9个simulator client。新增共享提交入口，先启动该既有脚本并等待6个动态端口就绪，再在同一allocation中启动CloseFridge X-WAM-B；X-WAM-B默认解释为A/B中的ratio00组，实验目录、checkpoint、episode数和eval ID均可由提交环境覆盖。

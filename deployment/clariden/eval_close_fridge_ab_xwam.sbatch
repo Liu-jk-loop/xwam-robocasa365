@@ -193,8 +193,7 @@ test -s "$READY_FILE"
 grep -q '"ok": true' "$READY_FILE"
 
 export XWAM_PHASE=close_fridge_eval_client
-set +e
-srun --overlap --exact --nodes=1 --ntasks=1 --gpus-per-node="$STEP_GPUS" --cpus-per-task=8 \
+if srun --overlap --exact --nodes=1 --ntasks=1 --gpus-per-node="$STEP_GPUS" --cpus-per-task=8 \
   --environment="$ROBOCASA_EDF" \
   env REPO="$REPO" ROBOCASA_ROOT="$ROBOCASA_ROOT" \
     ROBOSUITE_ROOT="$ROBOSUITE_ROOT" TOPOLOGY="$TOPOLOGY" \
@@ -208,7 +207,9 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export MUJOCO_GL=egl
 export PYOPENGL_PLATFORM=egl
-export MUJOCO_EGL_DEVICE_ID=0
+# 旧版robosuite先按物理编号检查该值是否属于CUDA_VISIBLE_DEVICES，随后才
+# 映射到单卡namespace中的逻辑0；共享模式GPU 3因此必须设置为3。
+export MUJOCO_EGL_DEVICE_ID="$CUDA_DEVICE"
 export EGL_DEVICE_ID=0
 export ROBOSUITE_RENDER_GPU_DEVICE_ID=0
 export CUDA_VISIBLE_DEVICES="$CUDA_DEVICE"
@@ -221,15 +222,19 @@ python evaluation/launch_robocasa365_m6_client_pool.py \
   --client-id 5 \
   --cuda-visible-devices "$CUDA_DEVICE"
 '
-CLIENT_RC=$?
-set -e
+then
+  CLIENT_RC=0
+else
+  CLIENT_RC=$?
+fi
 
 touch "$STOP_FILE"
 export XWAM_PHASE=close_fridge_eval_policy_shutdown
-set +e
-wait "$POLICY_STEP_PID"
-POLICY_RC=$?
-set -e
+if wait "$POLICY_STEP_PID"; then
+  POLICY_RC=0
+else
+  POLICY_RC=$?
+fi
 POLICY_STEP_PID=""
 
 [[ "$CLIENT_RC" -eq 0 ]] || xwam_fail "CloseFridge evaluation client failed"

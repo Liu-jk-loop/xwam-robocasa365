@@ -286,11 +286,16 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "--single-task-name CloseFridge",
             '--cuda-device "$CUDA_DEVICE"',
             '--gpus-per-node="$STEP_GPUS"',
+            'export MUJOCO_EGL_DEVICE_ID="$CUDA_DEVICE"',
+            'if srun --overlap --exact',
+            'if wait "$POLICY_STEP_PID"; then',
             "--episodes \"$EPISODES\"",
             "summary.json",
             "Independent evaluation repo must be clean",
         ):
             self.assertIn(expected, close_fridge_eval)
+        self.assertNotIn("export MUJOCO_EGL_DEVICE_ID=0", close_fridge_eval)
+        self.assertNotIn("set +e\nsrun --overlap --exact", close_fridge_eval)
 
         shared_eval = (
             DEPLOY_ROOT / "eval_fastwam_atomic9_xwam_b_shared4.sbatch"
@@ -317,7 +322,8 @@ class ClaridenDeploymentTest(unittest.TestCase):
             REPO_ROOT / "evaluation/launch_robocasa365_m6_client_pool.py"
         ).read_text(encoding="utf-8")
         for expected in (
-            'environment["MUJOCO_EGL_DEVICE_ID"] = "0"',
+            'physical_egl_device = args.cuda_visible_devices.split(",", 1)[0]',
+            'environment["MUJOCO_EGL_DEVICE_ID"] = physical_egl_device',
             'environment["EGL_DEVICE_ID"] = "0"',
             'environment["ROBOSUITE_RENDER_GPU_DEVICE_ID"] = "0"',
             'environment["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices',
