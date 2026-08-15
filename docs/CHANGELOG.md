@@ -1,5 +1,12 @@
 # 变更记录
 
+## 2026-08-15 — EGL导入物理编号与runtime逻辑编号分阶段切换
+
+- Job `3085601`否定了上一版“旧robosuite会自动把物理`MUJOCO_EGL_DEVICE_ID`映射到逻辑0”的假设：GPU 2 client已通过import断言并连接policy，但在`gym.make`创建offscreen context时明确报告EGL只枚举`0..0`、收到2；X-WAM GPU 3 client同理退出。`robosuite_models`、Mink和mimicgen缺失只是非阻塞warning。
+- 对照用户提供、已经成功运行的FastWAM Atomic18脚本，确认该RoboCasa EDF的正式可用合同为“simulator step看见多张GPU，但EGL固定逻辑0”。FastWAM Atomic9修正版因此让全部client共同使用`CUDA_VISIBLE_DEVICES=0,1,2`与三项EGL/render=0，不再给每个client收窄为单个物理卡，也不会暴露预留给X-WAM的GPU 3。
+- X-WAM仍保持GPU 3隔离：子进程启动为`CUDA_VISIBLE_DEVICES=3/MUJOCO_EGL_DEVICE_ID=3`，先让旧robosuite import检查通过；`run_robocasa365_m6_client.py`在RoboCasa注册完成后、`gym.make`之前显式切换`MUJOCO_EGL_DEVICE_ID=0`，满足实际单设备EGL context。日志分别记录import物理编号和runtime逻辑编号。
+- 同时修正失败报告阶段：client失败在policy回收后会恢复`phase=close_fridge_eval_client`并直接提示`clients/client_05.log`，不再错误显示为`policy_shutdown`。本地聚焦测试、Python/sbatch语法和变更记录门禁通过；GPU 3真实两阶段切换、FastWAM GPU 0/1/2 client和完整共享评测仍为`cluster-pending`。回滚本次commit会恢复已被Job `3085601`证伪的单值EGL设置，不影响既有日志或结果。
+
 ## 2026-08-15 — 共享评测物理GPU/EGL编号修复
 
 - Clariden Job `3085477`的X-WAM-B policy已到READY，但CloseFridge simulator client在外层`srun`返回1。同期FastWAM只有GPU 0上的三个client能导入RoboCasa，GPU 1/2 client均在旧版robosuite `binding_utils.py`断言退出：固定的`MUJOCO_EGL_DEVICE_ID=0`不属于各自的`CUDA_VISIBLE_DEVICES=1|2`；X-WAM的`CUDA_VISIBLE_DEVICES=3/EGL=0`属于同一根因。

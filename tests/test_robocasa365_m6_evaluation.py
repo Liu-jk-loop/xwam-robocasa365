@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import numpy as np
@@ -13,7 +15,10 @@ from evaluation.robocasa365_m6_topology import (
     load_m6_evaluation_topology,
     tasks_for_server,
 )
-from evaluation.run_robocasa365_m6_client import _summarize_base_diagnostics
+from evaluation.run_robocasa365_m6_client import (
+    _create_environment,
+    _summarize_base_diagnostics,
+)
 from evaluation.robocasa365_policy_server import validate_checkpoint_task
 from scripts.aggregate_robocasa365_m6_evaluation import aggregate
 from scripts.summarize_robocasa365_base_diagnostics import (
@@ -32,6 +37,36 @@ TOPOLOGY = (
 
 
 class RoboCasa365M6EvaluationTest(unittest.TestCase):
+    def test_environment_switches_physical_import_id_to_local_egl_zero(self) -> None:
+        captured: dict[str, object] = {}
+
+        class FakeGym:
+            @staticmethod
+            def make(name: str, **kwargs: object) -> object:
+                captured["name"] = name
+                captured["kwargs"] = kwargs
+                captured["egl"] = os.environ["MUJOCO_EGL_DEVICE_ID"]
+                return object()
+
+        with mock.patch.dict(
+            sys.modules,
+            {"gymnasium": FakeGym, "robocasa": object()},
+        ), mock.patch.dict(
+            os.environ,
+            {
+                "CUDA_VISIBLE_DEVICES": "3",
+                "MUJOCO_EGL_DEVICE_ID": "3",
+                "XWAM_ROBOCASA_IMPORT_EGL_DEVICE": "3",
+            },
+            clear=False,
+        ):
+            _create_environment("CloseFridge", "target")
+            _create_environment("CloseFridge", "target")
+
+        self.assertEqual(captured["name"], "robocasa/CloseFridge")
+        self.assertEqual(captured["kwargs"], {"split": "target"})
+        self.assertEqual(captured["egl"], "0")
+
     def test_single_task_summary_validates_success_rate_and_contract(self) -> None:
         report = summarize_single_task(
             {

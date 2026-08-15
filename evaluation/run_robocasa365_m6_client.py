@@ -53,6 +53,30 @@ def _create_environment(task: str, split: str) -> Any:
     import gymnasium as gym
     import robocasa  # noqa: F401 -- registers gym environments
 
+    # The legacy robosuite import gate compares MUJOCO_EGL_DEVICE_ID with the
+    # physical ids listed in CUDA_VISIBLE_DEVICES. The actual EGL context in the
+    # validated RoboCasa EDF exposes only one process-local device, index 0.
+    # Keep the physical id through the import above, then switch to local 0
+    # before gym.make() creates the offscreen context.
+    current_egl_device = os.environ.get("MUJOCO_EGL_DEVICE_ID", "0")
+    physical_egl_device = os.environ.setdefault(
+        "XWAM_ROBOCASA_IMPORT_EGL_DEVICE", current_egl_device
+    )
+    visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+    if visible_devices and current_egl_device != "0":
+        visible_ids = visible_devices.split(",")
+        if current_egl_device not in visible_ids:
+            raise BenchmarkContractError(
+                "MUJOCO_EGL_DEVICE_ID必须属于CUDA_VISIBLE_DEVICES："
+                f"egl={current_egl_device!r} visible={visible_ids!r}"
+            )
+    os.environ["MUJOCO_EGL_DEVICE_ID"] = "0"
+    print(
+        "[EGL] RoboCasa import使用物理设备"
+        f" {physical_egl_device}；runtime context切换到逻辑设备0",
+        flush=True,
+    )
+
     # Match the validated FastWAM formal evaluation: target split, seeded reset,
     # and no fixed M4 smoke layout/style.
     return gym.make(

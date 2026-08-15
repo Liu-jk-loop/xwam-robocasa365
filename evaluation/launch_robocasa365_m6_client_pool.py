@@ -96,13 +96,13 @@ def main() -> int:
             environment = dict(os.environ)
             environment["MUJOCO_GL"] = "egl"
             environment["PYOPENGL_PLATFORM"] = "egl"
-            # Legacy robosuite validates MUJOCO_EGL_DEVICE_ID against the
-            # physical ids in CUDA_VISIBLE_DEVICES before mapping the selected
-            # device into the process-local CUDA namespace. With
-            # CUDA_VISIBLE_DEVICES=3 the validated value is therefore 3, while
-            # EGL_DEVICE_ID and render_gpu_device_id remain local index 0.
+            # Legacy robosuite import validates MUJOCO_EGL_DEVICE_ID against
+            # the physical ids in CUDA_VISIBLE_DEVICES. The child keeps this
+            # value through RoboCasa registration, then switches it to local 0
+            # immediately before the one-device EGL context is constructed.
             physical_egl_device = args.cuda_visible_devices.split(",", 1)[0]
             environment["MUJOCO_EGL_DEVICE_ID"] = physical_egl_device
+            environment["XWAM_ROBOCASA_IMPORT_EGL_DEVICE"] = physical_egl_device
             environment["EGL_DEVICE_ID"] = "0"
             environment["ROBOSUITE_RENDER_GPU_DEVICE_ID"] = "0"
             environment["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices
@@ -117,7 +117,7 @@ def main() -> int:
             print(
                 f"[START] client={client_id} server={client['server_id']} "
                 f"cuda_visible={args.cuda_visible_devices} "
-                f"mujoco_egl_physical={physical_egl_device} egl_local=0 "
+                f"mujoco_egl_import={physical_egl_device} egl_runtime=0 "
                 f"tasks={[row['name'] for row in client['tasks']]}",
                 flush=True,
             )

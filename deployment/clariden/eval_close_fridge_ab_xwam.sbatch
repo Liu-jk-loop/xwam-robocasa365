@@ -207,8 +207,8 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export MUJOCO_GL=egl
 export PYOPENGL_PLATFORM=egl
-# 旧版robosuite先按物理编号检查该值是否属于CUDA_VISIBLE_DEVICES，随后才
-# 映射到单卡namespace中的逻辑0；共享模式GPU 3因此必须设置为3。
+# 旧版robosuite import先按物理编号检查该值是否属于CUDA_VISIBLE_DEVICES；
+# client在import完成后、创建单设备EGL context前再把它切换为逻辑0。
 export MUJOCO_EGL_DEVICE_ID="$CUDA_DEVICE"
 export EGL_DEVICE_ID=0
 export ROBOSUITE_RENDER_GPU_DEVICE_ID=0
@@ -237,8 +237,14 @@ else
 fi
 POLICY_STEP_PID=""
 
-[[ "$CLIENT_RC" -eq 0 ]] || xwam_fail "CloseFridge evaluation client failed"
-[[ "$POLICY_RC" -eq 0 ]] || xwam_fail "CloseFridge evaluation policy failed"
+if [[ "$CLIENT_RC" -ne 0 ]]; then
+  export XWAM_PHASE=close_fridge_eval_client
+  xwam_fail "CloseFridge evaluation client failed; inspect $LOG_ROOT/clients/client_05.log"
+fi
+if [[ "$POLICY_RC" -ne 0 ]]; then
+  export XWAM_PHASE=close_fridge_eval_policy_shutdown
+  xwam_fail "CloseFridge evaluation policy failed; inspect $LOG_ROOT/server_launcher.log"
+fi
 test -s "$RESULT_JSON"
 
 export XWAM_PHASE=close_fridge_eval_summary

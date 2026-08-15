@@ -76,7 +76,7 @@
 - 18任务闭环结果明显低于FastWAM，NavigateKitchen底盘诊断进一步确认policy虽持续输出非零base命令且环境数值上响应，但1000步净位移仅约5.6 cm，主要问题不是评测端静默丢弃底盘动作。按用户决定暂不把Navi标签审计作为阻塞项，先运行CloseFridge单任务A/B。
 - 新增CloseFridge专用单任务RGB配置、单节点4×GH200 `batch16/accum2` GBS128/ZeRO-1硬件层及`clean_action_ratio=0.5/0.0`两份严格对照实验。两组均从公开pretrained以seed42开始，固定3000-step scheduler，首轮只运行到step 1000；IOPS现每500步滚动保留2个，Store保存step 1000 final，W&B run与checkpoint目录按组隔离。ratio05已完成step 1000；ratio00的step 500文件尺寸完整，但原作业因保存时rank间I/O漂移触发30分钟NCCL timeout。硬件层现使用90分钟分布式timeout，callback保存后执行全rank barrier；真实恢复与step 1000完成为`cluster-pending`。
 - ratio05 step 1000单任务评测入口已准备：单GPU、CloseFridge seed42起50 episodes、target split、1000步/replan20/action denoise10，视频及结果写IOPS。评测默认使用独立Git clone，避免对正在执行ratio00训练的主工作区pull/checkout；真实成功率为`cluster-pending`。
-- 新增共享4卡评测入口：复用用户已有的FastWAM Atomic9脚本在GPU 0/1/2运行6 server/9 client，并把CloseFridge X-WAM-B（ratio00）policy与simulator同时固定到GPU 3。Job `3085477`确认两边policy能够启动，但FastWAM GPU 1/2和X-WAM GPU 3的simulator因`CUDA_VISIBLE_DEVICES=<物理卡>/MUJOCO_EGL_DEVICE_ID=0`不一致而在旧版robosuite import断言退出；GPU 0 client通过恰好印证该编号错误。X-WAM已改为物理`MUJOCO_EGL_DEVICE_ID`随选中卡、进程内EGL/render仍为逻辑0，并修复client返回码捕获；FastWAM外部脚本需应用同一物理编号修复。新commit上的GPU 1/2/3 EGL导入与完整退出为`cluster-pending`。
+- 新增共享4卡评测入口：复用用户已有的FastWAM Atomic9脚本在GPU 0/1/2运行6 server/9 client，并把CloseFridge X-WAM-B（ratio00）policy固定到GPU 3。Job `3085477`发现固定EGL 0不能通过单卡物理编号import检查；Job `3085601`进一步证明把EGL改成物理2/3虽能import，却会在只枚举逻辑设备0的runtime context失败。对照已成功FastWAM Atomic18脚本后，FastWAM client改为共同可见`0,1,2`且EGL=0；X-WAM保持只见GPU 3，但在RoboCasa import后、`gym.make`前把EGL从物理3切换到逻辑0。两边policy均已成功启动；新commit上的环境创建、一步闭环和完整退出为`cluster-pending`。
 
 ## 已确认资源
 

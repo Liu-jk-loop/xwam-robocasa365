@@ -289,6 +289,8 @@ class ClaridenDeploymentTest(unittest.TestCase):
             'export MUJOCO_EGL_DEVICE_ID="$CUDA_DEVICE"',
             'if srun --overlap --exact',
             'if wait "$POLICY_STEP_PID"; then',
+            'export XWAM_PHASE=close_fridge_eval_client',
+            'inspect $LOG_ROOT/clients/client_05.log',
             "--episodes \"$EPISODES\"",
             "summary.json",
             "Independent evaluation repo must be clean",
@@ -324,11 +326,22 @@ class ClaridenDeploymentTest(unittest.TestCase):
         for expected in (
             'physical_egl_device = args.cuda_visible_devices.split(",", 1)[0]',
             'environment["MUJOCO_EGL_DEVICE_ID"] = physical_egl_device',
+            'environment["XWAM_ROBOCASA_IMPORT_EGL_DEVICE"] = physical_egl_device',
             'environment["EGL_DEVICE_ID"] = "0"',
             'environment["ROBOSUITE_RENDER_GPU_DEVICE_ID"] = "0"',
             'environment["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices',
         ):
             self.assertIn(expected, client_pool)
+
+        task_client = (
+            REPO_ROOT / "evaluation/run_robocasa365_m6_client.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('import robocasa  # noqa: F401', task_client)
+        self.assertIn('os.environ["MUJOCO_EGL_DEVICE_ID"] = "0"', task_client)
+        self.assertLess(
+            task_client.index("import robocasa  # noqa: F401"),
+            task_client.index('os.environ["MUJOCO_EGL_DEVICE_ID"] = "0"'),
+        )
 
     def test_debug_log_archiver_preserves_formal_logs(self) -> None:
         script = (DEPLOY_ROOT / "archive_debug_logs_xwam.sh").read_text(

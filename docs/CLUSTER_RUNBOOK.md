@@ -1217,11 +1217,13 @@ sbatch deployment/clariden/eval_fastwam_atomic9_xwam_b_shared4.sbatch
 `26000+`动态端口就绪，然后启动X-WAM-B。X-WAM-B的policy与RoboCasa client都固定
 `CUDA_VISIBLE_DEVICES=3`，使用12005/13005；FastWAM继续使用GPU 0～2。两边driver日志：
 
-旧版robosuite在导入时会先检查物理编号，再把它映射为单卡namespace的逻辑0。因此
-每个simulator必须满足`MUJOCO_EGL_DEVICE_ID`等于其唯一的`CUDA_VISIBLE_DEVICES`
-物理编号；X-WAM GPU 3即为`CUDA_VISIBLE_DEVICES=3/MUJOCO_EGL_DEVICE_ID=3`，同时
-`EGL_DEVICE_ID=0/ROBOSUITE_RENDER_GPU_DEVICE_ID=0`保持不变。FastWAM GPU 1/2也必须
-应用相同规则，否则会在创建环境前触发`binding_utils.py`断言。
+该RoboCasa EDF存在两个不同编号阶段：旧版robosuite import要求
+`MUJOCO_EGL_DEVICE_ID`属于`CUDA_VISIBLE_DEVICES`的物理编号集合，真正创建offscreen
+context时却只枚举一个逻辑EGL设备0。FastWAM按已成功Atomic18脚本的合同，让所有
+simulator client共同使用`CUDA_VISIBLE_DEVICES=0,1,2`及EGL/render=0，因此不暴露GPU 3。
+X-WAM为保持GPU 3隔离，启动时使用`CUDA_VISIBLE_DEVICES=3/MUJOCO_EGL_DEVICE_ID=3`，
+完成RoboCasa import后、`gym.make`前由client切换为`MUJOCO_EGL_DEVICE_ID=0`；其余
+`EGL_DEVICE_ID/ROBOSUITE_RENDER_GPU_DEVICE_ID`始终为0。
 
 ```text
 /iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/shared-fastwam-xwam-b/<JOB_ID>/fastwam_driver.log
