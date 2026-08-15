@@ -1,6 +1,6 @@
 # 项目进度
 
-更新时间：2026-08-13
+更新时间：2026-08-15
 
 ## 当前状态
 
@@ -76,6 +76,7 @@
 - 18任务闭环结果明显低于FastWAM，NavigateKitchen底盘诊断进一步确认policy虽持续输出非零base命令且环境数值上响应，但1000步净位移仅约5.6 cm，主要问题不是评测端静默丢弃底盘动作。按用户决定暂不把Navi标签审计作为阻塞项，先运行CloseFridge单任务A/B。
 - 新增CloseFridge专用单任务RGB配置、单节点4×GH200 `batch16/accum2` GBS128/ZeRO-1硬件层及`clean_action_ratio=0.5/0.0`两份严格对照实验。两组均从公开pretrained以seed42开始，固定3000-step scheduler，首轮只运行到step 1000；IOPS现每500步滚动保留2个，Store保存step 1000 final，W&B run与checkpoint目录按组隔离。ratio05已完成step 1000；ratio00的step 500文件尺寸完整，但原作业因保存时rank间I/O漂移触发30分钟NCCL timeout。硬件层现使用90分钟分布式timeout，callback保存后执行全rank barrier；真实恢复与step 1000完成为`cluster-pending`。
 - ratio05 step 1000单任务评测入口已准备：单GPU、CloseFridge seed42起50 episodes、target split、1000步/replan20/action denoise10，视频及结果写IOPS。评测默认使用独立Git clone，避免对正在执行ratio00训练的主工作区pull/checkout；真实成功率为`cluster-pending`。
+- 新增共享4卡评测入口：复用用户已有的FastWAM Atomic9脚本在GPU 0/1/2运行6 server/9 client，并把CloseFridge X-WAM-B（ratio00）policy与simulator同时固定到GPU 3。FastWAM动态端口位于26000以上，X-WAM-B固定使用12005/13005；日志、结果和失败状态相互隔离。共享allocation的真实GPU绑定、EGL、显存和两侧完整退出为`cluster-pending`。
 
 ## 已确认资源
 

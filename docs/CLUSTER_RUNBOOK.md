@@ -1179,6 +1179,60 @@ logs/failure.txt
 `ok=true/result=pass`。任务失败本身记入成功率，不等同于工程失败；缺失episode、
 server异常、checkpoint/statistics漂移或模拟器异常会阻止最终PASS。
 
+## FastWAM Atomic9与X-WAM-B共享4卡评测
+
+该入口只适用于用户提供的`eval_robocasa365_atomic9_6s9c_reserve4_use3.sbatch`：
+FastWAM脚本必须仍为`NUM_GPUS=3/NUM_SERVERS=6/NUM_CLIENTS=9`，并由内部
+`CUDA_VISIBLE_DEVICES`只使用GPU 0、1、2。X-WAM-B按当前A/B命名解释为
+CloseFridge `ratio00`组，独占GPU 3。不要先单独`sbatch` FastWAM脚本；只提交下面的
+共享外层脚本，否则两个Slurm作业无法复用同一个4卡allocation。
+
+先让独立X-WAM评测clone拉取指定commit并保持clean，然后设置路径：
+
+```bash
+DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
+DEPLOY_CAPSCR=/capstor/scratch/cscs/zjingchen/terry_nys
+XWAM_B_REPO="$DEPLOY_STORE/src/xwam-robocasa365-eval"
+
+cd "$XWAM_B_REPO"
+git switch dev/atomic-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+test -z "$(git status --porcelain)"
+
+export FASTWAM_EVAL_SCRIPT=/absolute/path/to/eval_robocasa365_atomic9_6s9c_reserve4_use3.sbatch
+export XWAM_B_EVAL_REPO="$XWAM_B_REPO"
+export XWAM_B_EVAL_ID=ratio00_step1000_target_50ep_gpu3
+export XWAM_B_EXPERIMENT_DIR="$DEPLOY_CAPSCR/experiments/xwam/close_fridge_rgb_ratio00_seed42_4gpu"
+export XWAM_B_CHECKPOINT="$DEPLOY_STORE/checkpoints/xwam/close_fridge_rgb_ratio00_seed42_4gpu/checkpoints/final-step=1000.ckpt"
+export XWAM_B_EPISODES=50
+
+test -s "$FASTWAM_EVAL_SCRIPT"
+test -s "$XWAM_B_EXPERIMENT_DIR/config.yaml"
+test -s "$XWAM_B_CHECKPOINT/checkpoint/mp_rank_00_model_states.pt"
+
+sbatch deployment/clariden/eval_fastwam_atomic9_xwam_b_shared4.sbatch
+```
+
+共享入口申请4张GH200、96 CPU和450G内存。它先运行FastWAM driver并等待6个
+`26000+`动态端口就绪，然后启动X-WAM-B。X-WAM-B的policy与RoboCasa client都固定
+`CUDA_VISIBLE_DEVICES=3`，使用12005/13005；FastWAM继续使用GPU 0～2。两边driver日志：
+
+```text
+/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/shared-fastwam-xwam-b/<JOB_ID>/fastwam_driver.log
+/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/shared-fastwam-xwam-b/<JOB_ID>/xwam_b_driver.log
+```
+
+X-WAM-B结果仍写入：
+
+```text
+/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/close-fridge-ab/$XWAM_B_EVAL_ID/
+```
+
+一侧失败不会主动终止另一侧；外层会等待两侧结束，再以两个return code决定最终PASS。
+首次运行必须检查FastWAM server日志中的GPU只出现0/1/2，以及X-WAM
+`server_5_status.json`/job日志记录`gpu=3`。两边仍共享CPU、主机内存和存储带宽，因此
+“不影响前三张卡”只在GPU进程绑定上由代码强制，吞吐和RSS仍需Clariden实测。
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：

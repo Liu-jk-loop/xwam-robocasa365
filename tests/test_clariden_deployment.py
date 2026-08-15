@@ -225,6 +225,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "train_m6_formal_xwam_8gpu.sbatch",
             "train_close_fridge_ab_xwam.sbatch",
             "eval_close_fridge_ab_xwam.sbatch",
+            "eval_fastwam_atomic9_xwam_b_shared4.sbatch",
             "eval_m6_atomic18_xwam.sbatch",
         ):
             result = subprocess.run(
@@ -276,17 +277,41 @@ class ClaridenDeploymentTest(unittest.TestCase):
             'REPO="${XWAM_EVAL_REPO:-$DEPLOY_STORE/src/xwam-robocasa365-eval}"',
             'EVAL_ROOT="$DEPLOY_IOPS/x-wam-eval/close-fridge-ab/$EVAL_ID"',
             "final-step=1000.ckpt",
+            'CUDA_DEVICE="${XWAM_EVAL_CUDA_DEVICE:-0}"',
+            'STEP_GPUS="${XWAM_EVAL_STEP_GPUS:-1}"',
             "--server-id 5",
             "--client-id 5",
-            "--cuda-visible-devices 0",
+            '--cuda-visible-devices "$CUDA_DEVICE"',
             "--single-task-checkpoint",
             "--single-task-name CloseFridge",
-            "--cuda-device 0",
+            '--cuda-device "$CUDA_DEVICE"',
+            '--gpus-per-node="$STEP_GPUS"',
             "--episodes \"$EPISODES\"",
             "summary.json",
             "Independent evaluation repo must be clean",
         ):
             self.assertIn(expected, close_fridge_eval)
+
+        shared_eval = (
+            DEPLOY_ROOT / "eval_fastwam_atomic9_xwam_b_shared4.sbatch"
+        ).read_text(encoding="utf-8")
+        for expected in (
+            "#SBATCH --gpus-per-node=4",
+            "#SBATCH --cpus-per-task=96",
+            "eval_robocasa365_atomic9_6s9c_reserve4_use3.sbatch",
+            '"export NUM_GPUS=3" "export NUM_SERVERS=6" "export NUM_CLIENTS=9"',
+            "FastWAM script explicitly binds a process to GPU 3",
+            "close_fridge_rgb_ratio00_seed42_4gpu",
+            "XWAM_EVAL_STEP_GPUS=4",
+            "XWAM_EVAL_CUDA_DEVICE=3",
+            "FastWAM GPUs        : 0,1,2",
+            "X-WAM-B GPU         : 3",
+            "X-WAM-B ports       : 12005 / 13005",
+            "FastWAM return code",
+            "X-WAM-B return code",
+        ):
+            self.assertIn(expected, shared_eval)
+        self.assertNotIn("XWAM_EVAL_CUDA_DEVICE=0", shared_eval)
 
         client_pool = (
             REPO_ROOT / "evaluation/launch_robocasa365_m6_client_pool.py"

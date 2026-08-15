@@ -1,5 +1,13 @@
 # 变更记录
 
+## 2026-08-15 — FastWAM Atomic9与X-WAM-B共享4卡评测
+
+- 用户已有FastWAM Atomic9脚本申请单节点4卡，但只在逻辑GPU 0/1/2运行6个policy server和9个simulator client。新增共享提交入口，先启动该既有脚本并等待6个动态端口就绪，再在同一allocation中启动CloseFridge X-WAM-B；X-WAM-B默认解释为A/B中的ratio00组，实验目录、checkpoint、episode数和eval ID均可由提交环境覆盖。
+- 单任务X-WAM评测新增`XWAM_EVAL_CUDA_DEVICE`与`XWAM_EVAL_STEP_GPUS`。独立作业仍默认`device=0/step_gpus=1`；共享作业让Slurm step看到4卡，但policy launcher和RoboCasa client都只设置`CUDA_VISIBLE_DEVICES=3`，不会在GPU 0/1/2构造Torch模型或EGL client。
+- 两边端口不重叠：FastWAM继续使用按Job计算的26000以上连续6端口，X-WAM-B复用单任务topology的12005/13005并在启动前检查占用。FastWAM和X-WAM-B分别写独立driver、模型、client和结果目录；一侧非零退出不会主动终止另一侧，外层等两边结束后再汇总返回码。
+- 共享作业申请96 CPU和450G主机内存，X-WAM所有srun阶段增加`--overlap --exact`，避免在FastWAM step存活时等待资源。该设置隔离GPU，但两边仍共享节点CPU、内存和存储带宽；真实Clariden运行必须观察GPU进程映射、主机RSS、EGL和吞吐，当前为`cluster-pending`。
+- 本地验收覆盖两个sbatch的shell语法、共享脚本中的GPU/端口/ratio00默认值和原单GPU默认兼容性。回滚本次修改会移除共享入口并让单任务评测恢复写死GPU 0；不会停止现有作业或删除外部评测结果。
+
 ## 2026-08-14 — CloseFridge A/B checkpoint容量与慢盘同步修复
 
 - Clariden实跑确认单份4-rank ZeRO-1完整checkpoint约78 GiB。ratio05按250/500/750/1000保存四份后，IOPS目录达到311 GiB；ratio00在step 500保存阶段出现rank间I/O完成时间漂移，随后一个rank进入ALLREDUCE并触发原30分钟NCCL timeout。该失败与`clean_action_ratio`取值无关。

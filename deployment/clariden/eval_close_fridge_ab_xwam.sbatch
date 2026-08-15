@@ -30,9 +30,23 @@ EXPERIMENT_DIR="${XWAM_EVAL_EXPERIMENT_DIR:-$DEPLOY_CAPSCR/experiments/xwam/clos
 CHECKPOINT="${XWAM_EVAL_CHECKPOINT:-$DEPLOY_STORE/checkpoints/xwam/close_fridge_rgb_ratio05_seed42_4gpu/checkpoints/final-step=1000.ckpt}"
 EVAL_ID="${XWAM_EVAL_ID:-}"
 EPISODES="${XWAM_EVAL_EPISODES:-50}"
+CUDA_DEVICE="${XWAM_EVAL_CUDA_DEVICE:-0}"
+STEP_GPUS="${XWAM_EVAL_STEP_GPUS:-1}"
 
 if [[ -z "$EVAL_ID" || ! "$EVAL_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "[FAIL] XWAM_EVAL_ID must be nonempty and contain only A-Za-z0-9._-" >&2
+  exit 2
+fi
+if [[ ! "$CUDA_DEVICE" =~ ^[0-9]+$ ]]; then
+  echo "[FAIL] XWAM_EVAL_CUDA_DEVICE must be a nonnegative integer" >&2
+  exit 2
+fi
+if [[ ! "$STEP_GPUS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "[FAIL] XWAM_EVAL_STEP_GPUS must be a positive integer" >&2
+  exit 2
+fi
+if (( CUDA_DEVICE >= STEP_GPUS )); then
+  echo "[FAIL] XWAM_EVAL_CUDA_DEVICE must be smaller than XWAM_EVAL_STEP_GPUS" >&2
   exit 2
 fi
 EVAL_ROOT="$DEPLOY_IOPS/x-wam-eval/close-fridge-ab/$EVAL_ID"
@@ -106,11 +120,12 @@ echo "experiment_dir=$EXPERIMENT_DIR"
 echo "checkpoint=$CHECKPOINT"
 echo "task=CloseFridge episodes=$EPISODES seed_start=42 model_seed=42"
 echo "replan_steps=20 action_denoise_steps=10 max_steps=1000"
+echo "gpu_binding=CUDA_VISIBLE_DEVICES=$CUDA_DEVICE step_gpus=$STEP_GPUS"
 echo "result_root=$RESULT_ROOT"
 
 SIMULATOR_PROBE="$LOG_ROOT/robocasa_eval_runtime_probe.json"
 export XWAM_PHASE=close_fridge_eval_simulator_probe
-srun --nodes=1 --ntasks=1 --cpus-per-task=1 \
+srun --overlap --exact --nodes=1 --ntasks=1 --cpus-per-task=1 \
   --environment="$ROBOCASA_EDF" \
   env REPO="$REPO" ROBOCASA_ROOT="$ROBOCASA_ROOT" \
     ROBOSUITE_ROOT="$ROBOSUITE_ROOT" SIMULATOR_PROBE="$SIMULATOR_PROBE" \
@@ -136,11 +151,12 @@ cleanup_policy() {
 trap cleanup_policy EXIT INT TERM
 
 export XWAM_PHASE=close_fridge_eval_policy_start
-srun --overlap --nodes=1 --ntasks=1 --gpus-per-node=1 --cpus-per-task=12 \
+srun --overlap --exact --nodes=1 --ntasks=1 --gpus-per-node="$STEP_GPUS" --cpus-per-task=12 \
   --environment="$XWAM_EDF" \
   env REPO="$REPO" RUNTIME_OVERLAY="$RUNTIME_OVERLAY" TOPOLOGY="$TOPOLOGY" \
     EXPERIMENT_DIR="$EXPERIMENT_DIR" CHECKPOINT="$CHECKPOINT" WAN_DIR="$WAN_DIR" \
     LOG_ROOT="$LOG_ROOT" READY_FILE="$READY_FILE" STOP_FILE="$STOP_FILE" \
+    CUDA_DEVICE="$CUDA_DEVICE" \
   bash -lc '
 set -Eeuo pipefail
 cd "$REPO"
@@ -158,7 +174,7 @@ python evaluation/launch_robocasa365_m6_policy_pool.py \
   --server-id 5 \
   --single-task-checkpoint \
   --single-task-name CloseFridge \
-  --cuda-device 0
+  --cuda-device "$CUDA_DEVICE"
 ' >"$LOG_ROOT/server_launcher.log" 2>&1 &
 POLICY_STEP_PID=$!
 
@@ -178,11 +194,12 @@ grep -q '"ok": true' "$READY_FILE"
 
 export XWAM_PHASE=close_fridge_eval_client
 set +e
-srun --overlap --nodes=1 --ntasks=1 --gpus-per-node=1 --cpus-per-task=8 \
+srun --overlap --exact --nodes=1 --ntasks=1 --gpus-per-node="$STEP_GPUS" --cpus-per-task=8 \
   --environment="$ROBOCASA_EDF" \
   env REPO="$REPO" ROBOCASA_ROOT="$ROBOCASA_ROOT" \
     ROBOSUITE_ROOT="$ROBOSUITE_ROOT" TOPOLOGY="$TOPOLOGY" \
     RESULT_ROOT="$RESULT_ROOT" LOG_ROOT="$LOG_ROOT" EPISODES="$EPISODES" \
+    CUDA_DEVICE="$CUDA_DEVICE" \
   bash -lc '
 set -Eeuo pipefail
 cd "$REPO"
@@ -194,7 +211,7 @@ export PYOPENGL_PLATFORM=egl
 export MUJOCO_EGL_DEVICE_ID=0
 export EGL_DEVICE_ID=0
 export ROBOSUITE_RENDER_GPU_DEVICE_ID=0
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES="$CUDA_DEVICE"
 export PYTHONPATH="$ROBOCASA_ROOT:$ROBOSUITE_ROOT:$REPO${PYTHONPATH:+:$PYTHONPATH}"
 python evaluation/launch_robocasa365_m6_client_pool.py \
   --topology "$TOPOLOGY" \
@@ -202,7 +219,7 @@ python evaluation/launch_robocasa365_m6_client_pool.py \
   --log-root "$LOG_ROOT" \
   --episodes-per-task "$EPISODES" \
   --client-id 5 \
-  --cuda-visible-devices 0
+  --cuda-visible-devices "$CUDA_DEVICE"
 '
 CLIENT_RC=$?
 set -e
@@ -220,7 +237,7 @@ POLICY_STEP_PID=""
 test -s "$RESULT_JSON"
 
 export XWAM_PHASE=close_fridge_eval_summary
-srun --overlap --nodes=1 --ntasks=1 --cpus-per-task=1 \
+srun --overlap --exact --nodes=1 --ntasks=1 --cpus-per-task=1 \
   --environment="$XWAM_EDF" \
   env REPO="$REPO" RESULT_JSON="$RESULT_JSON" SUMMARY_JSON="$SUMMARY_JSON" \
     EPISODES="$EPISODES" EVAL_ID="$EVAL_ID" CHECKPOINT="$CHECKPOINT" \
