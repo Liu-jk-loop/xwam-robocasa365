@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""校验 M6 18任务 manifest/global stats，并输出精确5-epoch步数。"""
+"""校验 M6 manifest/global stats，并输出 epoch 或固定步数调度。"""
 
 from __future__ import annotations
 
@@ -27,6 +27,8 @@ def main() -> int:
     )
     parser.add_argument("--global-batch-size", type=int, default=128)
     parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument("--expected-task-count", type=int, default=18)
+    parser.add_argument("--fixed-training-steps", type=int)
     parser.add_argument(
         "--output",
         default="logs/cluster/robocasa365_m6_h100_preflight.json",
@@ -37,6 +39,8 @@ def main() -> int:
         args.stats,
         global_batch_size=args.global_batch_size,
         num_train_epochs=args.epochs,
+        expected_task_count=args.expected_task_count,
+        fixed_training_steps=args.fixed_training_steps,
     )
     output = write_json_atomic(args.output, report)
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))

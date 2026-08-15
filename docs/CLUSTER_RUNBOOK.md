@@ -1241,6 +1241,50 @@ X-WAM-B结果仍写入：
 `server_5_status.json`/job日志记录`gpu=3`。两边仍共享CPU、主机内存和存储带宽，因此
 “不影响前三张卡”只在GPU进程绑定上由代码强制，吞吐和RSS仍需Clariden实测。
 
+## Atomic9 ratio0：数据预检与8500步正式训练
+
+该实验固定9个任务、`clean_action_ratio=0`、8×GH200、GBS128和8500 optimizer
+steps。它有独立manifest、global stats、W&B run和checkpoint目录，不从18任务或
+CloseFridge A/B checkpoint恢复。
+
+先在主训练clone中拉取并确认工作区干净，然后提交数据预检：
+
+```bash
+DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
+REPO="$DEPLOY_STORE/src/xwam-robocasa365"
+
+cd "$REPO"
+git switch dev/atomic-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+test -z "$(git status --porcelain)"
+
+sbatch deployment/clariden/prepare_atomic9_ratio00_data_xwam.sbatch
+```
+
+预检完成后，检查任务数、固定步数和按真实有效clip折算的epoch数。这里不预设折算
+epoch；以生成报告为准：
+
+```bash
+PREFLIGHT="$DEPLOY_STORE/manifests/xwam/atomic9_ratio00/robocasa365_atomic9_ratio00_gh200_preflight.json"
+test -s "$PREFLIGHT"
+grep -E '"(result|expected_task_count|fixed_training_steps|planned_sample_draws|effective_num_train_epochs)"' "$PREFLIGHT"
+```
+
+验收应包含`result=pass`、`expected_task_count=9`、`fixed_training_steps=8500`和
+`planned_sample_draws=1088000`。确认后提交正式训练；API key只通过提交环境继承：
+
+```bash
+cd "$REPO"
+test -z "$(git status --porcelain)"
+test -n "${WANDB_API_KEY:-}"
+sbatch deployment/clariden/train_atomic9_ratio00_xwam_8gpu.sbatch
+```
+
+作业每500步写IOPS滚动checkpoint、每3000步写Store永久checkpoint，并在8500步写
+final checkpoint。12小时未完成时，重新提交同一个训练脚本；planner只接受本实验中
+model和8个ZeRO-1 optimizer shard都完整的最新checkpoint。不得把实验名、manifest或
+stats改成Atomic18路径后继续同一个W&B run。
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：

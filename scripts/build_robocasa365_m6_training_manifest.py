@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""审计 Atomic-Seen 18 的 pretrain 数据并生成 M6 正式训练 manifest。"""
+"""审计指定 atomic 任务清单的 pretrain 数据并生成 M6 训练 manifest。"""
 
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ def main() -> int:
     except (OSError, ValueError) as exc:
         report = {
             "schema_version": 1,
-            "name": "robocasa365_m6_atomic_seen18_pretrain",
+            "name": f"robocasa365_m6_{Path(args.task_manifest).stem}_pretrain",
             "scope": "atomic_only",
             "split": "pretrain",
             "sampling": "natural_proportional",

@@ -1,0 +1,30 @@
+{
+  "name": "target_atomic9_fastwam_overlap",
+  "scope": "atomic_only",
+  "split": "target",
+  "source": "user_frozen_subset",
+  "robocasa_release": "v1.0.1",
+  "source_file": "configs/tasks/robocasa365_atomic_seen.json",
+  "tasks": [
+    "OpenStandMixerHead",
+    "PickPlaceSinkToCounter",
+    "TurnOnElectricKettle",
+    "CloseFridge",
+    "TurnOnMicrowave",
+    "OpenDrawer",
+    "CoffeeSetupMug",
+    "PickPlaceDrawerToCounter",
+    "CloseBlenderLid"
+  ],
+  "horizons": {
+    "OpenStandMixerHead": 450,
+    "PickPlaceSinkToCounter": 900,
+    "TurnOnElectricKettle": 450,
+    "CloseFridge": 900,
+    "TurnOnMicrowave": 450,
+    "OpenDrawer": 750,
+    "CoffeeSetupMug": 600,
+    "PickPlaceDrawerToCounter": 750,
+    "CloseBlenderLid": 900
+  }
+}

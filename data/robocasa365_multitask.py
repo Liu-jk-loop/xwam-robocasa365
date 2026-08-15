@@ -228,7 +228,7 @@ def build_atomic_training_manifest_report(
     ok = not errors and len(tasks) == len(task_names)
     report: dict[str, Any] = {
         "schema_version": 1,
-        "name": "robocasa365_m6_atomic_seen18_pretrain",
+        "name": f"robocasa365_m6_atomic_seen{len(task_names)}_pretrain",
         "scope": "atomic_only",
         "split": "pretrain",
         "sampling": "natural_proportional",

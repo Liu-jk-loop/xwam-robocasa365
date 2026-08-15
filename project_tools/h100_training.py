@@ -69,7 +69,9 @@ def load_epoch_schedule_from_manifest(
     global_batch_size: int,
     num_train_epochs: int,
     trainer_max_steps: int | None = None,
-) -> dict[str, int | str]:
+    expected_task_count: int = 18,
+    fixed_training_steps: int | None = None,
+) -> dict[str, Any]:
     path = Path(manifest_path).expanduser().resolve()
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("ok") is not True or payload.get("result") != "pass":
@@ -77,31 +79,71 @@ def load_epoch_schedule_from_manifest(
     if payload.get("scope") != "atomic_only" or payload.get("split") != "pretrain":
         raise ValueError(f"M6 manifest 必须是 atomic_only/pretrain：{path}")
     tasks = payload.get("tasks")
-    if not isinstance(tasks, list) or len(tasks) != 18:
-        raise ValueError(f"M6 manifest 必须包含18个任务：{path}")
+    if not isinstance(tasks, list) or len(tasks) != expected_task_count:
+        raise ValueError(
+            f"M6 manifest 必须包含{expected_task_count}个任务：{path}"
+        )
     if payload.get("sampling") != "natural_proportional":
         raise ValueError(f"M6 manifest 必须使用 natural_proportional：{path}")
     task_names = [task.get("task_name") for task in tasks if isinstance(task, dict)]
-    if len(task_names) != 18 or len(set(task_names)) != 18:
-        raise ValueError(f"M6 manifest 必须包含18个唯一任务名：{path}")
+    if len(task_names) != expected_task_count or len(set(task_names)) != expected_task_count:
+        raise ValueError(
+            f"M6 manifest 必须包含{expected_task_count}个唯一任务名：{path}"
+        )
     declared_digest = str(payload.get("manifest_digest", ""))
     if not declared_digest or declared_digest != _manifest_digest(payload):
         raise ValueError(f"M6 manifest 摘要缺失或不匹配：{path}")
-    schedule = resolve_epoch_schedule(
+    epoch_schedule = resolve_epoch_schedule(
         total_samples=int(payload.get("total_valid_clips", 0)),
         global_batch_size=global_batch_size,
         num_train_epochs=num_train_epochs,
-        trainer_max_steps=trainer_max_steps,
+        trainer_max_steps=None if fixed_training_steps is not None else trainer_max_steps,
     )
+    if fixed_training_steps is not None:
+        fixed_training_steps = int(fixed_training_steps)
+        if fixed_training_steps <= 0:
+            raise ValueError("fixed_training_steps 必须为正整数")
+        invocation_steps = (
+            fixed_training_steps
+            if trainer_max_steps is None
+            else int(trainer_max_steps)
+        )
+        if invocation_steps <= 0 or invocation_steps > fixed_training_steps:
+            raise ValueError(
+                "trainer_max_steps 必须大于0且不超过 fixed_training_steps"
+            )
+        schedule = {
+            **epoch_schedule,
+            "schedule_mode": "fixed_steps",
+            "epoch_reference_training_steps": epoch_schedule["num_training_steps"],
+            "fixed_training_steps": fixed_training_steps,
+            "num_training_steps": fixed_training_steps,
+            "trainer_max_steps": invocation_steps,
+            "planned_sample_draws": fixed_training_steps * global_batch_size,
+            "effective_num_train_epochs": fixed_training_steps
+            / int(epoch_schedule["steps_per_epoch"]),
+        }
+    else:
+        schedule = {
+            **epoch_schedule,
+            "schedule_mode": "epochs",
+            "planned_sample_draws": int(epoch_schedule["num_training_steps"])
+            * global_batch_size,
+            "effective_num_train_epochs": float(num_train_epochs),
+        }
     return {
         **schedule,
         "manifest_path": str(path),
         "manifest_digest": declared_digest,
+        "expected_task_count": expected_task_count,
     }
 
 
 def validate_global_stats_contract(
-    stats_path: str | Path, *, manifest_digest: str
+    stats_path: str | Path,
+    *,
+    manifest_digest: str,
+    expected_task_count: int = 18,
 ) -> dict[str, Any]:
     path = Path(stats_path).expanduser().resolve()
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -109,7 +151,7 @@ def validate_global_stats_contract(
         "ok": payload.get("ok") is True and payload.get("result") == "pass",
         "atomic_pretrain": payload.get("scope") == "atomic_only"
         and payload.get("split") == "pretrain",
-        "task_count": int(payload.get("task_count", -1)) == 18,
+        "task_count": int(payload.get("task_count", -1)) == expected_task_count,
         "manifest_digest": payload.get("manifest_digest") == manifest_digest,
         "state_stats": _valid_stats_block(payload.get("observation.state"), 16),
         "action_stats": _valid_stats_block(payload.get("action"), 12),
@@ -158,6 +200,15 @@ def validate_m6_formal_training_contract(
     expected_world_size = int(get("formal_world_size", 4))
     expected_num_nodes = int(get("formal_num_nodes", 1))
     expected_devices_per_node = int(get("formal_devices_per_node", 4))
+    fixed_training_steps = get("formal_fixed_training_steps")
+    if fixed_training_steps is not None:
+        fixed_training_steps = int(fixed_training_steps)
+    formal_schedule_ok = (
+        int(get("num_train_epochs")) == 5
+        if fixed_training_steps is None
+        else fixed_training_steps > 0
+        and int(get("num_training_steps")) == fixed_training_steps
+    )
     checks = {
         "configured_world_size": int(world_size) == expected_world_size,
         "configured_topology": expected_world_size
@@ -175,7 +226,7 @@ def validate_m6_formal_training_contract(
         ),
         "rgb_only": not bool(get("use_depth"))
         and float(get("depth_loss_weight")) == 0.0,
-        "five_epochs": int(get("num_train_epochs")) == 5,
+        "formal_schedule": formal_schedule_ok,
         "natural_sampling": str(get("dataset").get("expected_sampling"))
         == "natural_proportional",
         "full_dataset": get("train_subset_size") is None,
@@ -217,6 +268,7 @@ def validate_m6_formal_training_contract(
         "segment_timing_interval_steps": int(get("segment_timing_interval_steps", 0)),
         "zero_stage": zero_stage,
         "required_zero_stage": required_zero_stage,
+        "fixed_training_steps": fixed_training_steps,
     }
 
 
@@ -231,6 +283,8 @@ def build_m6_preflight_report(
     *,
     global_batch_size: int = 128,
     num_train_epochs: int = 5,
+    expected_task_count: int = 18,
+    fixed_training_steps: int | None = None,
 ) -> dict[str, Any]:
     errors: list[str] = []
     try:
@@ -238,10 +292,13 @@ def build_m6_preflight_report(
             manifest_path,
             global_batch_size=global_batch_size,
             num_train_epochs=num_train_epochs,
+            expected_task_count=expected_task_count,
+            fixed_training_steps=fixed_training_steps,
         )
         stats = validate_global_stats_contract(
             stats_path,
             manifest_digest=str(schedule["manifest_digest"]),
+            expected_task_count=expected_task_count,
         )
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         schedule = None
@@ -632,7 +689,12 @@ def _run_contract(
         "expected_world_size": int(formal_contract.get("world_size", -1))
         == int(expected_world_size),
         "clean_git": bool(git.get("commit")) and git.get("dirty") is False,
-        "five_epoch_schedule": int(training.get("num_train_epochs", -1)) == 5,
+        "formal_schedule": (
+            int(training.get("num_train_epochs", -1)) == 5
+            if training.get("schedule_mode", "epochs") == "epochs"
+            else int(training.get("fixed_training_steps", -1))
+            == int(training.get("num_training_steps", -2))
+        ),
         "global_batch_128": int(training.get("global_batch_size", -1)) == 128,
         "epoch_aligned_sampler": sampler.get("type") == "epoch_aligned_distributed"
         and int(sampler.get("dropped_per_epoch", -1))

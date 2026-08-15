@@ -245,6 +245,13 @@ RoboCasa365 原生数据
 5. 用户用固定 seed 对 Atomic-Seen 18 执行闭环评测，补跑缺失或明确记录失败 rollout。
 6. Codex 汇总 per-task、per-skill、总体指标、延迟和失败类型，明确结果为 atomic-only 设置。
 
+当前诊断分支（Atomic9 ratio0）：
+
+1. 固定与FastWAM评测重叠的9任务清单和用户给定顺序，只读取各任务的`pretrain/atomic`数据；按自然样本比例重新生成独立manifest与16D/12D global stats。
+2. 从公开X-WAM pretrained重新初始化，保持18任务8卡主实验的RGB、seed42、LR、warmup、ZeRO-1和GBS128设置，仅将任务集合缩为9项、`clean_action_ratio`改为0并固定8500 optimizer steps。
+3. preflight记录8500步对应的1,088,000次样本抽取和按真实有效clip折算的epoch数；折算epoch只用于解释训练量，不覆盖停止步数。
+4. 使用独立W&B run、实验目录和8-rank checkpoint训练；完成后使用与现有结果相同的评测seed比较。若要单独估计ratio收益，下一组必须在同一Atomic9数据和8500步设置下只把ratio改回0.5。
+
 验收条件：
 
 - 训练可断点恢复，所有产物记录 Git commit、完整配置和数据清单。

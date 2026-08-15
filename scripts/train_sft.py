@@ -306,10 +306,13 @@ def main():
             global_batch_size=int(config.global_batch_size),
             num_train_epochs=int(config.num_train_epochs),
             trainer_max_steps=config.get("trainer_max_steps"),
+            expected_task_count=int(config.dataset.expected_task_count),
+            fixed_training_steps=config.get("formal_fixed_training_steps"),
         )
         stats_contract = validate_global_stats_contract(
             config.dataset.statistics_path,
             manifest_digest=str(schedule["manifest_digest"]),
+            expected_task_count=int(config.dataset.expected_task_count),
         )
         config.num_training_steps = int(schedule["num_training_steps"])
         config.steps_per_epoch = int(schedule["steps_per_epoch"])

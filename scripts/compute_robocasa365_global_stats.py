@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""从已审计的 Atomic-Seen 18 manifest 精确计算跨任务 q01/q99。"""
+"""从已审计的 atomic manifest 精确计算跨任务 q01/q99。"""
 
 from __future__ import annotations
 
@@ -52,13 +52,14 @@ def main() -> int:
         "--output",
         default="logs/cluster/robocasa365_m6_atomic_seen18_global_stats.json",
     )
+    parser.add_argument("--expected-task-count", type=int, default=18)
     parser.add_argument("--work-dir", help="可选临时 memmap 父目录。")
     args = parser.parse_args()
 
     manifest = load_multitask_dataset_manifest(
         args.manifest,
         atomic_task_manifest=args.task_manifest,
-        expected_task_count=18,
+        expected_task_count=args.expected_task_count,
     )
     if manifest.sampling != "natural_proportional":
         raise ValueError("M6 global stats 只接受 natural_proportional manifest")

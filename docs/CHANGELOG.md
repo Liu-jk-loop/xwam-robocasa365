@@ -1,5 +1,13 @@
 # 变更记录
 
+## 2026-08-15 — Atomic9 ratio0固定8500步正式训练入口
+
+- 冻结与FastWAM评测重叠的9个Atomic任务及用户指定顺序，新增独立task manifest、训练manifest、跨任务global stats和preflight路径；不读取或覆盖Atomic18、CloseFridge A/B的统计量、W&B run或checkpoint。
+- 新实验与18任务正式设置对齐：公开X-WAM pretrained初始化、RGB-only、seed42、LR `1e-5`、warmup200、自然比例采样、8×GH200、单卡batch16、累积1、GBS128、ZeRO-1、BF16计算和FP32 optimizer state；唯一训练超参改为`clean_action_ratio=0.0`并固定8500 optimizer steps。
+- 正式调度合同新增向后兼容的`fixed_steps`模式。原Atomic18仍按5 epoch自动得到16,390步；Atomic9 preflight同时记录8500步、1,088,000次样本抽取及根据真实有效clip折算的epoch数，训练入口不会再用5-epoch计算覆盖8500步。
+- 新增Atomic9数据准备和2节点×4卡训练sbatch。滚动checkpoint仍每500步保留5份，Store永久checkpoint每3000步保存，最终8500步另存；12小时超时后重提同一脚本只恢复本实验最新完整8-rank checkpoint。
+- 本地验收覆盖固定任务顺序、9任务stats/manifest合同、固定步数调度、独立路径、父训练入口旧默认兼容、Python/sbatch语法及文档门禁。真实Atomic9 clip数、折算epoch、global stats、8卡训练和恢复仍为`cluster-pending`。回滚本次变更不会删除任何集群产物；若已开始新实验，外部目录需单独确认后处理。
+
 ## 2026-08-15 — EGL导入物理编号与runtime逻辑编号分阶段切换
 
 - Job `3085601`否定了上一版“旧robosuite会自动把物理`MUJOCO_EGL_DEVICE_ID`映射到逻辑0”的假设：GPU 2 client已通过import断言并连接policy，但在`gym.make`创建offscreen context时明确报告EGL只枚举`0..0`、收到2；X-WAM GPU 3 client同理退出。`robosuite_models`、Mink和mimicgen缺失只是非阻塞warning。
