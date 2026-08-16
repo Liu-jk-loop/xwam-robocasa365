@@ -1285,6 +1285,71 @@ final checkpoint。12小时未完成时，重新提交同一个训练脚本；pl
 model和8个ZeRO-1 optimizer shard都完整的最新checkpoint。不得把实验名、manifest或
 stats改成Atomic18路径后继续同一个W&B run。
 
+## Atomic9 ratio0：step 5500与7000闭环对比
+
+这次评测只在独立eval clone上更新和运行，不要在仍用于训练的
+`src/xwam-robocasa365`中切换分支。先确认step 7000已经完整保存，再更新eval clone：
+
+```bash
+DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
+EVAL_REPO="$DEPLOY_STORE/src/xwam-robocasa365-eval"
+
+cd "$EVAL_REPO"
+git fetch origin
+git switch eval/atomic9-checkpoint-ab
+git pull --ff-only origin eval/atomic9-checkpoint-ab
+test -z "$(git status --porcelain)"
+git rev-parse HEAD
+```
+
+评测脚本会精确解析step 5500和7000；两者都必须含model state与8份ZeRO optimizer
+shard。默认从Atomic9训练的IOPS滚动目录查找。如checkpoint位于其他根目录，提交时用
+`XWAM_ATOMIC9_CHECKPOINT_ROOT`覆盖，但不能手工把5500/7000映射到别的step。
+
+```bash
+CHECKPOINT_ROOT=/iopsstor/scratch/cscs/zjingchen/terry_nys/xwam_run/robocasa365_atomic9_fastwam_overlap_ratio00_rgb_seed42_8gpu/checkpoints
+
+python3 scripts/resolve_robocasa365_eval_checkpoints.py \
+  --checkpoint-root "$CHECKPOINT_ROOT" \
+  --group-step step5500=5500 \
+  --group-step step7000=7000 \
+  --expected-world-size 8 \
+  --output /tmp/xwam_atomic9_55v70_checkpoints.json \
+  --output-env /tmp/xwam_atomic9_55v70_checkpoints.env
+grep -E '"(result|step|checkpoint)"' /tmp/xwam_atomic9_55v70_checkpoints.json
+```
+
+解析报告必须为`ok=true/result=pass`，且两条resolved step分别为5500和7000。随后直接
+提交正式50 episodes/task评测：
+
+```bash
+cd "$EVAL_REPO"
+test -z "$(git status --porcelain)"
+export XWAM_EVAL_ID=atomic9_ratio00_step5500_vs_step7000_seed42_50ep
+export XWAM_EVAL_EPISODES=50
+export XWAM_ATOMIC9_CHECKPOINT_ROOT="$CHECKPOINT_ROOT"
+sbatch deployment/clariden/eval_atomic9_step5500_vs_step7000_xwam.sbatch
+```
+
+固定资源映射为GPU 0/1加载step 5500，GPU 2/3加载step 7000；每卡两个server、每个
+server两个client。两个checkpoint组各自完整覆盖9任务，唯一双任务client在各组内均按
+`PickPlaceSinkToCounter → OpenDrawer`串行执行。两个任务是上次18任务X-WAM结果中、
+属于当前Atomic9集合的最高两项；不属于Atomic9的`PickPlaceCounterToStove`不会加入。
+
+结果与日志均在IOPS，不提交Git：
+
+```bash
+EVAL_ROOT=/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/atomic9-checkpoint-ab/$XWAM_EVAL_ID
+test -s "$EVAL_ROOT/logs/checkpoint-resolution.json"
+test -s "$EVAL_ROOT/comparison.json"
+test -s "$EVAL_ROOT/summary_atomic9_step5500_vs_step7000.csv"
+grep -E '"(ok|result|macro_success_rate|macro_success_rate_delta)"' "$EVAL_ROOT/comparison.json"
+```
+
+只有`comparison.json`为`ok=true/result=pass`，且`step5500`、`step7000`各自收齐9任务
+×50 episodes，才完成本轮对比。中断后使用完全相同的eval ID重提会跳过已完成seed；
+checkpoint、代码commit、topology、manifest、统计或episode数变化时不可变合同会拒绝混跑。
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：

@@ -251,6 +251,7 @@ RoboCasa365 原生数据
 2. 从公开X-WAM pretrained重新初始化，保持18任务8卡主实验的RGB、seed42、LR、warmup、ZeRO-1和GBS128设置，仅将任务集合缩为9项、`clean_action_ratio`改为0并固定8500 optimizer steps。
 3. preflight记录8500步对应的1,088,000次样本抽取和按真实有效clip折算的epoch数；折算epoch只用于解释训练量，不覆盖停止步数。
 4. 使用独立W&B run、实验目录和8-rank checkpoint训练；完成后使用与现有结果相同的评测seed比较。若要单独估计ratio收益，下一组必须在同一Atomic9数据和8500步设置下只把ratio改回0.5。
+5. 训练进行到step 7000后，在独立eval clone比较step 5500与7000：每个checkpoint使用2张GPU、4个server、8个client，分别完整覆盖同一Atomic9任务集；两个组使用完全一致的seed与推理合同。当前训练实际停止目标改为step 7500，不改变本次5500/7000评测点。
 
 验收条件：
 

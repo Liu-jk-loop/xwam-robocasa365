@@ -377,6 +377,7 @@ def _load_completed_episodes(
     task: str,
     topology: dict[str, Any],
     expected_episodes: int,
+    comparison_group: str | None = None,
 ) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
@@ -396,6 +397,11 @@ def _load_completed_episodes(
                 f"已有{task} result与本次配置不一致：{key} "
                 f"expected={value!r} actual={payload.get(key)!r}"
             )
+    if comparison_group is not None and payload.get("comparison_group") != comparison_group:
+        raise BenchmarkContractError(
+            f"已有{task} result comparison_group漂移："
+            f"expected={comparison_group!r} actual={payload.get('comparison_group')!r}"
+        )
     episodes = payload.get("episodes")
     if not isinstance(episodes, list):
         raise BenchmarkContractError(f"已有{task} result缺少episodes")
@@ -427,6 +433,7 @@ def _write_task_result(
             "task": task_entry["name"],
             "client_id": client["client_id"],
             "server_id": client["server_id"],
+            "comparison_group": client.get("comparison_group"),
             "split": topology["scene"]["split"],
             "seed_start": topology["seed_start"],
             "model_seed": topology["model_seed"],
@@ -486,6 +493,7 @@ def main() -> int:
                 task=task,
                 topology=topology,
                 expected_episodes=expected_episodes,
+                comparison_group=client.get("comparison_group"),
             )
             if len(episodes) == expected_episodes:
                 print(f"[SKIP] task complete: {task}", flush=True)

@@ -26,8 +26,11 @@ def load_m6_evaluation_topology(
 ) -> dict[str, Any]:
     resolved_path, payload = _read_json(path)
     root = Path(repo_root).resolve()
-    if payload.get("schema_version") != 1 or payload.get("scope") != "atomic_only":
-        raise BenchmarkContractError("M6 topology 必须为 schema_version=1/scope=atomic_only")
+    schema_version = int(payload.get("schema_version", -1))
+    if schema_version not in {1, 2} or payload.get("scope") != "atomic_only":
+        raise BenchmarkContractError(
+            "M6 topology 必须为 schema_version=1|2/scope=atomic_only"
+        )
     task_manifest_path = root / str(payload.get("task_manifest", ""))
     task_manifest = load_atomic_task_manifest(task_manifest_path)
     expected_tasks = set(task_manifest["tasks"])
@@ -51,6 +54,60 @@ def load_m6_evaluation_topology(
     if timeout <= 0 or cfg < 0:
         raise BenchmarkContractError("M6 topology timeout/cfg 非法")
 
+    comparison_groups: dict[str, dict[str, Any]] = {}
+    if schema_version == 2:
+        raw_groups = payload.get("comparison_groups")
+        if not isinstance(raw_groups, dict) or len(raw_groups) != 2:
+            raise BenchmarkContractError("schema v2 topology必须包含两个comparison group")
+        for group_name, raw_group in raw_groups.items():
+            if not isinstance(group_name, str) or not group_name:
+                raise BenchmarkContractError("comparison group名称必须为非空字符串")
+            if not isinstance(raw_group, dict):
+                raise BenchmarkContractError(f"comparison group非法：{group_name}")
+            try:
+                checkpoint_step = int(raw_group["checkpoint_step"])
+                gpus = [int(value) for value in raw_group["gpus"]]
+                server_ids = [int(value) for value in raw_group["server_ids"]]
+                client_ids = [int(value) for value in raw_group["client_ids"]]
+            except (KeyError, TypeError, ValueError) as exc:
+                raise BenchmarkContractError(
+                    f"comparison group字段非法：{group_name}"
+                ) from exc
+            if checkpoint_step <= 0:
+                raise BenchmarkContractError("comparison checkpoint step必须为正")
+            if len(gpus) != 2 or len(set(gpus)) != 2:
+                raise BenchmarkContractError("每个comparison group必须独占两张GPU")
+            if len(server_ids) != 4 or len(set(server_ids)) != 4:
+                raise BenchmarkContractError("每个comparison group必须包含四个server")
+            if len(client_ids) != 8 or len(set(client_ids)) != 8:
+                raise BenchmarkContractError("每个comparison group必须包含八个client")
+            comparison_groups[group_name] = {
+                **raw_group,
+                "checkpoint_step": checkpoint_step,
+                "gpus": gpus,
+                "server_ids": server_ids,
+                "client_ids": client_ids,
+            }
+        all_group_gpus = [
+            gpu for group in comparison_groups.values() for gpu in group["gpus"]
+        ]
+        all_group_servers = [
+            server_id
+            for group in comparison_groups.values()
+            for server_id in group["server_ids"]
+        ]
+        all_group_clients = [
+            client_id
+            for group in comparison_groups.values()
+            for client_id in group["client_ids"]
+        ]
+        if sorted(all_group_gpus) != list(range(4)):
+            raise BenchmarkContractError("两个comparison group必须恰好覆盖GPU 0..3")
+        if sorted(all_group_servers) != list(range(8)):
+            raise BenchmarkContractError("两个comparison group必须恰好覆盖server 0..7")
+        if sorted(all_group_clients) != list(range(16)):
+            raise BenchmarkContractError("两个comparison group必须恰好覆盖client 0..15")
+
     raw_servers = payload.get("servers")
     raw_clients = payload.get("clients")
     if not isinstance(raw_servers, list) or len(raw_servers) != 8:
@@ -58,7 +115,7 @@ def load_m6_evaluation_topology(
     if not isinstance(raw_clients, list) or len(raw_clients) != 16:
         raise BenchmarkContractError("M6 topology 必须恰好包含 16 个 client")
 
-    servers: dict[int, dict[str, int]] = {}
+    servers: dict[int, dict[str, Any]] = {}
     ports: set[int] = set()
     gpu_counts: Counter[int] = Counter()
     for raw in raw_servers:
@@ -79,6 +136,19 @@ def load_m6_evaluation_topology(
             raise BenchmarkContractError(f"server port 非法：{raw}")
         if frontend in ports or backend in ports:
             raise BenchmarkContractError(f"server port 重复：{raw}")
+        comparison_group = raw.get("comparison_group")
+        if schema_version == 2:
+            if comparison_group not in comparison_groups:
+                raise BenchmarkContractError(
+                    f"server comparison group非法：{raw}"
+                )
+            group = comparison_groups[str(comparison_group)]
+            if server_id not in group["server_ids"] or gpu not in group["gpus"]:
+                raise BenchmarkContractError(
+                    f"server不属于声明的comparison group资源：{raw}"
+                )
+        elif comparison_group is not None:
+            raise BenchmarkContractError("schema v1 server不能声明comparison group")
         ports.update((frontend, backend))
         gpu_counts[gpu] += 1
         servers[server_id] = {
@@ -86,6 +156,7 @@ def load_m6_evaluation_topology(
             "gpu": gpu,
             "frontend_port": frontend,
             "backend_port": backend,
+            "comparison_group": comparison_group,
         }
     if set(servers) != set(range(8)) or gpu_counts != Counter({0: 2, 1: 2, 2: 2, 3: 2}):
         raise BenchmarkContractError("M6 topology 必须为每张 GPU 两个 server")
@@ -105,6 +176,22 @@ def load_m6_evaluation_topology(
             raise BenchmarkContractError(f"client_id 必须唯一且位于0..15：{client_id}")
         if server_id not in servers:
             raise BenchmarkContractError(f"client 引用了未知 server：{server_id}")
+        comparison_group = raw.get("comparison_group")
+        if schema_version == 2:
+            if comparison_group not in comparison_groups:
+                raise BenchmarkContractError(
+                    f"client comparison group非法：{raw}"
+                )
+            group = comparison_groups[str(comparison_group)]
+            if (
+                client_id not in group["client_ids"]
+                or servers[server_id]["comparison_group"] != comparison_group
+            ):
+                raise BenchmarkContractError(
+                    f"client与server不属于同一comparison group：{raw}"
+                )
+        elif comparison_group is not None:
+            raise BenchmarkContractError("schema v1 client不能声明comparison group")
         raw_tasks = raw.get("tasks")
         if not isinstance(raw_tasks, list) or len(raw_tasks) not in {1, 2}:
             raise BenchmarkContractError("每个 client 必须串行执行 1 或 2 个任务")
@@ -116,18 +203,53 @@ def load_m6_evaluation_topology(
             reference = float(task_entry["fastwam_reference_success_percent"])
             if reference < 0 or reference > 100:
                 raise BenchmarkContractError(f"FastWAM reference success 非法：{task_entry}")
-            task_entries.append({"name": name, "fastwam_reference_success_percent": reference})
+            historical_xwam = task_entry.get("historical_xwam_success_percent")
+            if historical_xwam is not None:
+                historical_xwam = float(historical_xwam)
+                if historical_xwam < 0 or historical_xwam > 100:
+                    raise BenchmarkContractError(
+                        f"historical X-WAM success非法：{task_entry}"
+                    )
+            task_entries.append(
+                {
+                    "name": name,
+                    "fastwam_reference_success_percent": reference,
+                    "historical_xwam_success_percent": historical_xwam,
+                }
+            )
             assigned_tasks.append(name)
         server_client_counts[server_id] += 1
         clients[client_id] = {
             "client_id": client_id,
             "server_id": server_id,
             "tasks": task_entries,
+            "comparison_group": comparison_group,
         }
     if set(clients) != set(range(16)) or server_client_counts != Counter({i: 2 for i in range(8)}):
         raise BenchmarkContractError("M6 topology 必须为每个 server 两个 client")
-    if len(assigned_tasks) != 18 or set(assigned_tasks) != expected_tasks or len(set(assigned_tasks)) != 18:
-        raise BenchmarkContractError("M6 topology 必须不重不漏地覆盖 Atomic-Seen 18")
+    if schema_version == 1:
+        if (
+            len(assigned_tasks) != len(expected_tasks)
+            or set(assigned_tasks) != expected_tasks
+            or len(set(assigned_tasks)) != len(expected_tasks)
+        ):
+            raise BenchmarkContractError("M6 topology 必须不重不漏地覆盖任务清单")
+    else:
+        for group_name in comparison_groups:
+            group_tasks = [
+                task["name"]
+                for client in clients.values()
+                if client["comparison_group"] == group_name
+                for task in client["tasks"]
+            ]
+            if (
+                len(group_tasks) != len(expected_tasks)
+                or set(group_tasks) != expected_tasks
+                or len(set(group_tasks)) != len(expected_tasks)
+            ):
+                raise BenchmarkContractError(
+                    f"comparison group {group_name}必须各自不重不漏覆盖任务清单"
+                )
 
     resolved = dict(payload)
     resolved.update(
@@ -142,6 +264,7 @@ def load_m6_evaluation_topology(
         cfg=cfg,
         servers=servers,
         clients=clients,
+        comparison_groups=comparison_groups,
         resolved_path=str(resolved_path),
         resolved_task_manifest=str(task_manifest_path.resolve()),
         task_horizons={task: int(task_manifest["horizons"][task]) for task in expected_tasks},

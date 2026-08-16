@@ -93,6 +93,13 @@ The X-WAM backbone should consume validated tensors and remain free of dataset-p
 - 每个环境step把三路原始RGB拼成一帧并直接流式编码20 FPS MP4，跑满1000步的失败episode约50秒；不持久化PNG帧。正式评测目录固定为IOPS的`x-wam-eval/atomic18/<eval ID>`，仅组织为`logs/`、`results/<Task>/videos`、task result及根目录JSON/CSV汇总；policy server正式模式不写逐request journal，也不把全部成功request嵌入状态JSON。Capstor/Store不承载推理结果。
 - 在加载八份policy模型前，独立simulator probe必须确认RoboCasa/robosuite实际import路径位于上述Store根目录，并检查已知正式场景资产`Sink025/model.xml`非空；两份源码commit与asset hash进入eval不可变合同。当前RoboCasa EDF经FastWAM验证只枚举单一EGL设备，因此16个simulator client均固定EGL device 0；这不改变policy server的0/1/2/3 GPU映射。
 
+#### Atomic9 checkpoint同合同对比
+
+- Topology schema v2把8个server和16个client划成两个不可交叉的comparison group。`step5500`只绑定GPU 0/1、server 0～3和client 0～7；`step7000`只绑定GPU 2/3、server 4～7和client 8～15。每个server仍固定两个client，每组独立且恰好覆盖相同Atomic9任务一次。
+- 每个group由命令行显式绑定一个完整DeepSpeed checkpoint，policy pool按server所属group选择权重。启动前的解析器要求global step精确相等、model state存在且8份ZeRO optimizer shard齐全；它不会把“最近checkpoint”当作目标step。
+- Client输出根按group隔离，task result同时记录comparison group；恢复时group不一致立即拒绝。最终聚合分别验证两组相同seed和推理合同，在此基础上计算各组成功率与`step7000-step5500`逐任务/macro差值。外层不可变合同冻结两条checkpoint真实路径、代码与模拟器commit、topology、manifest、统计和episode数。
+- 本对比使用独立eval clone及分支。它只读取训练产生的checkpoint，不写训练实验目录，也不要求正在训练的工作区切换commit。
+
 ## Model initialization
 
 Two modes remain supported:

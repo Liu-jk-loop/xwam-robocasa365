@@ -71,11 +71,29 @@ def _wait_server_ready(
     raise TimeoutError(f"policy server READY timeout：{report_path}")
 
 
+def _parse_group_checkpoints(values: list[str]) -> dict[str, str]:
+    checkpoints: dict[str, str] = {}
+    for value in values:
+        group, separator, path = value.partition("=")
+        if not separator or not group or not path:
+            raise ValueError("--group-checkpoint必须为GROUP=/absolute/checkpoint")
+        if group in checkpoints:
+            raise ValueError(f"重复的checkpoint group：{group}")
+        checkpoints[group] = path
+    return checkpoints
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--topology", required=True)
     parser.add_argument("--experiment-dir", required=True)
-    parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--checkpoint")
+    parser.add_argument(
+        "--group-checkpoint",
+        action="append",
+        default=[],
+        help="schema v2比较拓扑使用GROUP=/absolute/checkpoint；每组传一次。",
+    )
     parser.add_argument("--wan-checkpoint-dir", required=True)
     parser.add_argument("--multitask-manifest")
     parser.add_argument("--statistics-path")
@@ -105,6 +123,10 @@ def _parse_args() -> argparse.Namespace:
         help="只启动指定server；可重复。默认启动0..7。",
     )
     args = parser.parse_args()
+    try:
+        args.group_checkpoints = _parse_group_checkpoints(args.group_checkpoint)
+    except ValueError as exc:
+        parser.error(str(exc))
     if args.startup_timeout_seconds <= 0:
         parser.error("startup timeout 必须为正")
     if args.server_ids is not None:
@@ -132,6 +154,21 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     topology = load_m6_evaluation_topology(args.topology, REPO_ROOT)
+    comparison_groups = set(topology.get("comparison_groups", {}))
+    if comparison_groups:
+        if args.checkpoint is not None:
+            raise ValueError("schema v2比较拓扑不能使用单一--checkpoint")
+        if set(args.group_checkpoints) != comparison_groups:
+            raise ValueError(
+                "schema v2必须为每个comparison group提供checkpoint："
+                f"expected={sorted(comparison_groups)}, "
+                f"actual={sorted(args.group_checkpoints)}"
+            )
+    else:
+        if not args.checkpoint:
+            raise ValueError("schema v1 topology必须提供--checkpoint")
+        if args.group_checkpoints:
+            raise ValueError("schema v1 topology不能使用--group-checkpoint")
     server_ids = sorted(args.server_ids or range(8))
     log_root = Path(args.log_root).expanduser().resolve()
     server_root = log_root / "servers"
@@ -183,6 +220,12 @@ def main() -> int:
         for server_id in server_ids:
             server = topology["servers"][server_id]
             assigned_tasks = tasks_for_server(topology, server_id)
+            comparison_group = server.get("comparison_group")
+            checkpoint = (
+                args.group_checkpoints[str(comparison_group)]
+                if comparison_group is not None
+                else args.checkpoint
+            )
             if args.single_task_checkpoint:
                 if args.single_task_name not in assigned_tasks:
                     raise ValueError(
@@ -201,7 +244,7 @@ def main() -> int:
                 "--experiment-dir",
                 args.experiment_dir,
                 "--checkpoint",
-                args.checkpoint,
+                checkpoint,
                 "--wan-checkpoint-dir",
                 args.wan_checkpoint_dir,
                 "--broker-port",
@@ -254,6 +297,7 @@ def main() -> int:
                     "server_id": server_id,
                     "gpu": cuda_device,
                     "tasks": assigned_tasks,
+                    "comparison_group": comparison_group,
                     "report": str(report_path),
                     "checkpoint": report["checkpoint"],
                     "model_seed": report["model_seed"],
@@ -272,7 +316,15 @@ def main() -> int:
                 "ok": True,
                 "topology": topology["name"],
                 "model_seed": topology["model_seed"],
-                "checkpoint": str(Path(args.checkpoint).expanduser().resolve()),
+                "checkpoint": (
+                    str(Path(args.checkpoint).expanduser().resolve())
+                    if args.checkpoint is not None
+                    else None
+                ),
+                "group_checkpoints": {
+                    group: str(Path(path).expanduser().resolve())
+                    for group, path in sorted(args.group_checkpoints.items())
+                },
                 "server_ids": server_ids,
                 "servers": server_reports,
                 "created_at_utc": datetime.now(timezone.utc).isoformat(),

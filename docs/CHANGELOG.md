@@ -1,5 +1,13 @@
 # 变更记录
 
+## 2026-08-16 — Atomic9 step 5500/7000 同合同闭环对比
+
+- 新增独立评测分支 `eval/atomic9-checkpoint-ab` 的 Atomic9 对比入口，不切换或修改正在训练的 `dev/atomic-robocasa365` 工作区。单节点4卡固定启动8个policy server和16个simulator client：GPU 0/1上的4个server严格加载step 5500，GPU 2/3上的4个server严格加载step 7000；每server绑定两个client，不跨组动态路由。
+- 两个checkpoint组各自完整且仅一次覆盖同一组9任务，并使用相同的模型seed、环境seed、episode数、target split、horizon、replan和去噪设置。每组唯一的双任务client串行评测 `PickPlaceSinkToCounter` 与 `OpenDrawer`：它们是既属于本次Atomic9、又在上次X-WAM 18任务结果中成功率最高的两项（54%与30%）；全18任务第二名 `PickPlaceCounterToStove` 不属于本次训练集，因此不混入评测。
+- Topology schema v2显式冻结comparison group、checkpoint step、GPU/server/client映射；schema v1的既有18任务评测保持兼容。policy pool按group加载checkpoint，client结果按`results/step5500`和`results/step7000`物理隔离，结果文件同时记录group，避免恢复或重提时交叉复用。
+- 新增精确checkpoint解析门禁，只接受global step完全等于5500/7000且包含model state与8份ZeRO optimizer shard的目录；缺失、不完整或误选最近checkpoint会在加载模型前退出。最终聚合分别给出两组9任务macro/micro成功率、逐任务差值及总macro差值，并保留checkpoint解析报告和不可变评测合同。
+- 本地dependency-light单元测试、Python编译、Ruff、JSON及sbatch语法通过；真实8模型并发加载、16个EGL client、50 episodes/task及最终对比仍为`cluster-pending`。回滚本次分支不会影响训练仓库、checkpoint或既有评测结果。
+
 ## 2026-08-15 — Atomic9 ratio0固定8500步正式训练入口
 
 - 冻结与FastWAM评测重叠的9个Atomic任务及用户指定顺序，新增独立task manifest、训练manifest、跨任务global stats和preflight路径；不读取或覆盖Atomic18、CloseFridge A/B的统计量、W&B run或checkpoint。

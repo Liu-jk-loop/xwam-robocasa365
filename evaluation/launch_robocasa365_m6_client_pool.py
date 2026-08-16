@@ -75,6 +75,12 @@ def main() -> int:
     try:
         for client_id in client_ids:
             client = topology["clients"][client_id]
+            comparison_group = client.get("comparison_group")
+            client_output_root = (
+                output_root / str(comparison_group)
+                if comparison_group is not None
+                else output_root
+            )
             log_handle = (log_root / f"client_{client_id:02d}.log").open(
                 "a", encoding="utf-8"
             )
@@ -87,7 +93,7 @@ def main() -> int:
                 "--client-id",
                 str(client_id),
                 "--output-root",
-                str(output_root),
+                str(client_output_root),
             ]
             if args.episodes_per_task is not None:
                 command.extend(
@@ -118,6 +124,7 @@ def main() -> int:
                 f"[START] client={client_id} server={client['server_id']} "
                 f"cuda_visible={args.cuda_visible_devices} "
                 f"mujoco_egl_import={physical_egl_device} egl_runtime=0 "
+                f"group={comparison_group} "
                 f"tasks={[row['name'] for row in client['tasks']]}",
                 flush=True,
             )
