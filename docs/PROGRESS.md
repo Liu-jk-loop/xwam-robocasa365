@@ -1,13 +1,13 @@
 # 项目进度
 
-更新时间：2026-08-15
+更新时间：2026-08-16
 
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：Clariden 迁移——独立 X-WAM aarch64/GH200 policy 容器部署
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；18任务8卡训练和评测已完成首轮，CloseFridge单任务固定seed评测中ratio05约58%、ratio00约66%，均明显高于18任务联合训练。下一轮已冻结为与FastWAM重叠的Atomic9、`clean_action_ratio=0`、GBS128、固定8500步；独立manifest/global stats/preflight及8×GH200训练入口已就绪，真实数据预检与训练为`cluster-pending`。
+- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；18任务和CloseFridge单任务评测已完成。Atomic9 ratio0训练已到step 7500，step 5500/7000闭环成功率为46.9%/50.9%，step 6500/7500准备补测；Atomic9 ratio0.5严格对照入口已就绪，真实preflight、训练和评测为`cluster-pending`。
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
-| M6 Atomic 正式训练与评测 | 18任务首轮和CloseFridge A/B完成；进入Atomic9 ratio0 | 9任务独立配置与8500步入口已实现，集群未运行 | 先生成Atomic9 manifest/stats并核对折算epoch，再启动8×GH200正式训练 |
+| M6 Atomic 正式训练与评测 | Atomic9 ratio0训练完成并进入checkpoint比较；准备ratio0.5对照 | ratio0 step 5500/7000为46.9%/50.9%；ratio0.5复用8500步scheduler并在7500停止 | 补测ratio0 step 6500/7500，并完成同合同ratio0.5训练与评测 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
 ## Clariden 部署状态

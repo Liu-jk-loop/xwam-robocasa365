@@ -1285,6 +1285,45 @@ final checkpoint。12小时未完成时，重新提交同一个训练脚本；pl
 model和8个ZeRO-1 optimizer shard都完整的最新checkpoint。不得把实验名、manifest或
 stats改成Atomic18路径后继续同一个W&B run。
 
+## Atomic9 ratio0.5：同scheduler、7500步严格对照训练
+
+该对照只改变`clean_action_ratio`和与之隔离所必需的实验身份。模型配置继续使用ratio0
+相同的8500步scheduler，使前7500步学习率轨迹一致；外层作业目标固定为7500，与ratio0
+已有训练范围对齐。任务清单、global stats、seed42、8×GH200、GBS128、warmup、采样顺序
+和checkpoint频率均复用ratio0合同，但不会恢复ratio0 checkpoint。
+
+先生成独立preflight。该步骤只审计已冻结的ratio0 manifest/global stats，不重新计算统计量：
+
+```bash
+DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
+REPO="$DEPLOY_STORE/src/xwam-robocasa365"
+
+cd "$REPO"
+git switch dev/atomic-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+test -z "$(git status --porcelain)"
+
+sbatch deployment/clariden/prepare_atomic9_ratio05_preflight_xwam.sbatch
+```
+
+预检完成后确认scheduler合同仍为8500步，再提交目标为7500步的训练：
+
+```bash
+PREFLIGHT="$DEPLOY_STORE/manifests/xwam/atomic9_ratio05/robocasa365_atomic9_ratio05_gh200_preflight.json"
+test -s "$PREFLIGHT"
+grep -E '"(result|expected_task_count|fixed_training_steps|planned_sample_draws|effective_num_train_epochs)"' "$PREFLIGHT"
+
+cd "$REPO"
+test -z "$(git status --porcelain)"
+test -n "${WANDB_API_KEY:-}"
+sbatch deployment/clariden/train_atomic9_ratio05_xwam_8gpu.sbatch
+```
+
+验收必须包含`result=pass`、`expected_task_count=9`、`fixed_training_steps=8500`和
+`planned_sample_draws=1088000`；训练作业日志中的`total_steps`应为7500。ratio0.5实验目录固定为
+`robocasa365_atomic9_fastwam_overlap_ratio05_rgb_seed42_8gpu`；若planner显示从任何ratio0
+目录恢复，应立即停止作业并检查提交分支和环境变量。
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：

@@ -1,5 +1,12 @@
 # 变更记录
 
+## 2026-08-16 — Atomic9 ratio0.5严格对照训练
+
+- 新增Atomic9 `clean_action_ratio=0.5`训练配置和8×GH200入口，其任务清单、global stats、公开pretrained初始化、seed42、LR、warmup、8500步scheduler、自然比例采样、GBS128、ZeRO-1、BF16、checkpoint频率及W&B group与ratio0保持一致；作业目标在7500停止，以便直接对齐已完成的ratio0 step 7500且不改变前7500步学习率轨迹。
+- ratio0.5使用独立实验名、W&B run、IOPS滚动checkpoint、Store最终checkpoint及文件锁，不能从ratio0 checkpoint恢复。仅复用ratio0已经冻结且通过审计的Atomic9 manifest/global stats，避免重新统计数据引入第二个变量；独立preflight继续记录相同的8500步scheduler合同，外层planner固定本轮7500停止点。
+- ratio0现有step 5500/7000闭环成功率为46.9%/50.9%，但任务数与`clean_action_ratio`同时相对Atomic18发生变化，尚不能把提升单独归因于ratio。新增对照用于隔离监督密度影响；真实ratio0.5 preflight、训练和闭环结果为`cluster-pending`。
+- 本地验收覆盖两份实验配置除ratio和实验身份之外保持一致，训练/预检路径隔离、8500步scheduler/7500步作业目标和既有Atomic9门禁。回滚本次修改只移除ratio0.5入口，不删除任何集群产物。
+
 ## 2026-08-15 — Atomic9 ratio0固定8500步正式训练入口
 
 - 冻结与FastWAM评测重叠的9个Atomic任务及用户指定顺序，新增独立task manifest、训练manifest、跨任务global stats和preflight路径；不读取或覆盖Atomic18、CloseFridge A/B的统计量、W&B run或checkpoint。

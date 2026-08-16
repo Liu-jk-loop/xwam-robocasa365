@@ -159,6 +159,59 @@ class Atomic9Ratio00TrainingTest(unittest.TestCase):
         ):
             self.assertIn(expected, parent)
 
+    def test_ratio05_control_changes_only_ratio_identity_and_stop_step(self) -> None:
+        ratio00_path = (
+            REPO_ROOT
+            / "configs/experiment/robocasa365_atomic9_ratio00_gh200_rgb.yaml"
+        )
+        ratio05_path = (
+            REPO_ROOT
+            / "configs/experiment/robocasa365_atomic9_ratio05_gh200_rgb.yaml"
+        )
+        ratio00 = ratio00_path.read_text(encoding="utf-8")
+        ratio05 = ratio05_path.read_text(encoding="utf-8")
+        self.assertIn("clean_action_ratio: 0.0", ratio00)
+        self.assertIn("clean_action_ratio: 0.5", ratio05)
+        self.assertIn("formal_fixed_training_steps: 8500", ratio05)
+
+        ignored_keys = {
+            "exp_name",
+            "clean_action_ratio",
+            "wandb_name",
+        }
+
+        def normalized(text: str) -> list[str]:
+            return [
+                line
+                for line in text.rstrip().splitlines()
+                if not line.startswith("# Atomic9正式对照")
+                and line.partition(":")[0] not in ignored_keys
+            ]
+
+        self.assertEqual(normalized(ratio00), normalized(ratio05))
+
+        wrapper = (
+            REPO_ROOT
+            / "deployment/clariden/train_atomic9_ratio05_xwam_8gpu.sbatch"
+        ).read_text(encoding="utf-8")
+        for expected in (
+            "XWAM_M6_TOTAL_STEPS=7500",
+            "gh200x8_96gb_gbs128.yaml",
+            "robocasa365_atomic9_ratio05_gh200_rgb.yaml",
+            "robocasa365_atomic9_fastwam_overlap_ratio05_rgb_seed42_8gpu",
+            'RATIO00_EVIDENCE="$DEPLOY_STORE/manifests/xwam/atomic9_ratio00"',
+            'RATIO05_EVIDENCE="$DEPLOY_STORE/manifests/xwam/atomic9_ratio05"',
+        ):
+            self.assertIn(expected, wrapper)
+
+        preflight = (
+            REPO_ROOT
+            / "deployment/clariden/prepare_atomic9_ratio05_preflight_xwam.sbatch"
+        ).read_text(encoding="utf-8")
+        self.assertIn("--fixed-training-steps 8500", preflight)
+        self.assertIn("--expected-task-count 9", preflight)
+        self.assertNotIn("compute_robocasa365_global_stats.py", preflight)
+
 
 if __name__ == "__main__":
     unittest.main()
