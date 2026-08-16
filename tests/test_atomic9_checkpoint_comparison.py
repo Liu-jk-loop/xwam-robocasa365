@@ -25,6 +25,10 @@ TOPOLOGY = (
     REPO_ROOT
     / "configs/evaluation/robocasa365_atomic9_step5500_vs_step7000_8server_16client.json"
 )
+TOPOLOGY_65V75 = (
+    REPO_ROOT
+    / "configs/evaluation/robocasa365_atomic9_step6500_vs_step7500_8server_16client.json"
+)
 ATOMIC9 = {
     "OpenStandMixerHead",
     "PickPlaceSinkToCounter",
@@ -204,6 +208,44 @@ class Atomic9CheckpointComparisonTest(unittest.TestCase):
             "--group-step step7000=7000",
             'checkpoint_step5500=$CHECKPOINT_5500 gpus=0,1',
             'checkpoint_step7000=$CHECKPOINT_7000 gpus=2,3',
+        ):
+            self.assertIn(expected, script)
+        self.assertNotIn('REPO="$DEPLOY_STORE/src/xwam-robocasa365"', script)
+
+    def test_step6500_vs_step7500_reuses_the_matched_contract(self) -> None:
+        topology = load_m6_evaluation_topology(TOPOLOGY_65V75, REPO_ROOT)
+        self.assertEqual(
+            {
+                name: group["checkpoint_step"]
+                for name, group in topology["comparison_groups"].items()
+            },
+            {"step6500": 6500, "step7500": 7500},
+        )
+        for group_name in ("step6500", "step7500"):
+            assigned = [
+                task["name"]
+                for client in topology["clients"].values()
+                if client["comparison_group"] == group_name
+                for task in client["tasks"]
+            ]
+            self.assertEqual(set(assigned), ATOMIC9)
+            self.assertEqual(len(assigned), 9)
+        self.assertEqual(topology["model_seed"], 42)
+        self.assertEqual(topology["seed_start"], 42)
+        self.assertEqual(topology["episodes_per_task"], 50)
+        self.assertEqual(topology["replan_steps"], 20)
+
+        script = (
+            REPO_ROOT
+            / "deployment/clariden/eval_atomic9_step6500_vs_step7500_xwam.sbatch"
+        ).read_text(encoding="utf-8")
+        for expected in (
+            'REPO="$DEPLOY_STORE/src/xwam-robocasa365-eval"',
+            "eval/atomic9-checkpoint-ab",
+            "--group-step step6500=6500",
+            "--group-step step7500=7500",
+            'checkpoint_step6500=$CHECKPOINT_6500 gpus=0,1',
+            'checkpoint_step7500=$CHECKPOINT_7500 gpus=2,3',
         ):
             self.assertIn(expected, script)
         self.assertNotIn('REPO="$DEPLOY_STORE/src/xwam-robocasa365"', script)

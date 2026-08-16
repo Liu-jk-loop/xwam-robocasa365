@@ -99,6 +99,7 @@ The X-WAM backbone should consume validated tensors and remain free of dataset-p
 - 每个group由命令行显式绑定一个完整DeepSpeed checkpoint，policy pool按server所属group选择权重。启动前的解析器要求global step精确相等、model state存在且8份ZeRO optimizer shard齐全；它不会把“最近checkpoint”当作目标step。
 - Client输出根按group隔离，task result同时记录comparison group；恢复时group不一致立即拒绝。最终聚合分别验证两组相同seed和推理合同，在此基础上计算各组成功率与`step7000-step5500`逐任务/macro差值。外层不可变合同冻结两条checkpoint真实路径、代码与模拟器commit、topology、manifest、统计和episode数。
 - 本对比使用独立eval clone及分支。它只读取训练产生的checkpoint，不写训练实验目录，也不要求正在训练的工作区切换commit。
+- step 6500/7500补测复用同一schema v2布局与评测合同，但使用独立topology、eval ID、锁和结果根；GPU 0/1绑定6500，GPU 2/3绑定7500。既有5500/7000结果不会被覆盖或作为恢复输入。
 
 ## Model initialization
 

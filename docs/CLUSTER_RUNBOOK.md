@@ -1350,6 +1350,57 @@ grep -E '"(ok|result|macro_success_rate|macro_success_rate_delta)"' "$EVAL_ROOT/
 ×50 episodes，才完成本轮对比。中断后使用完全相同的eval ID重提会跳过已完成seed；
 checkpoint、代码commit、topology、manifest、统计或episode数变化时不可变合同会拒绝混跑。
 
+## Atomic9 ratio0：step 6500与7500补充闭环对比
+
+该补测继续使用独立eval clone和与5500/7000完全相同的评测合同，但写入新的eval ID，
+不会读取或覆盖上一轮task result。先精确检查两份8-rank checkpoint：
+
+```bash
+DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
+EVAL_REPO="$DEPLOY_STORE/src/xwam-robocasa365-eval"
+CHECKPOINT_ROOT=/iopsstor/scratch/cscs/zjingchen/terry_nys/xwam_run/robocasa365_atomic9_fastwam_overlap_ratio00_rgb_seed42_8gpu/checkpoints
+
+cd "$EVAL_REPO"
+git fetch origin
+git switch eval/atomic9-checkpoint-ab
+git pull --ff-only origin eval/atomic9-checkpoint-ab
+test -z "$(git status --porcelain)"
+
+python3 scripts/resolve_robocasa365_eval_checkpoints.py \
+  --checkpoint-root "$CHECKPOINT_ROOT" \
+  --group-step step6500=6500 \
+  --group-step step7500=7500 \
+  --expected-world-size 8 \
+  --output /tmp/xwam_atomic9_65v75_checkpoints.json \
+  --output-env /tmp/xwam_atomic9_65v75_checkpoints.env
+grep -E '"(result|step|checkpoint)"' /tmp/xwam_atomic9_65v75_checkpoints.json
+```
+
+解析为`ok=true/result=pass`后提交正式评测：
+
+```bash
+cd "$EVAL_REPO"
+test -z "$(git status --porcelain)"
+export XWAM_EVAL_ID=atomic9_ratio00_step6500_vs_step7500_seed42_50ep
+export XWAM_EVAL_EPISODES=50
+export XWAM_ATOMIC9_CHECKPOINT_ROOT="$CHECKPOINT_ROOT"
+sbatch deployment/clariden/eval_atomic9_step6500_vs_step7500_xwam.sbatch
+```
+
+固定资源映射为GPU 0/1加载step 6500、GPU 2/3加载step 7500；每组均完整覆盖9任务，
+每任务50 episodes。结果位于：
+
+```bash
+EVAL_ROOT=/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/atomic9-checkpoint-ab/$XWAM_EVAL_ID
+test -s "$EVAL_ROOT/logs/checkpoint-resolution.json"
+test -s "$EVAL_ROOT/comparison.json"
+test -s "$EVAL_ROOT/summary_atomic9_step6500_vs_step7500.csv"
+grep -E '"(ok|result|macro_success_rate|macro_success_rate_delta)"' "$EVAL_ROOT/comparison.json"
+```
+
+只有`step6500`和`step7500`各收齐9×50 episodes才验收通过。重提必须沿用同一eval ID；
+不得把6500/7500别名映射到其他global step。
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：

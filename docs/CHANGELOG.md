@@ -1,5 +1,12 @@
 # 变更记录
 
+## 2026-08-16 — Atomic9 step 6500/7500补充闭环对比
+
+- step 5500/7000同合同评测已完成，Atomic9 ratio0总体成功率分别为46.9%和50.9%。新增独立step 6500/7500入口，用于定位5500～7000之间的增益轨迹，并判断训练继续到7500是否仍改善闭环控制。
+- 保留既有5500/7000脚本和结果目录不变；新topology仍为4卡、8 policy server、16 simulator client，每个checkpoint完整覆盖相同9任务、seed42～91、replan20和50 episodes/task。GPU 0/1只加载6500，GPU 2/3只加载7500。
+- 新入口使用独立eval ID、checkpoint解析报告、结果根、锁和CSV名称，不会复用5500/7000的task result。精确checkpoint门禁仍要求model state与8份ZeRO optimizer shard完整。
+- 本地验收覆盖新topology的任务/seed/推理合同、GPU分组、精确step绑定、sbatch语法及既有聚合逻辑。真实6500/7500评测为`cluster-pending`；回滚本次修改不影响已完成的5500/7000结果。
+
 ## 2026-08-16 — Atomic9 step 5500/7000 同合同闭环对比
 
 - 新增独立评测分支 `eval/atomic9-checkpoint-ab` 的 Atomic9 对比入口，不切换或修改正在训练的 `dev/atomic-robocasa365` 工作区。单节点4卡固定启动8个policy server和16个simulator client：GPU 0/1上的4个server严格加载step 5500，GPU 2/3上的4个server严格加载step 7000；每server绑定两个client，不跨组动态路由。
