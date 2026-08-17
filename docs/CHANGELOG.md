@@ -1,5 +1,13 @@
 # 变更记录
 
+## 2026-08-17 — RGBD-P1逐episode MJCF/state回放与RGB-D渲染门禁
+
+- 修正真实Atomic9结构报告暴露的假失败：MuJoCo展平state宽度由该episode自身MJCF的`nq/nv`决定，不再要求跨episode一致。结构报告现将宽度集合作为信息/警告保留，仍要求每个`states` 的帧数、有限性及三件回放文件完整。
+- 新增RoboCasa runtime专用render probe：按任务创建dataset metadata声明的环境，每个抽查episode都先设置`ep_meta.json`、加载自身`model.xml.gz`，再将`states.npz["states"]`的首/中/尾帧写入对应模型。宽度只与当前episode模型比较，并对state写入后回读误差设置`1e-9`门禁。
+- 对三路camera同时调用MuJoCo RGB+normalized depth渲染，使用robosuite官方near/far公式转为metric depth。渲染RGB明确纵向翻转后与同episode/帧/camera的原MP4计算MAE/RMSE/PSNR，默认`MAE<=12`；depth必须全部有限、为正且非常量。
+- 每个抽查点保存source RGB、rerender RGB、normalized/metric depth的压缩NPZ以及三联对比PNG。PNG中inverse-depth仅用per-frame q01/q99作可视化，机器报告显式标记其不是训练uint8公式，不会在本门禁中猜测或冻结X-WAM depth编码。
+- Clariden入口升级为单1卡作业串行完成Atomic9结构审计与真实render probe：每任务默认前3个episode、每episode首/中/尾3帧、每帧3相机，输出独立JSON和作业级artifacts目录。本地9项聚焦测试、Python编译、sbatch语法和diff检查通过；RoboCasa/MuJoCo/EGL及真实视频对齐为`cluster-pending`。
+
 ## 2026-08-17 — RGBD-P0/P1官方回放材料结构门禁
 
 - 根据RoboCasa365官方数据说明和转换源码，冻结离线depth的统一实现路线：所有atomic任务都从`dataset_meta.env_args`创建环境，以逐episode的`model.xml.gz/ep_meta.json/states.npz`恢复精确场景和MuJoCo state，再由同一组三路camera离线渲染；不为不同任务编写任务特定depth逻辑，也不在训练DataLoader中调用MuJoCo。

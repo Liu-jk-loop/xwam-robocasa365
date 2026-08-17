@@ -183,6 +183,8 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - RGB-D首轮是inverse-depth辅助预测监督，不把depth传感器帧加入policy条件。模型输入仍为首帧RGB、16D proprio和语言；depth branch只作为未来空间监督并可在action-only推理时关闭。
 - 所有RoboCasa365 atomic任务共用同一depth生成逻辑。dataset-level `env_args`决定环境类，episode-level MJCF/metadata决定场景，`states.npz["states"]`决定逐帧物理状态；任务代码不参与depth编码分支选择。
 - 原始LeRobot目录保持只读。MuJoCo只允许出现在独立离线生成/审计进程，训练loader只读取版本化缓存。cache索引必须绑定task/episode/frame/camera、源文件digest和depth encoding版本。
+- MuJoCo展平state宽度是per-episode合同，不是dataset/task常量。必须先用当前episode的`ep_meta.json + model.xml.gz`硬重置环境，再要求它与该episode的`states.shape[1]`一致并逐帧恢复；禁止用其他episode已实例化的模型解释state。
+- P1 render probe对每个抽查帧直接从同一simulator state渲染三路RGB和depth buffer。MuJoCo bottom-up RGB/depth均先纵向翻转；RGB必须与原LeRobot MP4同帧比较，normalized depth用robosuite模型near/far参数转换为metric depth并保存。
 - X-WAM公开合同使用inverse depth、三通道pseudo-RGB和`[-1,1]` VAE输入，但公开代码没有给出MuJoCo depth到8-bit的完整公式。结构门禁与render门禁分开；没有RGB像素/时间对齐和数值映射证据时禁止生成全量缓存。
 
 ## Current external paths

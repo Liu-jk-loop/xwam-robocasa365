@@ -100,7 +100,7 @@ def main() -> int:
     failed_tasks = [str(item.get("task_name")) for item in tasks if item.get("ok") is not True]
     ok = bool(tasks) and not errors and not failed_tasks
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "phase": "RGBD-P0-P1-structural-preflight",
         "scope": "atomic_only",
         "task_manifest": args.task_manifest if args.dataset_root else None,

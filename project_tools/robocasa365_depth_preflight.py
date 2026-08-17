@@ -213,11 +213,15 @@ def inspect_depth_replay_inputs(
         if item["state_shape"] is not None and len(item["state_shape"]) == 2
     }
     if len(state_widths) > 1:
-        errors.append(f"抽查 episode 的 MuJoCo state width 不一致：{sorted(state_widths)}")
+        warnings.append(
+            "抽查 episode 的 MuJoCo state width 随各自 MJCF 变化："
+            f"{sorted(state_widths)}；必须在 render probe 中先加载该 episode "
+            "的 model.xml.gz，再恢复对应 states"
+        )
 
     ok = not errors and len(inspected) == len(selected)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "phase": "RGBD-P0-P1-structural-preflight",
         "task_name": task_name,
         "requested_root": str(Path(dataset_path).expanduser()),
@@ -230,6 +234,7 @@ def inspect_depth_replay_inputs(
         "missing_episode_files": missing_episode_files,
         "episodes_decoded": len(inspected),
         "state_widths": sorted(state_widths),
+        "state_width_contract": "per_episode_mjcf",
         "inspected_episodes": inspected,
         "depth_target_contract": {
             "semantic_target": "inverse_depth",

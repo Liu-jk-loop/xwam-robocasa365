@@ -1324,9 +1324,9 @@ sbatch deployment/clariden/train_atomic9_ratio05_xwam_8gpu.sbatch
 `robocasa365_atomic9_fastwam_overlap_ratio05_rgb_seed42_8gpu`；若planner显示从任何ratio0
 目录恢复，应立即停止作业并检查提交分支和环境变量。
 
-## RGBD-P1 回放材料结构审计
+## RGBD-P1 结构审计与逐episode RGB-D回放
 
-本阶段只读 `pretrain/atomic/*/lerobot/extras`，不启动 MuJoCo、不生成 depth，输出写入 Store：
+本阶段只读 `pretrain/atomic/*/lerobot`，不加载Torch/X-WAM、不修改原数据。卑1卡作业先运行结构审计，再在RoboCasa EDF内逐episode加载MJCF/state并渲染RGB-D：
 
 ```bash
 cd /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365
@@ -1338,11 +1338,15 @@ test -z "$(git status --porcelain)"
 sbatch deployment/clariden/audit_atomic9_rgbd_replay_inputs_xwam.sbatch
 ```
 
-Atomic9 报告默认路径：
+Atomic9 默认产物：
 
 ```text
 /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/manifests/xwam/atomic9_rgbd/robocasa365_atomic9_rgbd_replay_inputs.json
+/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/manifests/xwam/atomic9_rgbd/robocasa365_atomic9_rgbd_render_probe.json
+/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/manifests/xwam/atomic9_rgbd/render_artifacts_job_<JOB_ID>/
 ```
+
+默认对Atomic9每任务前3个episode抽取首/中/尾帧，每帧验证三路camera。每个camera的NPZ包含原RGB、重渲染RGB、normalized depth和米制metric depth；`*_comparison.png`横向为原RGB / 重渲染RGB / inverse-depth诊断预览。
 
 单独审计用户确认的 `AdjustToasterOvenTemperature` 示例：
 
@@ -1357,9 +1361,15 @@ srun --environment=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/c
   --output /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/manifests/xwam/atomic9_rgbd/adjust_toaster_depth_replay_inputs.json
 ```
 
-验收要求：Atomic9 `passed_tasks=9/result=pass`，每任务全部episode都具备
-`states.npz/ep_meta.json/model.xml.gz`，抽查state帧数与`episodes.jsonl`完全一致。
-该PASS只允许进入三任务render probe；不能据此开始全量depth生成。
+验收要求：两份JSON均为`passed_tasks=9/result=pass`；每任务全部episode都具备`states.npz/ep_meta.json/model.xml.gz`，抽查state帧数与`episodes.jsonl`一致，每个state width与它自身MJCF一致，state回读偏差不超过`1e-9`，三路depth全有限/为正/非常量，原RGB与纵向翻转后重渲染RGB的MAE不超过12。
+
+若仅RGB MAE失败，先下载对应`comparison.png`判断是相机/时间/纹理还是压缩差异。只有确认为稳定编码误差后才可临时覆盖门限：
+
+```bash
+XWAM_RGBD_MAX_RGB_MAE=16 sbatch deployment/clariden/audit_atomic9_rgbd_replay_inputs_xwam.sbatch
+```
+
+即使本门禁通过，也只关闭scene/state/camera/metric-depth回放门禁；报告中的inverse-depth PNG是诊断预览，不是已冻结的X-WAM uint8训练编码，不能据此开始全量depth生成。
 
 ## 外部模型路径
 

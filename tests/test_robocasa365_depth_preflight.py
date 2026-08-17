@@ -12,13 +12,19 @@ from project_tools.robocasa365_depth_preflight import inspect_depth_replay_input
 
 
 class RoboCasa365DepthPreflightTests(unittest.TestCase):
-    def _dataset(self, root: Path, *, state_frames: int = 4) -> Path:
+    def _dataset(
+        self,
+        root: Path,
+        *,
+        state_frames: int = 4,
+        state_widths: tuple[int, ...] = (17,),
+    ) -> Path:
         lerobot = root / "lerobot"
         (lerobot / "meta").mkdir(parents=True)
-        (lerobot / "extras" / "episode_000000").mkdir(parents=True)
+        (lerobot / "extras").mkdir(parents=True)
         info = {
             "codebase_version": "v2.1",
-            "total_episodes": 1,
+            "total_episodes": len(state_widths),
             "features": {
                 name: {"dtype": "video", "shape": [256, 256, 3]}
                 for name in (
@@ -33,19 +39,25 @@ class RoboCasa365DepthPreflightTests(unittest.TestCase):
             json.dumps({"task_index": 0, "task": "close the fridge"}) + "\n"
         )
         (lerobot / "meta" / "episodes.jsonl").write_text(
-            json.dumps({"episode_index": 0, "length": 4, "tasks": [0]}) + "\n"
+            "".join(
+                json.dumps({"episode_index": index, "length": 4, "tasks": [0]})
+                + "\n"
+                for index in range(len(state_widths))
+            )
         )
         (lerobot / "extras" / "dataset_meta.json").write_text(
             json.dumps({"env_args": {"env_name": "CloseFridge"}})
         )
-        episode = lerobot / "extras" / "episode_000000"
-        np.savez_compressed(
-            episode / "states.npz",
-            states=np.ones((state_frames, 17), dtype=np.float64),
-        )
-        (episode / "ep_meta.json").write_text(json.dumps({"lang": "close"}))
-        with gzip.open(episode / "model.xml.gz", "wb") as handle:
-            handle.write(b"<mujoco model='fixture'></mujoco>")
+        for index, state_width in enumerate(state_widths):
+            episode = lerobot / "extras" / f"episode_{index:06d}"
+            episode.mkdir(parents=True)
+            np.savez_compressed(
+                episode / "states.npz",
+                states=np.ones((state_frames, state_width), dtype=np.float64),
+            )
+            (episode / "ep_meta.json").write_text(json.dumps({"lang": "close"}))
+            with gzip.open(episode / "model.xml.gz", "wb") as handle:
+                handle.write(b"<mujoco model='fixture'></mujoco>")
         return root
 
     def test_valid_official_extras_contract(self):
@@ -62,6 +74,18 @@ class RoboCasa365DepthPreflightTests(unittest.TestCase):
             report["depth_target_contract"]["pixel_encoding_formula_status"],
             "requires_render_probe_validation",
         )
+
+    def test_state_width_may_vary_when_each_episode_has_its_own_mjcf(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = inspect_depth_replay_inputs(
+                self._dataset(Path(tmp), state_widths=(17, 19, 23)),
+                task_name="CloseFridge",
+                episodes_to_decode=3,
+            )
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["state_widths"], [17, 19, 23])
+        self.assertEqual(report["state_width_contract"], "per_episode_mjcf")
+        self.assertTrue(any("model.xml.gz" in message for message in report["warnings"]))
 
     def test_state_frame_mismatch_fails(self):
         with tempfile.TemporaryDirectory() as tmp:

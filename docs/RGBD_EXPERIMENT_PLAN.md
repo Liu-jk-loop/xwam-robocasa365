@@ -61,15 +61,24 @@ X-WAM 官方 RoboCasa 数据和 loader 的公开合同为：
 3. 每任务默认解压前三个 episode，验证 `states` 为有限二维数值数组且帧数与 `episodes.jsonl` 完全一致。
 4. 验证 MJCF gzip 可解析且根标签为 `mujoco`。
 5. 验证 dataset-level `env_args.env_name` 和 X-WAM 三路 camera 合同。
-6. 报告 state width、缺失文件和下一阶段 render probe 要求。
+6. 报告 state width、缺失文件和下一阶段 render probe 要求。state width是per-episode MJCF属性，不再用跨episode一致性阻塞。
 
-结构门禁通过只说明离线回放材料齐全，不等于 RGB/depth 已对齐。下一阶段必须在 RoboCasa simulator 环境运行实际 reset/render probe。
+`scripts/probe_robocasa365_depth_render.py` 是RoboCasa runtime门禁，不导入Torch也不加载X-WAM模型。它对每个抽查episode执行：
+
+1. 从`dataset_meta.env_args` 创建任务环境。
+2. 设置`ep_meta.json`，硬重置该episode自身`model.xml.gz`。
+3. 只将`states.shape[1]`与当前MJCF的展平state宽度比较，写入首/中/尾帧并验证回读偏差。
+4. 对三路camera同时渲染RGB和normalized depth，纵向翻转后与原MP4同帧比较。
+5. 使用robosuite的near/far公式保存metric depth，验证有限、正值和非常量。
+6. 保存source/rerender/depth NPZ和三联PNG，供人工复核。PNG的per-frame inverse-depth归一化只是诊断预览，不是训练公式。
+
+当前Clariden入口一次性执行结构审计和上述render probe：Atomic9每任务前3个episode，每episode三个时间点，每点三路camera。默认RGB MAE门限为12；若失败，必须先查看对比PNG和报告，不可直接放宽门限。
 
 ## 后续顺序
 
-1. `P1-structure`：Atomic9 全 episode 文件覆盖 + 每任务三个 state 数组抽查。
-2. `P1-render`：三个代表任务各一个 episode、三个时间点，恢复 MJCF/state 并渲染三路 RGB/depth。
-3. 对原 RGB 计算像素对齐指标，并确定 vertical flip、near/far、inverse-depth 和 uint8 编码公式。
+1. `P1-structure + P1-render`：同一作业完成Atomic9全episode文件覆盖，并对每任务前3 episode执行逐MJCF/state的三帧三相机RGB-D回放。
+2. 根据JSON和对比PNG关闭state reset、vertical flip、RGB像素/时间对齐及metric depth有效性门禁。
+3. 基于metric depth分布与X-WAM公开样例冻结inverse-depth 到 uint8的版本化编码公式；不沿用诊断PNG的per-frame归一化。
 4. 生成少量可恢复 depth cache，统计速度、无效像素和磁盘占用。
 5. 接入 loader、checkpoint depth branch 和单 batch/resume 门禁。
 6. CloseFridge ratio0 RGB-D 单任务试验；通过后再运行 Atomic9 ratio0 RGB-D。

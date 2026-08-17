@@ -5,9 +5,9 @@
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：RGBD-P0/P1——RoboCasa365 离线 depth 回放材料审计
+- 当前阶段：RGBD-P1——逐episode MJCF/state回放与RGB-D渲染对齐
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Atomic9 ratio0训练和checkpoint评测已完成。ratio0.5训练接近结束，抽查任务成功率明显偏低，后续新训练默认ratio0，完整聚合结果仍作为负对照保留。RGBD-P0公开合同已确认，Atomic9回放材料结构审计待运行。
+- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Atomic9 ratio0训练和checkpoint评测已完成。ratio0.5训练接近结束，抽查任务成功率明显偏低，后续新训练默认ratio0。Atomic9真实结构报告已证明所有回放文件、帧数和数值正常；旧报告仅因跨episode state width假约束失败。修正后的结构门禁与真实RGB-D render probe已合并到单卡作业，待Clariden执行。
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -19,15 +19,15 @@
 | M2 动作与 checkpoint 适配 | 已完成 | 两种初始化、完整动作契约及 DeepSpeedCPUAdam 单 batch 参数更新均通过 | 已关闭 |
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
-| M5 离线深度试点 | P0/P1结构门禁已实现 | Atomic9真实报告待运行 | 三代表任务state replay与RGB/depth对齐 |
+| M5 离线深度试点 | P1逐episode render probe已实现 | 真实结构数据无缺失；新render job待运行 | Atomic9前3 episode的state replay、三路RGB/depth对齐 |
 | M6 Atomic 正式训练与评测 | Atomic9 ratio0训练完成并进入checkpoint比较；准备ratio0.5对照 | ratio0 step 5500/7000为46.9%/50.9%；ratio0.5复用8500步scheduler并在7500停止 | 补测ratio0 step 6500/7500，并完成同合同ratio0.5训练与评测 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
 ## RGB-D 当前进程
 
 - P0资料合同：完成。官方RoboCasa365 extras可用于state replay；X-WAM目标为inverse depth和三通道pseudo-RGB。
-- P1结构审计：代码和Clariden入口完成，本地fixture测试通过，真实Atomic9为`cluster-pending`。
-- P1渲染审计：未开始。必须在RoboCasa EDF内确定state reset、三路camera、vertical flip和inverse-depth uint8公式。
+- P1结构审计：真实Atomic9中文件完整性、state帧数/有限性、episode JSON和MJCF解析均通过。跨episode state width不一致已改为符合per-episode MJCF合同的信息项；新schema报告待与render job一起生成。
+- P1渲染审计：代码和Clariden单卡入口完成。默认验证Atomic9每任务前3 episode的首/中/尾帧，包含每episode MJCF硬重置、state回读、三路RGB MP4对齐和normalized/metric depth数值门禁；真实RoboCasa/EGL执行为`cluster-pending`。
 - 全量缓存、loader、RGB-D训练：均未开始；不得越过P1渲染对齐门禁。
 
 ## Clariden 部署状态
