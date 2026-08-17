@@ -1,5 +1,12 @@
 # 变更记录
 
+## 2026-08-17 — RGBD-P0/P1官方回放材料结构门禁
+
+- 根据RoboCasa365官方数据说明和转换源码，冻结离线depth的统一实现路线：所有atomic任务都从`dataset_meta.env_args`创建环境，以逐episode的`model.xml.gz/ep_meta.json/states.npz`恢复精确场景和MuJoCo state，再由同一组三路camera离线渲染；不为不同任务编写任务特定depth逻辑，也不在训练DataLoader中调用MuJoCo。
+- 明确X-WAM监督目标为inverse depth，公开RoboCasa数据使用三路256×256/20 FPS灰度H.264 depth视频、单通道重复为三通道并映射到`[-1,1]`。公开资料未说明metric/inverse-depth到uint8的完整公式，因此当前只冻结结构合同，禁止猜测min-max或near/far后直接生成全量数据。
+- 新增dependency-light单任务/Atomic9审计器：全部episode检查三个官方回放文件，每任务默认解压三个`states`数组并验证二维、有限值、帧数、state width、episode JSON、gzip MJCF和三路camera；输出明确区分`structural pass`与尚待集群执行的render alignment gate。
+- 新增Clariden Atomic9结构审计入口和独立Store报告目录；该作业不加载模型、不渲染depth、不修改原始数据。真实Atomic9报告为`cluster-pending`，回滚本次变更不会删除或改写任何数据/模型/实验产物。
+
 ## 2026-08-16 — Atomic9 ratio0.5严格对照训练
 
 - 新增Atomic9 `clean_action_ratio=0.5`训练配置和8×GH200入口，其任务清单、global stats、公开pretrained初始化、seed42、LR、warmup、8500步scheduler、自然比例采样、GBS128、ZeRO-1、BF16、checkpoint频率及W&B group与ratio0保持一致；作业目标在7500停止，以便直接对齐已完成的ratio0 step 7500且不改变前7500步学习率轨迹。

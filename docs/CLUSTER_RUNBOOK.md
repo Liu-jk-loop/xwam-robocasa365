@@ -1324,6 +1324,43 @@ sbatch deployment/clariden/train_atomic9_ratio05_xwam_8gpu.sbatch
 `robocasa365_atomic9_fastwam_overlap_ratio05_rgb_seed42_8gpu`；若planner显示从任何ratio0
 目录恢复，应立即停止作业并检查提交分支和环境变量。
 
+## RGBD-P1 回放材料结构审计
+
+本阶段只读 `pretrain/atomic/*/lerobot/extras`，不启动 MuJoCo、不生成 depth，输出写入 Store：
+
+```bash
+cd /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365
+git fetch origin
+git switch dev/atomic-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+test -z "$(git status --porcelain)"
+
+sbatch deployment/clariden/audit_atomic9_rgbd_replay_inputs_xwam.sbatch
+```
+
+Atomic9 报告默认路径：
+
+```text
+/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/manifests/xwam/atomic9_rgbd/robocasa365_atomic9_rgbd_replay_inputs.json
+```
+
+单独审计用户确认的 `AdjustToasterOvenTemperature` 示例：
+
+```bash
+cd /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365
+
+srun --environment=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/containers/edf/xwam.toml \
+  python scripts/audit_robocasa365_depth_replay_inputs.py \
+  --dataset /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/datasets/robocasa/v1.0/pretrain/atomic/AdjustToasterOvenTemperature/20250820 \
+  --task-name AdjustToasterOvenTemperature \
+  --episodes-to-decode 3 \
+  --output /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/manifests/xwam/atomic9_rgbd/adjust_toaster_depth_replay_inputs.json
+```
+
+验收要求：Atomic9 `passed_tasks=9/result=pass`，每任务全部episode都具备
+`states.npz/ep_meta.json/model.xml.gz`，抽查state帧数与`episodes.jsonl`完全一致。
+该PASS只允许进入三任务render probe；不能据此开始全量depth生成。
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：

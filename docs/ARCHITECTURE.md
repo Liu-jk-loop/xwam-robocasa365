@@ -178,6 +178,13 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - 单任务A/B不使用M6 18任务manifest、跨任务statistics或五epochformal guard。它验证CloseFridge机械臂/夹爪动作学习以及clean-action采样语义，不能单独证明NavigateKitchen底盘动作已经恢复。
 - 两组闭环比较复用M6已对齐FastWAM的target split和时间轴，但每次只启动一个policy server与一个CloseFridge client。每组固定模型seed42、环境seed42起50 episodes、1000-step horizon、replan20、action denoise10及20 FPS逐步视频。评测源码使用独立clean clone，训练作业所用仓库在作业结束前保持不变。
 
+### RGB-D离线回放合同
+
+- RGB-D首轮是inverse-depth辅助预测监督，不把depth传感器帧加入policy条件。模型输入仍为首帧RGB、16D proprio和语言；depth branch只作为未来空间监督并可在action-only推理时关闭。
+- 所有RoboCasa365 atomic任务共用同一depth生成逻辑。dataset-level `env_args`决定环境类，episode-level MJCF/metadata决定场景，`states.npz["states"]`决定逐帧物理状态；任务代码不参与depth编码分支选择。
+- 原始LeRobot目录保持只读。MuJoCo只允许出现在独立离线生成/审计进程，训练loader只读取版本化缓存。cache索引必须绑定task/episode/frame/camera、源文件digest和depth encoding版本。
+- X-WAM公开合同使用inverse depth、三通道pseudo-RGB和`[-1,1]` VAE输入，但公开代码没有给出MuJoCo depth到8-bit的完整公式。结构门禁与render门禁分开；没有RGB像素/时间对齐和数值映射证据时禁止生成全量缓存。
+
 ## Current external paths
 
 These paths are cluster deployment facts, not portable defaults:
