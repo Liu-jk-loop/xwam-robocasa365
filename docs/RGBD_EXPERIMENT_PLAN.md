@@ -50,7 +50,7 @@ X-WAM 官方 RoboCasa 数据和 loader 的公开合同为：
 - https://github.com/sharinka0715/X-WAM/blob/main/configs/data/robocasa.yaml
 - https://huggingface.co/datasets/sharinka0715/X-WAM-RoboCasa
 
-公开论文和代码没有给出“MuJoCo metric depth → inverse depth → uint8”的完整数值公式。当前不能自行假定 per-frame min-max、per-view min-max 或固定 near/far 映射。正式生成前必须用实际 state replay probe 冻结该公式；否则虽能训练，depth pretrained 权重的输入分布可能不匹配。
+公开论文和代码没有给出“MuJoCo metric depth → inverse depth → uint8”的完整数值公式，因此不把任何项目自定义映射描述为上游原公式。P1真实回放已通过后，本项目固定版本`robocasa365_inverse_metric_global_q_v1`：在三个代表性任务各前三个episode、三路相机的抽样帧中合并采样`1/depth_m`，以全局q01/q99作为固定边界，裁剪并映射到uint8，近处更亮、无效值为0。它匹配X-WAM公开的存储和loader合同，但不保证与上游未公开数值分布完全相同。
 
 ## RGBD-P0/P1 本轮实现
 
@@ -72,15 +72,24 @@ X-WAM 官方 RoboCasa 数据和 loader 的公开合同为：
 5. 使用robosuite的near/far公式保存metric depth，验证有限、正值和非常量。
 6. 保存source/rerender/depth NPZ和三联PNG，供人工复核。PNG的per-frame inverse-depth归一化只是诊断预览，不是训练公式。
 
-当前Clariden入口一次性执行结构审计和上述render probe：Atomic9每任务前3个episode，每episode三个时间点，每点三路camera。默认RGB MAE门限为12；若失败，必须先查看对比PNG和报告，不可直接放宽门限。
+当前Clariden入口一次性执行结构审计和上述render probe：Atomic9每任务前3个episode，每episode三个时间点，每点三路camera。默认RGB MAE门限为12；用户已回报这轮全部检查通过且无错误，但未提供Job ID，因此只关闭P1功能门禁，不补造作业编号。
+
+## RGBD-P2 编码、缓存与审计
+
+`scripts/build_and_audit_robocasa365_depth_cache.py`在同一作业内依次完成：
+
+1. 对`CloseFridge`、`PickPlaceSinkToCounter`、`OpenDrawer`各前三个episode执行逐MJCF/state标定，默认每10帧、每相机采4096个有效逆深度像素，写入不可变encoding JSON。
+2. 以冻结范围逐帧渲染三个任务的全部9个episode和三路相机，生成27个256×256、20 FPS、H.264/yuv420p三通道灰度MP4；不改写原始LeRobot目录。
+3. 每个视频写sidecar，绑定encoding、states/MJCF/episode metadata、源RGB和输出视频digest。中断重提会验证并跳过完整相机，只原子补写缺失相机；无sidecar的半成品不会被接受。
+4. 自动检查帧数、FPS、相机key、uint8 shape/range、灰度通道一致性、H.264往返MAE、无效/裁剪像素、生成吞吐、总字节数和每帧字节数，统一输出cache manifest和audit JSON。
+
+Clariden入口为`deployment/clariden/build_atomic3_rgbd_pilot_cache_xwam.sbatch`。真实数值边界、27个视频生成和审计结果仍为`cluster-pending`；通过前不接入训练loader，也不生成Atomic9全量缓存。
 
 ## 后续顺序
 
-1. `P1-structure + P1-render`：同一作业完成Atomic9全episode文件覆盖，并对每任务前3 episode执行逐MJCF/state的三帧三相机RGB-D回放。
-2. 根据JSON和对比PNG关闭state reset、vertical flip、RGB像素/时间对齐及metric depth有效性门禁。
-3. 基于metric depth分布与X-WAM公开样例冻结inverse-depth 到 uint8的版本化编码公式；不沿用诊断PNG的per-frame归一化。
-4. 生成少量可恢复 depth cache，统计速度、无效像素和磁盘占用。
-5. 接入 loader、checkpoint depth branch 和单 batch/resume 门禁。
-6. CloseFridge ratio0 RGB-D 单任务试验；通过后再运行 Atomic9 ratio0 RGB-D。
+1. `P1-structure + P1-render`：已由用户回报全部通过。
+2. `P2-encoding + pilot cache + audit`：代码与单卡作业已完成，等待真实三任务生成报告。
+3. 接入 loader、checkpoint depth branch 和单 batch/resume 门禁。
+4. CloseFridge ratio0 RGB-D 单任务试验；通过后再运行 Atomic9 ratio0 RGB-D。
 
 任何 P1 render 对齐失败都优先修复 scene/state/camera 恢复，不进入全量缓存生成。

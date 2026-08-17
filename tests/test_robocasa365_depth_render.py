@@ -6,12 +6,12 @@ import numpy as np
 
 from project_tools.robocasa365_depth_render import (
     DepthRenderProbeError,
-    _set_episode_state,
     diagnostic_inverse_depth_rgb,
     metric_depth_statistics,
     parse_frame_fractions,
     resolve_frame_indices,
     rgb_alignment_metrics,
+    set_replay_episode_state,
 )
 
 
@@ -85,11 +85,11 @@ class RoboCasa365DepthRenderTests(unittest.TestCase):
 
     def test_state_is_checked_against_current_episode_model(self):
         state = np.array([0.0, 1.0, 2.0, 3.0], dtype=np.float64)
-        self.assertEqual(_set_episode_state(_FakeEnvironment(4), state), 0.0)
+        self.assertEqual(set_replay_episode_state(_FakeEnvironment(4), state), 0.0)
 
     def test_state_from_another_episode_model_is_rejected(self):
         with self.assertRaisesRegex(DepthRenderProbeError, "state=4, model=3"):
-            _set_episode_state(
+            set_replay_episode_state(
                 _FakeEnvironment(3),
                 np.array([0.0, 1.0, 2.0, 3.0], dtype=np.float64),
             )

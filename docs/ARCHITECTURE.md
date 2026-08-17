@@ -186,6 +186,8 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - MuJoCo展平state宽度是per-episode合同，不是dataset/task常量。必须先用当前episode的`ep_meta.json + model.xml.gz`硬重置环境，再要求它与该episode的`states.shape[1]`一致并逐帧恢复；禁止用其他episode已实例化的模型解释state。
 - P1 render probe对每个抽查帧直接从同一simulator state渲染三路RGB和depth buffer。MuJoCo bottom-up RGB/depth均先纵向翻转；RGB必须与原LeRobot MP4同帧比较，normalized depth用robosuite模型near/far参数转换为metric depth并保存。
 - X-WAM公开合同使用inverse depth、三通道pseudo-RGB和`[-1,1]` VAE输入，但公开代码没有给出MuJoCo depth到8-bit的完整公式。结构门禁与render门禁分开；没有RGB像素/时间对齐和数值映射证据时禁止生成全量缓存。
+- 本项目训练缓存固定为`robocasa365_inverse_metric_global_q_v1`：在代表性任务/episode/相机上合并采样`1/depth_m`，用全局q01/q99冻结一个跨任务、跨相机、跨帧范围，再裁剪映射到uint8，近处更亮；无效或非正depth映射为0。该规则兼容X-WAM公开存储/loader合同，但不声称复现上游未公开的数值公式。
+- P2缓存是256×256、20 FPS、H.264/yuv420p的三通道重复灰度MP4。每个视频sidecar绑定encoding digest、episode三件回放源文件digest、源RGB digest、帧数、相机key、数值统计、压缩往返误差和文件digest；只有sidecar与视频均通过才可恢复跳过，原始LeRobot数据始终只读。
 
 ## Current external paths
 

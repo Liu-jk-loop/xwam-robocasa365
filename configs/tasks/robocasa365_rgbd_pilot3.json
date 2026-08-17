@@ -1,0 +1,18 @@
+{
+  "name": "target_atomic_rgbd_pilot3",
+  "scope": "atomic_only",
+  "split": "target",
+  "source": "rgbd_representative_pilot",
+  "robocasa_release": "v1.0.1",
+  "source_file": "configs/tasks/robocasa365_atomic9_fastwam_overlap.json",
+  "tasks": [
+    "CloseFridge",
+    "PickPlaceSinkToCounter",
+    "OpenDrawer"
+  ],
+  "horizons": {
+    "CloseFridge": 900,
+    "PickPlaceSinkToCounter": 900,
+    "OpenDrawer": 750
+  }
+}

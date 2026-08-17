@@ -1,5 +1,13 @@
 # 变更记录
 
+## 2026-08-17 — RGBD-P2全局逆深度编码、三任务缓存与一体化审计
+
+- 根据X-WAM官方RoboCasa发布样例冻结存储合同为三通道灰度、256×256、20 FPS、H.264/yuv420p；公开代码没有披露MuJoCo米制depth到uint8的唯一公式，因此新增项目版本`robocasa365_inverse_metric_global_q_v1`，明确采用跨任务/相机/帧合并采样的全局inverse-metric-depth q01/q99映射，近处更亮、无效值为0，不冒充上游数值公式。
+- 新增`CloseFridge/PickPlaceSinkToCounter/OpenDrawer`三任务pilot清单和一体化生成器。第一遍逐episode加载MJCF/metadata/state完成确定性标定并写不可变encoding JSON；第二遍渲染9个完整episode的三路depth，原子生成27个MP4，原始LeRobot目录保持只读。
+- 每个缓存视频新增恢复sidecar，绑定encoding、states/MJCF/episode metadata、源RGB和输出视频digest。重提时验证完整相机并跳过，只补缺失相机；没有有效sidecar的旧视频不会被当作完成产物，新文件完整关闭后才原子替换。
+- 自动审计帧数/FPS、相机映射、uint8 shape/range、灰度通道、H.264往返MAE、无效/裁剪像素、生成吞吐、总空间和每帧空间，输出独立cache manifest/audit。Clariden单卡作业固定3任务×3 episode×3相机并要求27视频和机器报告PASS。
+- P1真实render由用户回报全部通过且无错误，但未提供Job ID，进度仅记录该反馈。为P2复用将环境创建、episode模型加载和state恢复提升为公共helper。本地通过12项聚焦测试、Python编译、Ruff、sbatch语法和diff检查；真实标定边界、缓存生成及审计为`cluster-pending`。
+
 ## 2026-08-17 — RGBD-P1逐episode MJCF/state回放与RGB-D渲染门禁
 
 - 修正真实Atomic9结构报告暴露的假失败：MuJoCo展平state宽度由该episode自身MJCF的`nq/nv`决定，不再要求跨episode一致。结构报告现将宽度集合作为信息/警告保留，仍要求每个`states` 的帧数、有限性及三件回放文件完整。

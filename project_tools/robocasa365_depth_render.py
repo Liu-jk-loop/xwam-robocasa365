@@ -176,7 +176,8 @@ def _set_runtime_egl_device_after_import() -> dict[str, str]:
     return {"import_physical_device": physical, "runtime_logical_device": "0"}
 
 
-def _create_environment(root: Path) -> tuple[Any, Any, dict[str, Any]]:
+def create_replay_environment(root: Path) -> tuple[Any, Any, dict[str, Any]]:
+    """Create one offscreen environment from a task's dataset metadata."""
     import robocasa  # noqa: F401 -- register RoboCasa environments
     import robosuite
 
@@ -212,7 +213,13 @@ def _create_environment(root: Path) -> tuple[Any, Any, dict[str, Any]]:
     return environment, robosuite, runtime
 
 
-def _load_episode_model(env: Any, robosuite_module: Any, model_xml: str, ep_meta: dict[str, Any]) -> None:
+def load_replay_episode_model(
+    env: Any,
+    robosuite_module: Any,
+    model_xml: str,
+    ep_meta: dict[str, Any],
+) -> None:
+    """Replace the active model with the MJCF and metadata of one episode."""
     if hasattr(env, "set_attrs_from_ep_meta"):
         env.set_attrs_from_ep_meta(ep_meta)
     elif hasattr(env, "set_ep_meta"):
@@ -237,7 +244,8 @@ def _load_episode_model(env: Any, robosuite_module: Any, model_xml: str, ep_meta
     env.sim.reset()
 
 
-def _set_episode_state(env: Any, state: np.ndarray) -> float:
+def set_replay_episode_state(env: Any, state: np.ndarray) -> float:
+    """Restore one flattened simulator state and report its round-trip error."""
     expected_width = int(np.asarray(env.sim.get_state().flatten()).size)
     actual_width = int(np.asarray(state).size)
     if actual_width != expected_width:
@@ -284,7 +292,7 @@ def _probe_episode(
             f"episode_{episode_index:06d} states shape={states.shape} 与 length={episode_length} 不匹配"
         )
 
-    _load_episode_model(env, robosuite_module, model_xml, ep_meta)
+    load_replay_episode_model(env, robosuite_module, model_xml, ep_meta)
     model_state_width = int(np.asarray(env.sim.get_state().flatten()).size)
     if int(states.shape[1]) != model_state_width:
         raise DepthRenderProbeError(
@@ -303,7 +311,7 @@ def _probe_episode(
     errors: list[str] = []
     for frame_index in frame_indices:
         try:
-            state_roundtrip_max_abs = _set_episode_state(env, states[frame_index])
+            state_roundtrip_max_abs = set_replay_episode_state(env, states[frame_index])
             frame_errors: list[str] = []
             if state_roundtrip_max_abs > 1e-9:
                 frame_errors.append(
@@ -447,7 +455,7 @@ def probe_task_depth_replay(
     errors: list[str] = []
     runtime: dict[str, Any] = {}
     try:
-        env, robosuite_module, runtime = _create_environment(root)
+        env, robosuite_module, runtime = create_replay_environment(root)
         for episode in selected:
             try:
                 report = _probe_episode(

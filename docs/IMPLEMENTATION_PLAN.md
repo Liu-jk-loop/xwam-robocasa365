@@ -208,13 +208,14 @@ RoboCasa365 原生数据
 - 对 1～3 个 atomic 任务离线渲染三路 depth。
 - 以 episode/frame/camera 为键保存版本化缓存和生成元数据。
 - 校验 RGB/depth/action 时序、像素对齐、单位和范围。
+- 先用CloseFridge、PickPlaceSinkToCounter、OpenDrawer各3个episode冻结全局逆米制深度q01/q99编码，再生成27个三相机小缓存视频；编码JSON、视频sidecar、cache manifest和audit必须可恢复且绑定源文件digest。
 - 评估生成速度和存储成本，再决定是否扩展。
 
 阶段执行过程：
 
 1. Codex 编写独立的状态恢复、深度渲染、缓存索引和对齐审计工具，训练 loader 内不调用 MuJoCo。
 2. 用户选择 1～3 个 atomic 任务，在星光离线生成少量深度缓存。
-3. 用户反馈生成速度、磁盘占用、失败 episode、样例 RGB/depth 和元数据。
+3. 用户运行P2一体化作业，反馈encoding、manifest和audit；机器报告必须包含生成速度、磁盘占用、失败episode、帧数/FPS、相机key和H.264往返误差。
 4. Codex 检查像素与时间对齐、单位、范围和缺帧，并修正缓存格式。
 5. 用户运行一个 RGB-D batch 和短训练烟测。
 6. 双方依据质量、速度和存储证据决定是否扩大深度生成；未通过时保持 RGB-only 主线。
