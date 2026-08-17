@@ -250,6 +250,44 @@ class Atomic9CheckpointComparisonTest(unittest.TestCase):
             self.assertIn(expected, script)
         self.assertNotIn('REPO="$DEPLOY_STORE/src/xwam-robocasa365"', script)
 
+    def test_ratio05_wrappers_reuse_ratio00_evaluation_contract(self) -> None:
+        cases = (
+            (
+                "eval_atomic9_ratio05_step5500_vs_step7000_xwam.sbatch",
+                "eval_atomic9_step5500_vs_step7000_xwam.sbatch",
+                "atomic9_ratio05_step5500_vs_step7000_seed42_50ep",
+            ),
+            (
+                "eval_atomic9_ratio05_step6500_vs_step7500_xwam.sbatch",
+                "eval_atomic9_step6500_vs_step7500_xwam.sbatch",
+                "atomic9_ratio05_step6500_vs_step7500_seed42_50ep",
+            ),
+        )
+        for wrapper_name, base_name, eval_id in cases:
+            wrapper = (
+                REPO_ROOT / "deployment/clariden" / wrapper_name
+            ).read_text(encoding="utf-8")
+            base = (
+                REPO_ROOT / "deployment/clariden" / base_name
+            ).read_text(encoding="utf-8")
+            for expected in (
+                "#SBATCH --gpus-per-node=4",
+                "#SBATCH --cpus-per-task=64",
+                "#SBATCH --mem=450G",
+                "#SBATCH --time=12:00:00",
+                "robocasa365_atomic9_fastwam_overlap_ratio05_rgb_seed42_8gpu",
+                "XWAM_RATIO05_CHECKPOINT_ROOT:-",
+                eval_id,
+                f"deployment/clariden/{base_name}",
+            ):
+                self.assertIn(expected, wrapper)
+            self.assertIn("XWAM_ATOMIC9_EXP_NAME:-", base)
+            self.assertIn(
+                "robocasa365_atomic9_fastwam_overlap_ratio00_rgb_seed42_8gpu",
+                base,
+            )
+            self.assertIn("manifests/xwam/atomic9_ratio00", base)
+
 
 if __name__ == "__main__":
     unittest.main()

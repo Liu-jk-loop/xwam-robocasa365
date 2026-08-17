@@ -1401,6 +1401,69 @@ grep -E '"(ok|result|macro_success_rate|macro_success_rate_delta)"' "$EVAL_ROOT/
 只有`step6500`和`step7500`各收齐9×50 episodes才验收通过。重提必须沿用同一eval ID；
 不得把6500/7500别名映射到其他global step。
 
+## Atomic9 ratio0.5：四checkpoint同合同评测
+
+ratio0.5沿用ratio0的全部评测原则：相同Atomic9任务、target split、seed42～91、
+50 episodes/task、replan20、action denoise10和四卡8-server/16-client布局。唯一变化是
+加载独立ratio0.5实验目录中的checkpoint；manifest/global stats继续复用训练时冻结的
+Atomic9 ratio0合同。
+
+更新独立eval clone：
+
+```bash
+DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
+EVAL_REPO="$DEPLOY_STORE/src/xwam-robocasa365-eval"
+
+cd "$EVAL_REPO"
+git fetch origin
+git switch eval/atomic9-checkpoint-ab
+git pull --ff-only origin eval/atomic9-checkpoint-ab
+test -z "$(git status --porcelain)"
+```
+
+step 5500和7000都完整后即可先提交第一组，不必等待训练到7500：
+
+```bash
+cd "$EVAL_REPO"
+test -z "$(git status --porcelain)"
+sbatch deployment/clariden/eval_atomic9_ratio05_step5500_vs_step7000_xwam.sbatch
+```
+
+step 7500完整保存后，再提交6500/7500组：
+
+```bash
+cd "$EVAL_REPO"
+test -z "$(git status --porcelain)"
+sbatch deployment/clariden/eval_atomic9_ratio05_step6500_vs_step7500_xwam.sbatch
+```
+
+两个wrapper默认解析以下独立滚动checkpoint根：
+
+```text
+/iopsstor/scratch/cscs/zjingchen/terry_nys/xwam_run/robocasa365_atomic9_fastwam_overlap_ratio05_rgb_seed42_8gpu/checkpoints
+```
+
+如果checkpoint已经迁移到其他根，分别提交前设置专用变量
+`XWAM_RATIO05_CHECKPOINT_ROOT=/absolute/checkpoints`。wrapper会覆盖shell中可能残留的通用
+`XWAM_ATOMIC9_CHECKPOINT_ROOT`，防止误用ratio0路径；专用变量不得指向包含ratio0权重的目录。
+默认eval ID分别为`atomic9_ratio05_step5500_vs_step7000_seed42_50ep`和
+`atomic9_ratio05_step6500_vs_step7500_seed42_50ep`，两组可以独立排队或中断恢复，不能共用eval ID。
+
+验收路径：
+
+```bash
+ROOT=/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/atomic9-checkpoint-ab
+test -s "$ROOT/atomic9_ratio05_step5500_vs_step7000_seed42_50ep/comparison.json"
+test -s "$ROOT/atomic9_ratio05_step6500_vs_step7500_seed42_50ep/comparison.json"
+grep -E '"(ok|result|macro_success_rate|macro_success_rate_delta)"' \
+  "$ROOT/atomic9_ratio05_step5500_vs_step7000_seed42_50ep/comparison.json"
+grep -E '"(ok|result|macro_success_rate|macro_success_rate_delta)"' \
+  "$ROOT/atomic9_ratio05_step6500_vs_step7500_seed42_50ep/comparison.json"
+```
+
+每份`comparison.json`都必须为`ok=true/result=pass`，且两个checkpoint group各收齐
+9×50 episodes，才可写入ratio0/ratio0.5对比表。
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：

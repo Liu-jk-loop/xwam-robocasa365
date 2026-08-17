@@ -5,9 +5,9 @@
 ## 当前状态
 
 - 当前分支：`eval/atomic9-checkpoint-ab`（独立评测工作区；训练分支仍为`dev/atomic-robocasa365`）
-- 当前阶段：Atomic9 ratio0 checkpoint性能轨迹补测
+- 当前阶段：Atomic9 ratio0 checkpoint补测与ratio0.5同合同评测准备
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：Atomic9 ratio0 step 5500/7000同合同评测已完成，总体成功率为46.9%/50.9%。本分支保留原入口并新增step 6500/7500补测，评测合同仍为seed42、replan20、50 episodes/task；新结果为`cluster-pending`。
+- 超算运行状态：Atomic9 ratio0 step 5500/7000同合同评测已完成，总体成功率为46.9%/50.9%，6500/7500补测待反馈。ratio0.5训练接近step 7500；本分支已准备同样的5500/7000与6500/7500四卡评测入口，真实结果为`cluster-pending`。
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | 未开始 | 待验证 | 完成 1～3 个任务的对齐缓存 |
-| M6 Atomic 正式训练与评测 | Atomic9 ratio0训练完成并补测checkpoint轨迹 | step 5500/7000为46.9%/50.9%；6500/7500入口已实现 | 完成6500/7500各9任务、50 episodes/task闭环对比 |
+| M6 Atomic 正式训练与评测 | Atomic9 ratio0补测；ratio0.5训练接近完成并准备评测 | ratio0 step 5500/7000为46.9%/50.9%；两种ratio的四checkpoint入口均已实现 | 完成ratio0的6500/7500及ratio0.5两组checkpoint闭环评测 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
 ## Clariden 部署状态

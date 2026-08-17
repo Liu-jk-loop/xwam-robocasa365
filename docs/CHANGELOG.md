@@ -1,5 +1,12 @@
 # 变更记录
 
+## 2026-08-17 — Atomic9 ratio0.5同合同checkpoint评测入口
+
+- ratio0.5训练接近step 7500后，新增step 5500/7000与step 6500/7500两个四卡提交入口。资源与ratio0完全一致：每个作业4卡、8个policy server、16个simulator client，每个checkpoint独占2卡并完整覆盖同一Atomic9任务集。
+- 现有两个ratio0主评测脚本仅增加可选`XWAM_ATOMIC9_EXP_NAME`；未设置时仍默认ratio0实验，原命令和结果不变。两个ratio0.5薄wrapper只切换到独立ratio0.5实验/checkpoint根与eval ID，继续复用相同topology、manifest/global stats、seed42～91、replan20和50 episodes/task合同。
+- ratio0.5 wrapper会显式覆盖通用checkpoint root，避免继承提交shell中残留的ratio0路径；迁移后的权重只通过专用`XWAM_RATIO05_CHECKPOINT_ROOT`覆盖。step 5500/7000在两份checkpoint完整后即可启动；step 6500/7500必须等待7500的model state与8份ZeRO optimizer shard完整落盘。两组输出使用独立eval ID，不与ratio0或彼此交叉恢复。
+- 本地验收覆盖ratio0默认兼容、ratio0.5实验身份、四卡资源、两组step映射、共享数据合同、sbatch语法和既有聚合门禁。真实ratio0.5评测为`cluster-pending`。
+
 ## 2026-08-16 — Atomic9 step 6500/7500补充闭环对比
 
 - step 5500/7000同合同评测已完成，Atomic9 ratio0总体成功率分别为46.9%和50.9%。新增独立step 6500/7500入口，用于定位5500～7000之间的增益轨迹，并判断训练继续到7500是否仍改善闭环控制。
