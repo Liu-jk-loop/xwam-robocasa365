@@ -1,0 +1,14 @@
+{
+  "name": "target_atomic_rgbd_close_fridge",
+  "scope": "atomic_only",
+  "split": "target",
+  "source": "rgbd_single_task_full_cache",
+  "robocasa_release": "v1.0.1",
+  "source_file": "configs/tasks/robocasa365_atomic_seen.json",
+  "tasks": [
+    "CloseFridge"
+  ],
+  "horizons": {
+    "CloseFridge": 900
+  }
+}

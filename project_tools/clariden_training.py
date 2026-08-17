@@ -125,7 +125,10 @@ def _optimizer_audit(directory: str | Path) -> dict[str, Any]:
 
 
 def _metrics_audit(
-    log_path: str | Path, *, expected_steps: list[int]
+    log_path: str | Path,
+    *,
+    expected_steps: list[int],
+    expect_depth: bool,
 ) -> dict[str, Any]:
     path = Path(log_path).expanduser().resolve()
     records, errors = parse_console_metrics(
@@ -165,9 +168,16 @@ def _metrics_audit(
         "expected_steps": steps == expected_steps,
         "metrics_present": bool(records) and not missing,
         "metrics_finite": bool(records) and not non_finite and not errors,
-        "depth_loss_zero": bool(records)
+        "depth_loss_contract": bool(records)
         and all(
-            abs(float(record["metrics"].get("train/depth_loss", math.inf))) <= 1e-8
+            (
+                float(record["metrics"].get("train/depth_loss", math.nan)) > 0.0
+                if expect_depth
+                else abs(
+                    float(record["metrics"].get("train/depth_loss", math.inf))
+                )
+                <= 1e-8
+            )
             for record in records
         ),
         "all_batches_supervised": bool(ratios)
@@ -193,12 +203,17 @@ def _run_contract(
     expected_global_step: int,
     expected_metric_steps: list[int],
     expect_resume: bool,
+    expect_depth: bool,
 ) -> dict[str, Any]:
     metadata = _load_json(metadata_path)
     result = _load_json(result_path)
     events = _load_events(events_path)
     optimizer = _optimizer_audit(optimizer_dir)
-    metrics = _metrics_audit(log_path, expected_steps=expected_metric_steps)
+    metrics = _metrics_audit(
+        log_path,
+        expected_steps=expected_metric_steps,
+        expect_depth=expect_depth,
+    )
     topology = metadata.get("topology") or {}
     environment = metadata.get("environment") or {}
     deepspeed = metadata.get("deepspeed") or {}
@@ -243,7 +258,7 @@ def _run_contract(
         and optimizer_config.get("fp32_optimizer_states") is True,
         "fixed_four_step_schedule": int(training.get("num_training_steps", -1)) == 4,
         "fixed_atomic_subset": dataset.get("task_name") == "CloseFridge"
-        and dataset.get("use_depth") is False
+        and dataset.get("use_depth") is expect_depth
         and dataset.get("subset_indices") == list(range(8))
         and dataset.get("shuffle") is False,
         "clean_git": bool(git.get("commit")) and git.get("dirty") is False,
@@ -251,7 +266,7 @@ def _run_contract(
         "checkpoint_complete": expected_global_step in complete_steps,
         "checkpoint_layout": all(checkpoint["checks"].values()),
         "optimizer_state": all(optimizer["checks"].values()),
-        "finite_rgb_only_metrics": all(metrics["checks"].values()),
+        "finite_modality_metrics": all(metrics["checks"].values()),
     }
     if expect_resume:
         checks["excluded_frozen_resume_strict"] = (
@@ -280,6 +295,7 @@ def build_clariden_4gpu_resume_report(
     initial: dict[str, str],
     resumed: dict[str, str],
     commit_compatibility: dict[str, Any] | None = None,
+    expect_depth: bool = False,
 ) -> dict[str, Any]:
     errors: list[str] = []
     try:
@@ -288,12 +304,14 @@ def build_clariden_4gpu_resume_report(
             expected_global_step=2,
             expected_metric_steps=[0, 1],
             expect_resume=False,
+            expect_depth=expect_depth,
         )
         resumed_report = _run_contract(
             **resumed,
             expected_global_step=4,
             expected_metric_steps=[2, 3],
             expect_resume=True,
+            expect_depth=expect_depth,
         )
         same_commit = bool(initial_report["git_commit"]) and (
             initial_report["git_commit"] == resumed_report["git_commit"]
@@ -338,7 +356,12 @@ def build_clariden_4gpu_resume_report(
     ok = not errors
     return {
         "schema_version": 1,
-        "stage": "Clariden-GH200-4GPU-resume-gate",
+        "stage": (
+            "Clariden-GH200-4GPU-RGBD-resume-gate"
+            if expect_depth
+            else "Clariden-GH200-4GPU-resume-gate"
+        ),
+        "expect_depth": expect_depth,
         "result": "pass" if ok else "fail",
         "ok": ok,
         "initial": initial_report,

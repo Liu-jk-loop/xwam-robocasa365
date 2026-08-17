@@ -188,6 +188,9 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - X-WAM公开合同使用inverse depth、三通道pseudo-RGB和`[-1,1]` VAE输入，但公开代码没有给出MuJoCo depth到8-bit的完整公式。结构门禁与render门禁分开；没有RGB像素/时间对齐和数值映射证据时禁止生成全量缓存。
 - 本项目训练缓存固定为`robocasa365_inverse_metric_global_q_v1`：在代表性任务/episode/相机上合并采样`1/depth_m`，用全局q01/q99冻结一个跨任务、跨相机、跨帧范围，再裁剪映射到uint8，近处更亮；无效或非正depth映射为0。该规则兼容X-WAM公开存储/loader合同，但不声称复现上游未公开的数值公式。
 - P2缓存是256×256、20 FPS、H.264/yuv420p的三通道重复灰度MP4。每个视频sidecar绑定encoding digest、episode三件回放源文件digest、源RGB digest、帧数、相机key、数值统计、压缩往返误差和文件digest；只有sidecar与视频均通过才可恢复跳过，原始LeRobot数据始终只读。
+- RGB-D loader只有在`use_depth=true`且同时提供cache root、冻结encoding和PASS manifest时启用；三者缺一、task/episode/camera集合漂移、sidecar与manifest不一致或任一文件缺失都会在创建Dataset时阻塞。`use_depth=false`时反向禁止携带depth路径，保持RGB实验不触碰缓存。
+- loader按RGB完全相同的episode/frame ID解码三路depth，输出`depths[V,T,3,H,W]`，uint8只执行`pixel/127.5-1`且resize使用nearest；RGB继续使用bilinear。随机空间裁剪由同一个augmentation同时作用于RGB/depth，从而保持像素对齐。
+- P3工程门禁先生成完整CloseFridge缓存，再用4×GH200固定8个clip执行step 0→2保存和step 2→4恢复。审计必须同时看到有效非零depth loss、RGB/action/proprio有限loss、四rank FP32 optimizer state、完整checkpoint和精确resume来源；该门禁不是正式RGB-D训练。
 
 ## Current external paths
 

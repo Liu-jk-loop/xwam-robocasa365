@@ -5,9 +5,9 @@
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：RGBD-P2——版本化逆深度编码、三任务小缓存与审计
+- 当前阶段：RGBD-P3——完整CloseFridge缓存、loader、batch与短训练恢复
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Atomic9 ratio0训练和checkpoint评测已完成。ratio0.5训练接近结束，抽查任务成功率明显偏低，后续新训练默认ratio0。用户已回报Atomic9逐episode MJCF/state RGB-D render检查全部通过且无报错；本次未提供Job ID。P2三任务缓存与审计入口已实现，真实生成仍待Clariden执行。
+- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Atomic9 ratio0训练和checkpoint评测已完成，后续新训练默认ratio0。用户已回报P1 render及P2 encoding/三任务cache/audit全部通过且无报错；本次仍未提供Job ID。P3完整CloseFridge缓存与RGB-D batch/step2→4训练入口已实现，等待Clariden执行。
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -19,7 +19,7 @@
 | M2 动作与 checkpoint 适配 | 已完成 | 两种初始化、完整动作契约及 DeepSpeedCPUAdam 单 batch 参数更新均通过 | 已关闭 |
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
-| M5 离线深度试点 | P1已通过；P2编码/三任务缓存/审计已实现 | P1由用户回报全通过；P2真实缓存为`cluster-pending` | 生成27个pilot视频并取得encoding/manifest/audit PASS |
+| M5 离线深度试点 | P1/P2已通过；P3 loader与短训练已实现 | P1/P2由用户回报全通过；P3为`cluster-pending` | 先完成CloseFridge 318视频，再关闭RGB-D batch及step 2→4恢复门禁 |
 | M6 Atomic 正式训练与评测 | Atomic9 ratio0训练完成并进入checkpoint比较；准备ratio0.5对照 | ratio0 step 5500/7000为46.9%/50.9%；ratio0.5复用8500步scheduler并在7500停止 | 补测ratio0 step 6500/7500，并完成同合同ratio0.5训练与评测 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
@@ -28,8 +28,9 @@
 - P0资料合同：完成。官方RoboCasa365 extras可用于state replay；X-WAM目标为inverse depth和三通道pseudo-RGB。
 - P1结构审计：真实Atomic9中文件完整性、state帧数/有限性、episode JSON和MJCF解析均通过。跨episode state width不一致已改为符合per-episode MJCF合同的信息项；新schema报告待与render job一起生成。
 - P1渲染审计：用户已回报Atomic9全部检查通过且无报错；由于没有提供Job ID，仅记录用户反馈，不推断机器编号。
-- P2编码/小缓存：固定项目版本`robocasa365_inverse_metric_global_q_v1`，以三个代表性任务各3 episode标定全局q01/q99，生成9 episode×3 camera的可恢复H.264缓存，并审计数值、帧/FPS、相机、digest、速度与空间。代码已完成，真实Clariden产物为`cluster-pending`。
-- loader、RGB-D训练：尚未开始；必须先取得P2 audit `ok=true/result=pass`。
+- P2编码/小缓存：固定项目版本`robocasa365_inverse_metric_global_q_v1`，以三个代表性任务各3 episode标定全局q01/q99，生成9 episode×3 camera缓存；用户回报所有检查通过且无错误。
+- P3 loader：已接入严格encoding/manifest/sidecar合同，输出三路同帧`depths`并保持RGB-only路径完全不读取depth。完整CloseFridge生成器复用P2 encoding，目标106 episode/318视频。
+- P3 batch/短训练：新增4×GH200一体化门禁，先读真实RGB-D batch，再step 0→2保存及step 2→4恢复；要求depth loss有限非零及完整四rank FP32 optimizer证据。真实运行是`cluster-pending`。
 
 ## Clariden 部署状态
 

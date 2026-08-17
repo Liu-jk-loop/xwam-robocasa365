@@ -1129,7 +1129,15 @@ class XWAMRunner(L.LightningModule):
         # rgbd: [B, C, MV, T, H, W]
         B = batch["video"].shape[0]
         gt_rgb = rearrange(batch["video"], "b v t c h w -> (b v) c t h w")
-        if self.config.use_depth and self.run_depth and "depths" in batch:
+        if self.config.use_depth and self.run_depth:
+            if "depths" not in batch:
+                raise KeyError("use_depth=true但batch缺少depths")
+            if batch["depths"].shape != batch["video"].shape:
+                raise ValueError(
+                    "RGB/depth batch shape必须完全一致："
+                    f"rgb={tuple(batch['video'].shape)}, "
+                    f"depth={tuple(batch['depths'].shape)}"
+                )
             gt_depth = rearrange(batch["depths"], "b v t c h w -> (b v) c t h w")
             gt_video = torch.cat([gt_rgb, gt_depth], dim=0)
             with self._cuda_timing_segment("vae"):

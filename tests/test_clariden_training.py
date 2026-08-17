@@ -28,6 +28,7 @@ def _write_run(
     resume_checkpoint: str | None,
     commit: str,
     optimizer_shard_prefix: str = "",
+    use_depth: bool = False,
 ) -> dict[str, str]:
     run_root = root / name
     checkpoint = run_root / f"step={global_step}.ckpt"
@@ -49,7 +50,7 @@ def _write_run(
             "task_name": "CloseFridge",
             "subset_indices": list(range(8)),
             "shuffle": False,
-            "use_depth": False,
+            "use_depth": use_depth,
         },
         "environment": {"gpu_names": ["NVIDIA GH200 96GB"] * 4},
         "training": {"num_training_steps": 4, "trainer_max_steps": global_step},
@@ -117,8 +118,12 @@ def _write_run(
             ),
             encoding="utf-8",
         )
+    metrics = METRICS.replace(
+        "train/depth_loss: 0.0",
+        "train/depth_loss: 0.75" if use_depth else "train/depth_loss: 0.0",
+    )
     log_path.write_text(
-        "".join(f"[METRICS] Step: {step} - {METRICS}\n" for step in metric_steps),
+        "".join(f"[METRICS] Step: {step} - {metrics}\n" for step in metric_steps),
         encoding="utf-8",
     )
     return {
@@ -243,6 +248,40 @@ class ClaridenTrainingAuditTest(unittest.TestCase):
             self.assertEqual(report["initial"]["checkpoint"]["optimizer_ranks"], [0, 1, 2, 3])
             self.assertTrue(
                 report["resumed"]["checks"]["checkpoint_layout"], report
+            )
+
+    def test_rgbd_step_two_to_four_requires_positive_depth_loss(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            commit = "f" * 40
+            initial = _write_run(
+                root,
+                name="initial",
+                global_step=2,
+                metric_steps=[0, 1],
+                resume_checkpoint=None,
+                commit=commit,
+                use_depth=True,
+            )
+            resumed = _write_run(
+                root,
+                name="resumed",
+                global_step=4,
+                metric_steps=[2, 3],
+                resume_checkpoint=initial["checkpoint"],
+                commit=commit,
+                use_depth=True,
+            )
+            initial.pop("checkpoint")
+            resumed.pop("checkpoint")
+            report = build_clariden_4gpu_resume_report(
+                initial=initial,
+                resumed=resumed,
+                expect_depth=True,
+            )
+            self.assertTrue(report["ok"], report)
+            self.assertTrue(
+                report["initial"]["metrics"]["checks"]["depth_loss_contract"]
             )
 
     def test_resume_must_use_the_initial_completed_checkpoint(self) -> None:

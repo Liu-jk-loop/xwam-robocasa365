@@ -27,9 +27,12 @@ from data.robocasa365_index import episode_video_path, load_episode_records  # n
 from data.robocasa365_multitask import resolve_task_dataset_directory  # noqa: E402
 from project_tools.robocasa365_depth_encoding import (  # noqa: E402
     decoded_frame_audit,
+    depth_cache_sidecar_path,
+    depth_cache_video_path,
     encode_inverse_metric_depth,
     file_sha256,
     freeze_global_inverse_depth_encoding,
+    read_frozen_depth_encoding,
     sample_inverse_metric_depth,
     validate_frozen_encoding,
 )
@@ -250,20 +253,17 @@ def _cache_video_path(
     episode_index: int,
     camera_key: str,
 ) -> Path:
-    chunks_size = int(info.get("chunks_size", 1000))
-    chunk = episode_index // chunks_size
-    return (
-        cache_root
-        / task_name
-        / "videos"
-        / f"chunk-{chunk:03d}"
-        / camera_key
-        / f"episode_{episode_index:06d}.mp4"
+    return depth_cache_video_path(
+        cache_root,
+        task_name=task_name,
+        episode_index=episode_index,
+        camera_key=camera_key,
+        chunks_size=int(info.get("chunks_size", 1000)),
     )
 
 
 def _sidecar_path(video_path: Path) -> Path:
-    return video_path.with_suffix(".depth.json")
+    return depth_cache_sidecar_path(video_path)
 
 
 def _valid_resume_sidecar(
@@ -566,7 +566,9 @@ def _build_cache(
     task_reports: list[dict[str, Any]] = []
     for task_name, dataset_path in tasks:
         root, info, episodes = load_episode_records(dataset_path)
-        selected = episodes[:episodes_per_task]
+        selected = episodes if episodes_per_task == 0 else episodes[:episodes_per_task]
+        if not selected:
+            raise ValueError(f"{task_name}没有可生成depth cache的episode")
         env = None
         episode_reports: list[dict[str, Any]] = []
         try:
@@ -683,38 +685,73 @@ def main() -> int:
     parser.add_argument("--max-roundtrip-mae", type=float, default=3.0)
     parser.add_argument("--max-channel-delta", type=int, default=3)
     parser.add_argument("--cache-root", required=True)
-    parser.add_argument("--encoding-output", required=True)
+    parser.add_argument(
+        "--encoding-input",
+        help="复用已经通过审计的冻结encoding；设置后不重新标定。",
+    )
+    parser.add_argument(
+        "--encoding-output",
+        help="新标定encoding的输出；复用模式可省略或指向相同不可变文件。",
+    )
+    parser.add_argument(
+        "--expected-task-count",
+        type=int,
+        default=0,
+        help="非零时要求task manifest恰好包含该数量任务。",
+    )
     parser.add_argument("--manifest-output", required=True)
     parser.add_argument("--audit-output", required=True)
     args = parser.parse_args()
 
-    if args.episodes_per_task <= 0:
-        raise ValueError("--episodes-per-task 必须为正整数")
+    if args.episodes_per_task < 0:
+        raise ValueError("--episodes-per-task 不能为负数；0表示全部")
     tasks, task_manifest_path = _select_tasks(args)
-    if len(tasks) != 3:
-        raise ValueError(f"RGBD-P2 pilot必须恰好包含3个任务，实际为{len(tasks)}")
+    if args.expected_task_count > 0 and len(tasks) != args.expected_task_count:
+        raise ValueError(
+            f"任务数与--expected-task-count不一致：{len(tasks)} != {args.expected_task_count}"
+        )
     cache_root = Path(args.cache_root).expanduser().resolve()
-    encoding_output = Path(args.encoding_output).expanduser().resolve()
     manifest_output = Path(args.manifest_output).expanduser().resolve()
     audit_output = Path(args.audit_output).expanduser().resolve()
 
-    print("[RGBD-P2] pass 1/3: calibrating frozen global inverse depth", flush=True)
-    spec, calibration_report = _calibrate(
-        tasks,
-        episodes_per_task=args.episodes_per_task,
-        frame_stride=args.calibration_frame_stride,
-        pixels_per_frame=args.calibration_pixels_per_frame,
-        height=args.height,
-        width=args.width,
-        seed=args.seed,
-        quantile_low=args.quantile_low,
-        quantile_high=args.quantile_high,
-        task_manifest_path=task_manifest_path,
-    )
-    validate_frozen_encoding(spec)
-    _write_immutable_json(encoding_output, spec)
+    if args.encoding_input:
+        encoding_input = Path(args.encoding_input).expanduser().resolve()
+        print(f"[RGBD-cache] reusing frozen encoding: {encoding_input}", flush=True)
+        spec = read_frozen_depth_encoding(encoding_input)
+        encoding_output = (
+            Path(args.encoding_output).expanduser().resolve()
+            if args.encoding_output
+            else encoding_input
+        )
+        _write_immutable_json(encoding_output, spec)
+        calibration_report = {
+            "mode": "reused_frozen_encoding",
+            "encoding_input": str(encoding_input),
+            "encoding_sha256": spec["encoding_sha256"],
+        }
+    else:
+        if args.episodes_per_task == 0:
+            raise ValueError("新标定模式不允许--episodes-per-task=0")
+        if not args.encoding_output:
+            raise ValueError("新标定模式必须提供--encoding-output")
+        encoding_output = Path(args.encoding_output).expanduser().resolve()
+        print("[RGBD-cache] calibrating frozen global inverse depth", flush=True)
+        spec, calibration_report = _calibrate(
+            tasks,
+            episodes_per_task=args.episodes_per_task,
+            frame_stride=args.calibration_frame_stride,
+            pixels_per_frame=args.calibration_pixels_per_frame,
+            height=args.height,
+            width=args.width,
+            seed=args.seed,
+            quantile_low=args.quantile_low,
+            quantile_high=args.quantile_high,
+            task_manifest_path=task_manifest_path,
+        )
+        validate_frozen_encoding(spec)
+        _write_immutable_json(encoding_output, spec)
 
-    print("[RGBD-P2] pass 2/3: building resumable three-task depth cache", flush=True)
+    print("[RGBD-cache] building resumable depth cache", flush=True)
     task_reports = _build_cache(
         tasks,
         episodes_per_task=args.episodes_per_task,
@@ -734,12 +771,12 @@ def main() -> int:
     )
     manifest = {
         **summary,
-        "phase": "RGBD-P2-pilot-cache-manifest",
+        "phase": "RGBD-cache-manifest",
         "calibration": calibration_report,
     }
     audit = {
         **summary,
-        "phase": "RGBD-P2-pilot-cache-audit",
+        "phase": "RGBD-cache-audit",
         "checks": {
             "frozen_encoding_digest": True,
             "all_three_cameras": all(
@@ -790,7 +827,7 @@ if __name__ == "__main__":
                 output = sys.argv[position + 1]
         failure = {
             "schema_version": 1,
-            "phase": "RGBD-P2-pilot-cache-audit",
+            "phase": "RGBD-cache-audit",
             "scope": "atomic_only",
             "git": collect_git_state(REPO_ROOT),
             "errors": [f"{type(exc).__name__}: {exc}"],

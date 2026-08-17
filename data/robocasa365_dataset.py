@@ -1,4 +1,4 @@
-"""Native RoboCasa365 LeRobot v2.1 RGB-only adapter for X-WAM."""
+"""Native RoboCasa365 LeRobot v2.1 RGB/RGB-D adapter for X-WAM."""
 
 from __future__ import annotations
 
@@ -30,13 +30,14 @@ from data.robocasa365_index import (
     load_episode_records,
 )
 from data.robocasa365_schema import PandaOmronTensorCodec
+from project_tools.robocasa365_depth_encoding import validate_task_depth_cache
 
 
 SUPPORTED_NORMALIZATION = {"none", "panda_omron_v1"}
 
 
 class RoboCasa365Dataset(Dataset):
-    """Read official LeRobot v2.1 Parquet and three synchronized RGB videos."""
+    """Read LeRobot v2.1 tensors, RGB, and optional audited depth cache."""
 
     def __init__(
         self,
@@ -57,16 +58,26 @@ class RoboCasa365Dataset(Dataset):
         saturation: float = 0.2,
         hue: float = 0.05,
         use_depth: bool = False,
+        depth_cache_root: str | None = None,
+        depth_encoding_path: str | None = None,
+        depth_cache_manifest: str | None = None,
         normalization: str = "none",
         schema_path: str | None = None,
         statistics_path: str | None = None,
         parquet_cache_size: int = 8,
         video_cache_size: int = 12,
     ):
-        if use_depth:
+        if use_depth and not all(
+            (depth_cache_root, depth_encoding_path, depth_cache_manifest)
+        ):
             raise ValueError(
-                "RoboCasa365 M1 loader 仅支持 depth=disabled；cached depth 将在 M5 单独接入"
+                "use_depth=true时必须同时提供depth_cache_root、"
+                "depth_encoding_path和depth_cache_manifest"
             )
+        if not use_depth and any(
+            (depth_cache_root, depth_encoding_path, depth_cache_manifest)
+        ):
+            raise ValueError("use_depth=false时禁止配置depth cache路径")
         if normalization not in SUPPORTED_NORMALIZATION:
             raise ValueError(
                 f"normalization 只允许 {sorted(SUPPORTED_NORMALIZATION)}，实际为 {normalization!r}"
@@ -90,6 +101,7 @@ class RoboCasa365Dataset(Dataset):
             )
 
         self.sequence_length = int(sequence_length)
+        self.task_name = str(task_name)
         self.frame_skip = int(frame_skip)
         self.action_skip = int(action_skip)
         self.action_num = self.frame_skip // self.action_skip
@@ -111,6 +123,7 @@ class RoboCasa365Dataset(Dataset):
         self.proprio_dim = EXPECTED_STATE_DIM
         self.action_dim = EXPECTED_ACTION_DIM
         self.normalization = normalization
+        self.use_depth = bool(use_depth)
         self.statistics_path = (
             str(Path(statistics_path).expanduser().resolve())
             if statistics_path is not None
@@ -129,7 +142,9 @@ class RoboCasa365Dataset(Dataset):
         self._parquet_cache: OrderedDict[int, tuple[np.ndarray, np.ndarray]] = (
             OrderedDict()
         )
-        self._video_cache: OrderedDict[tuple[int, str], VideoReader] = OrderedDict()
+        self._video_cache: OrderedDict[tuple[str, int, str], VideoReader] = (
+            OrderedDict()
+        )
 
         manifest = load_task_manifest(task_manifest)
         summary = inspect_dataset(
@@ -148,6 +163,24 @@ class RoboCasa365Dataset(Dataset):
             raise ValueError(f"配置选择了元数据中不存在的相机：{missing_selected}")
 
         self.dataset_root, self.info, self.episodes = load_episode_records(dataset_path)
+        self.depth_cache_contract: dict[str, Any] | None = None
+        self.depth_video_paths: dict[tuple[int, str], Path] = {}
+        if self.use_depth:
+            self.depth_cache_contract = validate_task_depth_cache(
+                cache_root=str(depth_cache_root),
+                encoding_path=str(depth_encoding_path),
+                manifest_path=str(depth_cache_manifest),
+                task_name=task_name,
+                episode_lengths={
+                    episode.episode_index: episode.length for episode in self.episodes
+                },
+                camera_keys=self.camera_keys,
+                chunks_size=int(self.info.get("chunks_size", 1000)),
+            )
+            self.depth_video_paths = dict(
+                self.depth_cache_contract.pop("video_paths")
+            )
+            self.depth_cache_contract.pop("sidecar_paths")
         self.tensor_codec = (
             PandaOmronTensorCodec.from_dataset(
                 dataset_path,
@@ -204,6 +237,22 @@ class RoboCasa365Dataset(Dataset):
             ],
             dim=0,
         )
+        depths = (
+            torch.stack(
+                [
+                    self._read_video_frames(
+                        clip.episode_index,
+                        camera_key,
+                        frame_ids,
+                        modality="depth",
+                    )
+                    for camera_key in self.camera_keys
+                ],
+                dim=0,
+            )
+            if self.use_depth
+            else None
+        )
         selected_states = states[frame_ids].copy()
         selected_actions = actions[action_ids].copy()
         if self.tensor_codec is not None:
@@ -232,6 +281,8 @@ class RoboCasa365Dataset(Dataset):
             "prompt": episode.prompts[prompt_index],
             "episode_key": f"episode_{clip.episode_index:06d}",
         }
+        if depths is not None:
+            data["depths"] = depths
         return self.augmentation(data) if self.augment else data
 
     def clip_spec(self, index: int) -> ClipSpec:
@@ -246,7 +297,7 @@ class RoboCasa365Dataset(Dataset):
 
     def sample_paths(self, index: int) -> dict[str, Any]:
         clip = self.clip_spec(index)
-        return {
+        paths = {
             "parquet": str(
                 episode_data_path(self.dataset_root, self.info, clip.episode_index)
             ),
@@ -258,6 +309,23 @@ class RoboCasa365Dataset(Dataset):
                 )
                 for camera_key in self.camera_keys
             },
+        }
+        if self.use_depth:
+            paths["depths"] = {
+                camera_key: str(
+                    self.depth_video_paths[(clip.episode_index, camera_key)]
+                )
+                for camera_key in self.camera_keys
+            }
+        return paths
+
+    def provenance(self) -> dict[str, Any]:
+        return {
+            "type": "robocasa365_lerobot_v21",
+            "task_name": self.task_name,
+            "dataset_root": str(self.dataset_root),
+            "use_depth": self.use_depth,
+            "depth_cache": self.depth_cache_contract,
         }
 
     @staticmethod
@@ -362,15 +430,23 @@ class RoboCasa365Dataset(Dataset):
                 self._parquet_cache.popitem(last=False)
         return value
 
-    def _video_reader(self, episode_index: int, camera_key: str) -> VideoReader:
-        cache_key = (episode_index, camera_key)
+    def _video_reader(
+        self, episode_index: int, camera_key: str, *, modality: str = "rgb"
+    ) -> VideoReader:
+        if modality not in {"rgb", "depth"}:
+            raise ValueError(f"不支持的视频modality：{modality}")
+        cache_key = (modality, episode_index, camera_key)
         cached = self._video_cache.get(cache_key)
         if cached is not None:
             self._video_cache.move_to_end(cache_key)
             return cached
 
-        path = episode_video_path(
-            self.dataset_root, self.info, episode_index, camera_key
+        path = (
+            episode_video_path(
+                self.dataset_root, self.info, episode_index, camera_key
+            )
+            if modality == "rgb"
+            else self.depth_video_paths[(episode_index, camera_key)]
         )
         try:
             reader = VideoReader(str(path), ctx=cpu(0))
@@ -384,22 +460,30 @@ class RoboCasa365Dataset(Dataset):
         return reader
 
     def _read_video_frames(
-        self, episode_index: int, camera_key: str, frame_ids: np.ndarray
+        self,
+        episode_index: int,
+        camera_key: str,
+        frame_ids: np.ndarray,
+        *,
+        modality: str = "rgb",
     ) -> torch.Tensor:
-        reader = self._video_reader(episode_index, camera_key)
-        if int(frame_ids[-1]) >= len(reader):
-            path = episode_video_path(
+        reader = self._video_reader(
+            episode_index, camera_key, modality=modality
+        )
+        path = (
+            episode_video_path(
                 self.dataset_root, self.info, episode_index, camera_key
             )
+            if modality == "rgb"
+            else self.depth_video_paths[(episode_index, camera_key)]
+        )
+        if int(frame_ids[-1]) >= len(reader):
             raise ValueError(
                 f"请求帧 {int(frame_ids[-1])} 超出视频长度 {len(reader)}：{path}"
             )
         try:
             frames = reader.get_batch(frame_ids.tolist()).asnumpy()
         except Exception as exc:
-            path = episode_video_path(
-                self.dataset_root, self.info, episode_index, camera_key
-            )
             raise ValueError(f"解码 MP4 帧失败：{path}: {exc}") from exc
         if frames.ndim != 4 or frames.shape[-1] != 3:
             raise ValueError(f"视频帧应为 [T,H,W,3]，实际为 {frames.shape}")
@@ -409,11 +493,18 @@ class RoboCasa365Dataset(Dataset):
         )
         tensor = tensor.div_(127.5).sub_(1.0)
         if tuple(tensor.shape[-2:]) != self.video_size:
-            tensor = F.interpolate(
-                tensor,
-                size=self.video_size,
-                mode="bilinear",
-                align_corners=False,
-                antialias=False,
-            )
+            if modality == "rgb":
+                tensor = F.interpolate(
+                    tensor,
+                    size=self.video_size,
+                    mode="bilinear",
+                    align_corners=False,
+                    antialias=False,
+                )
+            else:
+                tensor = F.interpolate(
+                    tensor,
+                    size=self.video_size,
+                    mode="nearest",
+                )
         return tensor

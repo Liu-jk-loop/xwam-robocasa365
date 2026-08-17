@@ -37,6 +37,160 @@ def file_sha256(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+def depth_cache_video_path(
+    cache_root: str | Path,
+    *,
+    task_name: str,
+    episode_index: int,
+    camera_key: str,
+    chunks_size: int,
+) -> Path:
+    """Resolve the cache layout shared by the generator and training loader."""
+
+    if chunks_size <= 0:
+        raise ValueError("chunks_size 必须为正整数")
+    if episode_index < 0:
+        raise ValueError("episode_index 不能为负数")
+    return (
+        Path(cache_root).expanduser().resolve()
+        / task_name
+        / "videos"
+        / f"chunk-{episode_index // chunks_size:03d}"
+        / camera_key
+        / f"episode_{episode_index:06d}.mp4"
+    )
+
+
+def depth_cache_sidecar_path(video_path: str | Path) -> Path:
+    return Path(video_path).with_suffix(".depth.json")
+
+
+def read_frozen_depth_encoding(path: str | Path) -> dict[str, Any]:
+    resolved = Path(path).expanduser().resolve()
+    try:
+        payload = json.loads(resolved.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DepthEncodingError(f"无法读取depth encoding：{resolved}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise DepthEncodingError(f"depth encoding顶层必须为对象：{resolved}")
+    validate_frozen_encoding(payload)
+    return payload
+
+
+def validate_task_depth_cache(
+    *,
+    cache_root: str | Path,
+    encoding_path: str | Path,
+    manifest_path: str | Path,
+    task_name: str,
+    episode_lengths: dict[int, int],
+    camera_keys: Iterable[str],
+    chunks_size: int,
+) -> dict[str, Any]:
+    """Validate one task's immutable cache contract without decoding videos."""
+
+    root = Path(cache_root).expanduser().resolve()
+    encoding_file = Path(encoding_path).expanduser().resolve()
+    manifest_file = Path(manifest_path).expanduser().resolve()
+    encoding = read_frozen_depth_encoding(encoding_file)
+    try:
+        manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DepthEncodingError(f"无法读取depth cache manifest：{manifest_file}: {exc}") from exc
+    if not isinstance(manifest, dict):
+        raise DepthEncodingError(f"depth cache manifest顶层必须为对象：{manifest_file}")
+    if manifest.get("ok") is not True or manifest.get("result") != "pass":
+        raise DepthEncodingError(f"depth cache manifest不是PASS：{manifest_file}")
+    if manifest.get("encoding_sha256") != encoding["encoding_sha256"]:
+        raise DepthEncodingError("depth cache manifest与encoding digest不一致")
+    if Path(str(manifest.get("cache_root", ""))).expanduser().resolve() != root:
+        raise DepthEncodingError(
+            f"depth cache root漂移：manifest={manifest.get('cache_root')}, runtime={root}"
+        )
+
+    task_reports = [
+        item
+        for item in manifest.get("tasks", [])
+        if isinstance(item, dict) and item.get("task_name") == task_name
+    ]
+    if len(task_reports) != 1:
+        raise DepthEncodingError(
+            f"depth cache manifest中任务{task_name}应恰好出现一次，实际为{len(task_reports)}"
+        )
+    task_report = task_reports[0]
+    if task_report.get("ok") is not True:
+        raise DepthEncodingError(f"任务{task_name}的depth cache不是PASS")
+    episode_reports = {
+        int(item["episode_index"]): item
+        for item in task_report.get("episodes", [])
+        if isinstance(item, dict) and "episode_index" in item
+    }
+    expected_episode_indices = set(episode_lengths)
+    if set(episode_reports) != expected_episode_indices:
+        raise DepthEncodingError(
+            "depth cache episode集合不一致："
+            f"missing={sorted(expected_episode_indices - set(episode_reports))[:8]}, "
+            f"extra={sorted(set(episode_reports) - expected_episode_indices)[:8]}"
+        )
+
+    expected_cameras = tuple(str(key) for key in camera_keys)
+    video_paths: dict[tuple[int, str], Path] = {}
+    sidecar_paths: dict[tuple[int, str], Path] = {}
+    for episode_index, episode_length in episode_lengths.items():
+        episode_report = episode_reports[episode_index]
+        if int(episode_report.get("episode_length", -1)) != int(episode_length):
+            raise DepthEncodingError(
+                f"episode_{episode_index:06d}长度与cache manifest不一致"
+            )
+        cameras = {
+            str(item.get("camera_key")): item
+            for item in episode_report.get("cameras", [])
+            if isinstance(item, dict)
+        }
+        if set(cameras) != set(expected_cameras):
+            raise DepthEncodingError(
+                f"episode_{episode_index:06d}相机集合不一致：{sorted(cameras)}"
+            )
+        for camera_key in expected_cameras:
+            report = cameras[camera_key]
+            video_path = depth_cache_video_path(
+                root,
+                task_name=task_name,
+                episode_index=episode_index,
+                camera_key=camera_key,
+                chunks_size=chunks_size,
+            )
+            sidecar_path = depth_cache_sidecar_path(video_path)
+            if Path(str(report.get("video_path", ""))).expanduser().resolve() != video_path:
+                raise DepthEncodingError(f"cache video路径漂移：{video_path}")
+            if report.get("encoding_sha256") != encoding["encoding_sha256"]:
+                raise DepthEncodingError(f"cache video encoding漂移：{video_path}")
+            if int(report.get("frame_count", -1)) != int(episode_length):
+                raise DepthEncodingError(f"cache video帧数漂移：{video_path}")
+            if report.get("ok") is not True:
+                raise DepthEncodingError(f"cache video审计未通过：{video_path}")
+            if not video_path.is_file() or not sidecar_path.is_file():
+                raise DepthEncodingError(f"cache video或sidecar缺失：{video_path}")
+            sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            if not isinstance(sidecar, dict) or sidecar != report:
+                raise DepthEncodingError(f"cache sidecar与manifest记录不一致：{sidecar_path}")
+            video_paths[(episode_index, camera_key)] = video_path
+            sidecar_paths[(episode_index, camera_key)] = sidecar_path
+
+    return {
+        "cache_root": str(root),
+        "encoding_path": str(encoding_file),
+        "encoding_name": encoding["encoding_name"],
+        "encoding_sha256": encoding["encoding_sha256"],
+        "manifest_path": str(manifest_file),
+        "task_name": task_name,
+        "episode_count": len(episode_lengths),
+        "video_count": len(video_paths),
+        "video_paths": video_paths,
+        "sidecar_paths": sidecar_paths,
+    }
+
+
 def sample_inverse_metric_depth(
     metric_depth: np.ndarray,
     *,

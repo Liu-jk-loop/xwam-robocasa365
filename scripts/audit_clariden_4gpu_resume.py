@@ -84,6 +84,11 @@ def main() -> int:
         ),
     )
     parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--expect-depth",
+        action="store_true",
+        help="要求dataset.use_depth=true且每个记录step的depth loss有限并大于0。",
+    )
     args = parser.parse_args()
     commit_compatibility = None
     if args.allow_orchestration_only_commit_delta:
@@ -107,6 +112,7 @@ def main() -> int:
             "log_path": args.resumed_log,
         },
         commit_compatibility=commit_compatibility,
+        expect_depth=args.expect_depth,
     )
     output = write_json_atomic(args.output, report)
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))

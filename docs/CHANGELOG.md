@@ -1,5 +1,14 @@
 # 变更记录
 
+## 2026-08-17 — RGBD-P3完整CloseFridge缓存、严格loader与短训练恢复门禁
+
+- 用户回报P2全局编码、三任务小缓存及数值/时序/存储三项检查全部通过且无报错；未提供Job ID，因此进度只记录用户反馈。深度生成器现支持`--encoding-input`复用冻结encoding和`--episodes-per-task=0`生成全部episode，P2原三任务入口继续固定任务数3且保持兼容。
+- 新增CloseFridge atomic-only完整缓存清单与12小时可恢复作业，复用P2的`robocasa365_inverse_metric_global_q_v1`，目标106 episode/318个三相机视频，写入独立IOPS atomic cache和Store manifest/audit；不重新标定、不改写原始数据。
+- RoboCasa365 loader正式支持可选depth。RGB-D模式必须同时提供cache root、encoding和PASS manifest，并逐项验证task/episode/camera、帧数、sidecar和路径；RGB-only模式禁止携带depth配置。depth使用与RGB相同frame ID，三通道uint8映射到`[-1,1]`并以nearest resize，augmentation保持两者空间同步。
+- batch审计器增加RGB-D模式，验证`depths[3,9,3,256,320]`、范围、有限性、确定性、DataLoader batch维和真实路径。训练metadata通过单任务Dataset provenance记录encoding digest、manifest和cache root；runner在`use_depth=true`时显式拒绝缺失depth或与RGB shape不一致的batch，不再延迟到loss计算才产生模糊错误。
+- 新增RoboCasa365 RGB-D模型/data/四步experiment配置及4×GH200一体化作业：batch PASS后固定8 clip执行step 0→2保存、从精确checkpoint恢复到step 4。复用既有ZeRO-2 CPUAdam debug硬件层，但审计扩展为要求`use_depth=true`及每步depth loss有限且大于0，同时保留四rankFP32 optimizer和严格恢复合同。
+- 本地通过171项dependency-light全套测试、Python编译、Ruff、三份sbatch语法和diff检查；本地没有Torch/RoboCasa/GPU，完整318视频、真实depth batch、forward/backward/checkpoint/resume均为`cluster-pending`。
+
 ## 2026-08-17 — RGBD-P2全局逆深度编码、三任务缓存与一体化审计
 
 - 根据X-WAM官方RoboCasa发布样例冻结存储合同为三通道灰度、256×256、20 FPS、H.264/yuv420p；公开代码没有披露MuJoCo米制depth到uint8的唯一公式，因此新增项目版本`robocasa365_inverse_metric_global_q_v1`，明确采用跨任务/相机/帧合并采样的全局inverse-metric-depth q01/q99映射，近处更亮、无效值为0，不冒充上游数值公式。

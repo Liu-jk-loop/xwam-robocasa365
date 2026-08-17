@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import copy
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 import numpy as np
 
 from project_tools.robocasa365_depth_encoding import (
     DepthEncodingError,
     decoded_frame_audit,
+    depth_cache_sidecar_path,
+    depth_cache_video_path,
     encode_inverse_metric_depth,
     freeze_global_inverse_depth_encoding,
     sample_inverse_metric_depth,
+    validate_task_depth_cache,
     validate_frozen_encoding,
 )
 
@@ -65,6 +71,78 @@ class RoboCasa365DepthEncodingTests(unittest.TestCase):
             decoded, expected, max_mae=1.0, max_channel_delta=2
         )
         self.assertTrue(report["ok"])
+
+    def test_task_cache_contract_binds_all_episode_cameras(self):
+        cameras = (
+            "observation.images.robot0_agentview_left",
+            "observation.images.robot0_agentview_right",
+            "observation.images.robot0_eye_in_hand",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cache_root = root / "cache"
+            encoding_path = root / "encoding.json"
+            manifest_path = root / "manifest.json"
+            spec = _spec()
+            encoding_path.write_text(json.dumps(spec), encoding="utf-8")
+            camera_reports = []
+            for camera in cameras:
+                video = depth_cache_video_path(
+                    cache_root,
+                    task_name="CloseFridge",
+                    episode_index=0,
+                    camera_key=camera,
+                    chunks_size=1000,
+                )
+                video.parent.mkdir(parents=True, exist_ok=True)
+                video.write_bytes(b"fake-video")
+                sidecar = depth_cache_sidecar_path(video)
+                report = {
+                    "task_name": "CloseFridge",
+                    "episode_index": 0,
+                    "camera_key": camera,
+                    "video_path": str(video),
+                    "sidecar_path": str(sidecar),
+                    "encoding_sha256": spec["encoding_sha256"],
+                    "frame_count": 5,
+                    "source_identity": {"states": {"sha256": "a" * 64}},
+                    "source_rgb_video_sha256": "b" * 64,
+                    "ok": True,
+                }
+                sidecar.write_text(json.dumps(report), encoding="utf-8")
+                camera_reports.append(report)
+            manifest = {
+                "cache_root": str(cache_root.resolve()),
+                "encoding_sha256": spec["encoding_sha256"],
+                "tasks": [
+                    {
+                        "task_name": "CloseFridge",
+                        "ok": True,
+                        "episodes": [
+                            {
+                                "episode_index": 0,
+                                "episode_length": 5,
+                                "cameras": camera_reports,
+                            }
+                        ],
+                    }
+                ],
+                "ok": True,
+                "result": "pass",
+            }
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            contract = validate_task_depth_cache(
+                cache_root=cache_root,
+                encoding_path=encoding_path,
+                manifest_path=manifest_path,
+                task_name="CloseFridge",
+                episode_lengths={0: 5},
+                camera_keys=cameras,
+                chunks_size=1000,
+            )
+            self.assertEqual(contract["episode_count"], 1)
+            self.assertEqual(contract["video_count"], 3)
+            self.assertEqual(contract["encoding_sha256"], spec["encoding_sha256"])
 
 
 if __name__ == "__main__":

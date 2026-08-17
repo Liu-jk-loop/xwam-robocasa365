@@ -217,7 +217,7 @@ RoboCasa365 原生数据
 2. 用户选择 1～3 个 atomic 任务，在星光离线生成少量深度缓存。
 3. 用户运行P2一体化作业，反馈encoding、manifest和audit；机器报告必须包含生成速度、磁盘占用、失败episode、帧数/FPS、相机key和H.264往返误差。
 4. Codex 检查像素与时间对齐、单位、范围和缺帧，并修正缓存格式。
-5. 用户运行一个 RGB-D batch 和短训练烟测。
+5. 用户先生成完整CloseFridge 106 episode/318视频，再运行真实RGB-D batch和4×GH200 step 2→4短训练恢复门禁。
 6. 双方依据质量、速度和存储证据决定是否扩大深度生成；未通过时保持 RGB-only 主线。
 
 验收条件：

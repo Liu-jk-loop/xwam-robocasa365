@@ -83,13 +83,23 @@ X-WAM 官方 RoboCasa 数据和 loader 的公开合同为：
 3. 每个视频写sidecar，绑定encoding、states/MJCF/episode metadata、源RGB和输出视频digest。中断重提会验证并跳过完整相机，只原子补写缺失相机；无sidecar的半成品不会被接受。
 4. 自动检查帧数、FPS、相机key、uint8 shape/range、灰度通道一致性、H.264往返MAE、无效/裁剪像素、生成吞吐、总字节数和每帧字节数，统一输出cache manifest和audit JSON。
 
-Clariden入口为`deployment/clariden/build_atomic3_rgbd_pilot_cache_xwam.sbatch`。真实数值边界、27个视频生成和审计结果仍为`cluster-pending`；通过前不接入训练loader，也不生成Atomic9全量缓存。
+Clariden入口为`deployment/clariden/build_atomic3_rgbd_pilot_cache_xwam.sbatch`。用户已回报三项P2任务全部通过且无报错；本轮未提供Job ID，因此不补造编号。
+
+## RGBD-P3 Loader、完整CloseFridge缓存与短训练
+
+顺序不能颠倒：
+
+1. 先运行`deployment/clariden/build_close_fridge_rgbd_cache_xwam.sbatch`。它复用P2冻结encoding，不重新计算q01/q99；对CloseFridge全部106个episode生成318个相机视频，支持按episode/camera恢复，输出独立manifest和audit。
+2. 完整缓存PASS后运行`deployment/clariden/smoke_close_fridge_rgbd_train_resume_xwam.sbatch`。作业先解码一个真实batch，检查RGB/depth均为`[1,3,9,3,256,320]`、有限且在`[-1,1]`，再加载公开X-WAM pretrained执行4×GH200 step 0→2。
+3. step 2必须保存完整model/四rank optimizer checkpoint，并从该精确目录恢复到step 4。机器审计要求depth loss每步有限且大于0、action/proprio监督比例为1、全部loss有限、四rank optimizer为FP32且resume来源一致。
+
+P3只使用固定8个CloseFridge clip、GBS4、ZeRO-2 CPUAdam和debug checkpoint策略，目的是关闭loader/forward/backward/resume工程门禁；不作为正式RGB-D超参或性能结论。完整缓存及短训练真实结果均为`cluster-pending`。
 
 ## 后续顺序
 
 1. `P1-structure + P1-render`：已由用户回报全部通过。
-2. `P2-encoding + pilot cache + audit`：代码与单卡作业已完成，等待真实三任务生成报告。
-3. 接入 loader、checkpoint depth branch 和单 batch/resume 门禁。
+2. `P2-encoding + pilot cache + audit`：用户回报三项检查全部通过。
+3. `P3-full CloseFridge cache + loader + batch + short resume`：代码已完成，等待按上述两个作业顺序运行。
 4. CloseFridge ratio0 RGB-D 单任务试验；通过后再运行 Atomic9 ratio0 RGB-D。
 
 任何 P1 render 对齐失败都优先修复 scene/state/camera 恢复，不进入全量缓存生成。

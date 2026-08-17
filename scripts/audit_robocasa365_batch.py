@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""读取一个真实 RoboCasa365 RGB-only batch，并输出机器可读验收报告。"""
+"""读取一个真实 RoboCasa365 RGB或RGB-D batch，并输出机器可读验收报告。"""
 
 from __future__ import annotations
 
@@ -86,9 +86,23 @@ def main() -> int:
     parser.add_argument("--action-skip", type=int, default=1)
     parser.add_argument("--video-height", type=int, default=256)
     parser.add_argument("--video-width", type=int, default=320)
+    parser.add_argument("--depth-cache-root")
+    parser.add_argument("--depth-encoding-path")
+    parser.add_argument("--depth-cache-manifest")
     parser.add_argument("--num-workers", type=int, default=0, help="DataLoader worker 数；首次验收建议为 0。")
     parser.add_argument("--output", "--log-file", default=str(DEFAULT_OUTPUT))
     args = parser.parse_args()
+    depth_values = (
+        args.depth_cache_root,
+        args.depth_encoding_path,
+        args.depth_cache_manifest,
+    )
+    if any(depth_values) and not all(depth_values):
+        parser.error(
+            "RGB-D模式必须同时提供--depth-cache-root、--depth-encoding-path和"
+            "--depth-cache-manifest"
+        )
+    use_depth = all(depth_values)
 
     output_path = Path(args.output).expanduser().resolve()
     report: dict[str, Any] = {
@@ -120,9 +134,17 @@ def main() -> int:
             "action_skip": args.action_skip,
             "video_size": [args.video_height, args.video_width],
             "augment": False,
-            "use_depth": False,
+            "use_depth": use_depth,
             "normalization": "none",
         }
+        if use_depth:
+            config.update(
+                {
+                    "depth_cache_root": args.depth_cache_root,
+                    "depth_encoding_path": args.depth_encoding_path,
+                    "depth_cache_manifest": args.depth_cache_manifest,
+                }
+            )
         dataset = RoboCasa365Dataset(**config)
         first = dataset[args.index]
         second = dataset[args.index]
@@ -150,13 +172,31 @@ def main() -> int:
             "proprio_mask_all_valid": bool(torch.all(first["proprio_mask"] == 1).item()),
             "action_mask_all_valid": bool(torch.all(first["action_mask"] == 1).item()),
             "camera_type_mask": first["camera_type_mask"].tolist() == [0, 0, 1],
-            "depth_absent": "depths" not in first,
+            "depth_contract": (
+                "depths" in first
+                and list(first["depths"].shape)
+                == [3, args.sequence_length, 3, args.video_height, args.video_width]
+                and float(first["depths"].min()) >= -1.00001
+                and float(first["depths"].max()) <= 1.00001
+            )
+            if use_depth
+            else "depths" not in first,
             "finite_tensors": all(
                 bool(torch.isfinite(first[key]).all().item())
-                for key in ("video", "proprios", "actions")
+                for key in (
+                    "video",
+                    "proprios",
+                    "actions",
+                    *(("depths",) if use_depth else ()),
+                )
             ),
             "deterministic_without_augmentation": _same_sample(first, second),
             "batch_dimension": list(batch["video"].shape[:2]) == [1, 3],
+            "depth_batch_dimension": (
+                list(batch["depths"].shape[:2]) == [1, 3]
+                if use_depth
+                else "depths" not in batch
+            ),
         }
 
         report.update(
@@ -183,7 +223,9 @@ def main() -> int:
                 "sample": {key: _tensor_summary(value) for key, value in first.items()},
                 "batch": {key: _tensor_summary(value) for key, value in batch.items()},
                 "checks": checks,
-                "normalization_status": "M1 raw state/action；禁止用于正式训练，M2 后启用归一化",
+                "normalization_status": (
+                    "batch审计使用raw state/action；depth保持冻结uint8映射后的[-1,1]"
+                ),
                 "ok": all(checks.values()),
             }
         )
