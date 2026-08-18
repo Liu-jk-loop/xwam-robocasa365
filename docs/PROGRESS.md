@@ -1,13 +1,13 @@
 # 项目进度
 
-更新时间：2026-08-17
+更新时间：2026-08-18
 
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：RGBD-P3——完整CloseFridge缓存、loader、batch与短训练恢复
+- 当前阶段：RGBD-P4——CloseFridge单任务RGB-D正式训练
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Atomic9 ratio0训练和checkpoint评测已完成，后续新训练默认ratio0。用户已回报P1 render及P2 encoding/三任务cache/audit全部通过且无报错；本次仍未提供Job ID。P3完整CloseFridge缓存与RGB-D batch/step2→4训练入口已实现，等待Clariden执行。
+- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Atomic9 ratio0训练和checkpoint评测已完成，后续新训练默认ratio0。RGBD-P1/P2均已通过；Job `3108551`完成CloseFridge真实RGB-D batch、正depth loss、四卡optimizer update及step 2→4严格恢复，联合audit为PASS。P4正式训练入口已实现，等待Clariden执行。
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -19,7 +19,7 @@
 | M2 动作与 checkpoint 适配 | 已完成 | 两种初始化、完整动作契约及 DeepSpeedCPUAdam 单 batch 参数更新均通过 | 已关闭 |
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
-| M5 离线深度试点 | P1/P2已通过；P3 loader与短训练已实现 | P1/P2由用户回报全通过；P3为`cluster-pending` | 先完成CloseFridge 318视频，再关闭RGB-D batch及step 2→4恢复门禁 |
+| M5 离线深度试点 | P1～P3已通过；进入P4单任务正式训练 | Job `3108551`：CloseFridge loader/depth loss/四卡更新/resume联合门禁PASS | 运行CloseFridge ratio0、GBS128、3000步RGB-D正式训练 |
 | M6 Atomic 正式训练与评测 | Atomic9 ratio0训练完成并进入checkpoint比较；准备ratio0.5对照 | ratio0 step 5500/7000为46.9%/50.9%；ratio0.5复用8500步scheduler并在7500停止 | 补测ratio0 step 6500/7500，并完成同合同ratio0.5训练与评测 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
@@ -30,7 +30,9 @@
 - P1渲染审计：用户已回报Atomic9全部检查通过且无报错；由于没有提供Job ID，仅记录用户反馈，不推断机器编号。
 - P2编码/小缓存：固定项目版本`robocasa365_inverse_metric_global_q_v1`，以三个代表性任务各3 episode标定全局q01/q99，生成9 episode×3 camera缓存；用户回报所有检查通过且无错误。
 - P3 loader：已接入严格encoding/manifest/sidecar合同，输出三路同帧`depths`并保持RGB-only路径完全不读取depth。完整CloseFridge生成器复用P2 encoding，目标106 episode/318视频。
-- P3 batch/短训练：新增4×GH200一体化门禁，先读真实RGB-D batch，再step 0→2保存及step 2→4恢复；要求depth loss有限非零及完整四rank FP32 optimizer证据。真实运行是`cluster-pending`。
+- P3 batch/短训练：Job `3108551`已完成4×GH200一体化门禁；真实RGB-D batch、step 0→2保存、step 2→4严格恢复、有限正depth loss及四rank FP32 optimizer证据全部通过。用户未提供本次commit SHA，不补造Git provenance。
+- P3产物保存：smoke脚本把metadata/result/checkpoint写在Capstor scratch的`experiments/xwam/close_fridge_rgbd_resume_gate_3108551`，脚本没有删除或移动逻辑；Store中的batch/audit和训练日志是永久证据。是否存在平台侧scratch生命周期不由仓库脚本推断。
+- P4正式训练：新增CloseFridge ratio0、seed42、3000步、4×GH200、`batch8×accum4=GBS128`入口。启用RGB/depth同步augmentation、ZeRO-1 GPU AdamW、FP32 optimizer state和完整gradient checkpointing；每500步在IOPS滚动保留2份、每1000步在Store永久保存、最终step 3000另存。真实吞吐、峰值显存及最终loss为`cluster-pending`。
 
 ## Clariden 部署状态
 

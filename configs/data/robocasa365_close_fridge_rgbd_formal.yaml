@@ -1,0 +1,31 @@
+# CloseFridge单任务RGB-D正式训练；Clariden作业覆盖所有绝对路径。
+format: robocasa365_lerobot_v21
+training_ready: true
+dataset_path: ./datasets/robocasa365/CloseFridge/latest
+task_name: CloseFridge
+task_manifest: configs/tasks/robocasa365_atomic_seen.json
+camera_keys:
+  - observation.images.robot0_agentview_left
+  - observation.images.robot0_agentview_right
+  - observation.images.robot0_eye_in_hand
+camera_types:
+  - static
+  - static
+  - dynamic
+sequence_length: 9
+frame_skip: 4
+action_skip: 1
+video_size: [256, 320]
+augment: true
+crop_ratio: 0.95
+brightness: 0.2
+contrast: 0.2
+saturation: 0.2
+hue: 0.05
+normalization: panda_omron_v1
+schema_path: configs/schemas/robocasa365_panda_omron_v1.json
+depth_cache_root: ./datasets/robocasa365/depth-cache/atomic
+depth_encoding_path: ./datasets/robocasa365/depth-cache/encoding.json
+depth_cache_manifest: ./datasets/robocasa365/depth-cache/close-fridge-manifest.json
+parquet_cache_size: 2
+video_cache_size: 4

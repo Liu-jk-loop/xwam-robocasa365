@@ -1371,6 +1371,74 @@ XWAM_RGBD_MAX_RGB_MAE=16 sbatch deployment/clariden/audit_atomic9_rgbd_replay_in
 
 即使本门禁通过，也只关闭scene/state/camera/metric-depth回放门禁；报告中的inverse-depth PNG是诊断预览，不是已冻结的X-WAM uint8训练编码，不能据此开始全量depth生成。
 
+## CloseFridge RGB-D单任务正式训练
+
+Job `3108551`已经关闭真实RGB-D batch、正depth loss、四卡optimizer update及step 2→4
+恢复门禁。smoke产物位于Capstor scratch，而不是Store；仓库脚本不会删除它们：
+
+```bash
+SMOKE_EXP=/capstor/scratch/cscs/zjingchen/terry_nys/experiments/xwam/close_fridge_rgbd_resume_gate_3108551
+test -d "$SMOKE_EXP"
+find "$SMOKE_EXP" -maxdepth 3 -type f -print | sort
+```
+
+如果该目录随后消失，应检查当前挂载和平台scratch生命周期；不要把它解释为训练脚本执行了
+cleanup。正式训练的可恢复checkpoint不依赖这个目录。
+
+正式实验固定CloseFridge、公开X-WAM pretrained、ratio0、seed42、3000 optimizer steps和
+`4×batch8×accum4=GBS128`。RGB-D额外增加depth分支，因此micro-batch先使用8，而不是
+RGB-only单任务的16；ZeRO-1、GPU AdamW、BF16计算、FP32 optimizer state和gradient
+checkpointing保持正式设置。
+
+先更新主训练clone并确认门禁、depth缓存和工作区：
+
+```bash
+DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
+DEPLOY_IOPS=/iopsstor/scratch/cscs/zjingchen/terry_nys
+REPO="$DEPLOY_STORE/src/xwam-robocasa365"
+RGBD_GATE="$DEPLOY_STORE/manifests/xwam/atomic9_rgbd/close_fridge_rgbd_resume_3108551.json"
+DEPTH_MANIFEST="$DEPLOY_STORE/manifests/xwam/atomic9_rgbd/robocasa365_close_fridge_rgbd_cache_manifest.json"
+
+cd "$REPO"
+git switch dev/atomic-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+test -z "$(git status --porcelain)"
+test -s "$RGBD_GATE"
+test -s "$DEPTH_MANIFEST"
+grep -E '"(ok|result|episode_count|video_count)"' "$RGBD_GATE" "$DEPTH_MANIFEST"
+```
+
+使用隐藏输入传递W&B API key，然后提交；不要把key写入命令、脚本或日志：
+
+```bash
+read -rsp 'W&B API key: ' WANDB_API_KEY
+echo
+export WANDB_API_KEY
+sbatch deployment/clariden/train_close_fridge_rgbd_xwam.sbatch
+unset WANDB_API_KEY
+```
+
+每500步在IOPS保留最多2份滚动checkpoint，每1000步在Store永久保存，step 3000另存final：
+
+```text
+/iopsstor/scratch/cscs/zjingchen/terry_nys/xwam_run/close_fridge_rgbd_ratio00_seed42_4gpu/checkpoints/
+/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/checkpoints/xwam/close_fridge_rgbd_ratio00_seed42_4gpu/checkpoints/
+```
+
+如果12小时先到，等待原Job完全退出后，重新执行同一组隐藏输入和`sbatch`命令。planner会从
+IOPS/Store中最新的完整四rankcheckpoint恢复；文件锁会拒绝两个并发作业写同一实验。不要
+恢复P3 smoke、RGB-only或其他任务的checkpoint，也不要修改实验名后复用原W&B run。
+
+正常达到step 3000后，Store报告必须为`ok=true/result=pass`：
+
+```text
+/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/manifests/xwam/atomic9_rgbd/close_fridge_rgbd_formal_<JOB_ID>.json
+```
+
+如果首轮在正式forward/backward阶段CUDA OOM，反馈train log和峰值显存；下一档只把硬件层
+改为`4×batch4×accum8=GBS128`并从step 0重启，不降低GBS、不启用CPU optimizer offload，
+也不从内存布局不同的半成品checkpoint继续。
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：

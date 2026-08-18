@@ -1,5 +1,14 @@
 # 变更记录
 
+## 2026-08-18 — RGBD-P3门禁关闭与CloseFridge正式训练入口
+
+- 用户回报Clariden Job `3108551`的CloseFridge RGB-D真实batch、有限正depth loss、四卡optimizer update及step 2→4严格恢复全部通过，联合audit为`ok=true/result=pass`。本次反馈没有commit SHA，因此只记录Job和机器结果，不补造Git provenance。
+- 核对确认smoke脚本把运行metadata/result/checkpoint保存在Capstor scratch的独立experiment目录，仓库脚本没有`rm`、cleanup或产物迁移逻辑；Store中的batch/audit与日志保持独立。新增回归测试阻止未来误加smoke删除逻辑。
+- 新增CloseFridge单任务RGB-D正式data/hardware/experiment层：使用完整106 episode离线depth cache、同步RGB/depth augmentation、公开X-WAM pretrained初始化、ratio0、seed42、LR `1e-5`、warmup200及固定3000步scheduler/停止点。
+- 正式硬件层固定4×GH200、`batch8×accum4=GBS128`、ZeRO-1 GPU AdamW、BF16计算、FP32 optimizer state和完整gradient checkpointing。相比RGB-only的micro-batch16主动减半，为新增depth VAE/DiT分支保留显存余量；不继承P3 debug的ZeRO-2 CPU offload。
+- 新Clariden作业先要求Job `3108551`联合audit、106 episode/318 depth视频和干净Git，再用双checkpoint根自动选择最新完整四rankcheckpoint恢复。IOPS每500步滚动保留2份，Store每1000步永久保存且最终step 3000另存；Capstor experiment目录只承载resolved config、metadata/result及W&B run ID，不作为唯一恢复来源。
+- 作业结束审计固定检查RGB-D/ratio0/GBS128/ZeRO-1/FP32 state、正depth loss、完整checkpoint和W&B身份；运行手册补充smoke目录核对、安全W&B提交、12小时重提恢复、产物路径和OOM回退规则。本地没有Torch/GH200，真实正式训练显存、吞吐、断点恢复及step 3000结果标记为`cluster-pending`。
+
 ## 2026-08-17 — RGBD-P3完整CloseFridge缓存、严格loader与短训练恢复门禁
 
 - 用户回报P2全局编码、三任务小缓存及数值/时序/存储三项检查全部通过且无报错；未提供Job ID，因此进度只记录用户反馈。深度生成器现支持`--encoding-input`复用冻结encoding和`--episodes-per-task=0`生成全部episode，P2原三任务入口继续固定任务数3且保持兼容。
