@@ -150,6 +150,47 @@ class RoboCasa365RGBDTrainingContractTests(unittest.TestCase):
         self.assertIn("8×batch4×accum4=GBS128", runbook)
         self.assertIn("8×batch2×accum8=GBS128", runbook)
 
+    def test_rgbd_evaluation_runs_two_checkpoints_and_two_seed_ranges(self) -> None:
+        job = (
+            REPO_ROOT
+            / "deployment/clariden/eval_close_fridge_rgbd_xwam.sbatch"
+        ).read_text(encoding="utf-8")
+        policy = (
+            REPO_ROOT / "evaluation/robocasa365_policy_server.py"
+        ).read_text(encoding="utf-8")
+
+        for expected in (
+            "#SBATCH --gpus-per-node=4",
+            "#SBATCH --cpus-per-task=64",
+            "#SBATCH --mem=450G",
+            "close_fridge_rgbd_ratio00_seed42_8gpu",
+            "epoch=5-step=1000.ckpt",
+            "epoch=*-step=1500.ckpt",
+            "XWAM_RGBD_EVAL_EPISODES:-50",
+            "RUN_NAMES=(step1000_seed42 step1000_seed7 step1500_seed42 step1500_seed7)",
+            "seeds = [42, 7, 42, 7]",
+            "--cuda-device \"$run_index\"",
+            "--cuda-visible-devices \"$run_index\"",
+            'EVAL_ROOT="$DEPLOY_IOPS/x-wam-eval/close-fridge-rgbd/$EVAL_ID"',
+            'COMPARISON_JSON="$EVAL_ROOT/comparison.json"',
+            '"model_seed": 42',
+            '"training_modality": "rgbd"',
+            '"online_inference_modalities": ["rgb", "proprio"]',
+        ):
+            self.assertIn(expected, job)
+        self.assertEqual(job.count("--server-id 5"), 1)
+        self.assertEqual(job.count("--client-id 5"), 1)
+        self.assertIn("TOPOLOGY_0=", job)
+        self.assertIn("TOPOLOGY_3=", job)
+        self.assertIn("CHECKPOINT_0=", job)
+        self.assertIn("CHECKPOINT_3=", job)
+        self.assertNotIn("trainer_max_steps", job)
+        self.assertIn("runner = XWAMRunner(config=config, run_depth=False)", policy)
+        self.assertIn('"training_use_depth": training_use_depth', policy)
+        self.assertIn('"inference_run_depth": False', policy)
+        self.assertIn('"online_depth_required": False', policy)
+        self.assertNotIn("首轮只允许 RGB-only / use_depth=false", policy)
+
     def test_runner_rejects_missing_or_misaligned_depth_batch(self) -> None:
         runner = (REPO_ROOT / "runners/xwam_runner.py").read_text(encoding="utf-8")
         self.assertIn('raise KeyError("use_depth=true但batch缺少depths")', runner)

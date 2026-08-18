@@ -1439,6 +1439,48 @@ IOPS/Store中最新的完整八rankcheckpoint恢复；文件锁会拒绝两个�
 下一档只把硬件层改为`8×batch2×accum8=GBS128`并从step 0重启，不降低GBS、不启用CPU
 optimizer offload，也不从内存布局不同的半成品checkpoint继续。
 
+训练脚本保持原3000步停止点。若当前实验由用户手动保留step1000和step1500
+checkpoint，在独立评测clone中拉取同一commit后提交四路RGB-D评测：
+
+```bash
+EVAL_REPO="$DEPLOY_STORE/src/xwam-robocasa365-eval"
+cd "$EVAL_REPO"
+git switch dev/atomic-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+test -z "$(git status --porcelain)"
+
+sbatch deployment/clariden/eval_close_fridge_rgbd_xwam.sbatch
+```
+
+默认加载step1000：
+
+```text
+/iopsstor/scratch/cscs/zjingchen/terry_nys/xwam_run/close_fridge_rgbd_ratio00_seed42_8gpu/checkpoints/epoch=5-step=1000.ckpt
+```
+
+step1500在同一`checkpoints/`下按`epoch=*-step=1500.ckpt`唯一匹配；如果存在零个或
+多个候选，作业在加载模型前失败，可以用`XWAM_RGBD_EVAL_CHECKPOINT_1500`给出精确路径。
+
+默认一个节点使用4张GPU并发启动4个server和4个client，每路运行50 episodes：
+
+| GPU | checkpoint | RoboCasa seed范围 | 模型seed |
+| --- | --- | --- | --- |
+| 0 | step1000 | 42～91 | 42 |
+| 1 | step1000 | 7～56 | 42 |
+| 2 | step1500 | 42～91 | 42 |
+| 3 | step1500 | 7～56 | 42 |
+
+结果写入IOPS：
+
+```text
+/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/close-fridge-rgbd/step1000-1500_seed42-7_target_50ep/
+```
+
+4个子目录分别为`step1000_seed42`、`step1000_seed7`、`step1500_seed42`和
+`step1500_seed7`；总表为`comparison.json`。RGB-D中的depth只用于训练辅助loss。
+评测policy按`use_depth=true`构造两模态权重结构并严格加载checkpoint，但生成调用
+固定`run_depth=false`，模拟器client仍只发送三路RGB与16D state，无需在线渲染depth。
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：

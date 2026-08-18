@@ -1,5 +1,15 @@
 # 变更记录
 
+## 2026-08-18 — CloseFridge RGB-D四路checkpoint/seed评测
+
+- 保持CloseFridge RGB-D训练配置和2节8卡训练作业不变；训练由用户手动在期望步数停止，本轮不改trainer/planner/scheduler停止逻辑。
+- 新增一个CloseFridge RGB-D四卡评测入口：GPU0/1各加载一次step1000，GPU2/3各加载一次step1500；每张卡各启动一个policy server和一个RoboCasa client。
+- 每个checkpoint分别评测连续seed `42..91`和`7..56`（默认50 episodes）；模型侧采样seed继续固定42，target split、1000环境步、replan20和action denoise10与既有比较合同一致。
+- 四路broker使用独立端口、topology、控制文件、日志和结果目录；最终生成四个单路summary和一个`comparison.json`，避免并发产物互相覆盖。
+- step1000默认使用用户给定的IOPS `epoch=5-step=1000.ckpt`；step1500按`epoch=*-step=1500.ckpt`唯一匹配，避免在脚本中猜epoch编号。
+- policy server允许按`use_depth=true`构造训练时RGB-D结构并严格加载checkpoint，但在线评测仍固定`run_depth=false`，client只传三路RGB和16D state。
+- 本地无Torch/Clariden模拟器；四卡同时加载、四路闭环和汇总产物均为`cluster-pending`。
+
 ## 2026-08-18 — CloseFridge RGB-D正式训练切换2节点8卡
 
 - 用户回报首版4×GH200、单卡batch8的RGB-D正式设置会OOM；本次没有Job ID、峰值显存或完整日志，因此记录为用户反馈，不推断具体OOM阶段或容量。
