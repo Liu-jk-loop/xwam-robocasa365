@@ -1,8 +1,8 @@
-# CloseFridge RGB-D正式训练：4×batch8×accum4=GBS128。
-# RGB-D比RGB-only增加depth VAE/DiT分支，默认micro-batch从16降为8以保留显存余量。
+# CloseFridge RGB-D正式训练：2节点×4卡，8×batch4×accum4=GBS128。
+# RGB-D比RGB-only增加depth VAE/DiT分支，以单卡batch4控制显存。
 precision: bf16-mixed
 devices: 4
-batch_size_per_gpu: 8
+batch_size_per_gpu: 4
 accumulate_grad_batches: 4
 global_batch_size: 128
 num_workers_per_gpu: 4
@@ -22,7 +22,12 @@ deepspeed_fp32_optimizer_states: true
 deepspeed_exclude_frozen_parameters: false
 distributed_timeout_minutes: 90
 
-# 单任务RGB-D不是M6五epochmanifest实验，不启用M6 formal guard。
+# 单任务RGB-D使用固定步数，不启用依赖多任务manifest的M6 formal guard。
 m6_formal_guard: false
+formal_accelerator: GH200
+formal_minimum_memory_gib: 90
+formal_world_size: 8
+formal_num_nodes: 2
+formal_devices_per_node: 4
 audit_optimizer_state_dtype: true
 allow_distributed_generator_state: true

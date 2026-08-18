@@ -1,5 +1,13 @@
 # 变更记录
 
+## 2026-08-18 — CloseFridge RGB-D正式训练切换2节点8卡
+
+- 用户回报首版4×GH200、单卡batch8的RGB-D正式设置会OOM；本次没有Job ID、峰值显存或完整日志，因此记录为用户反馈，不推断具体OOM阶段或容量。
+- 正式硬件层改为2节点×每节点4张GH200、单卡batch4、累积4，保持GBS128、ZeRO-1 GPU AdamW、BF16、FP32 optimizer state和完整gradient checkpointing。训练步数、LR、warmup、ratio0、seed42及depth loss权重不变。
+- 正式作业使用torchrun建立8-rank world，增加跨节点master地址/端口、node-rank、节点独立日志和90分钟分布式timeout；planner只接受8-rank完整checkpoint，最终审计同时要求rank 0～7的optimizer实态报告与8个非空ZeRO shard。
+- 实验名、W&B run、Capstor metadata、IOPS滚动checkpoint和Store永久checkpoint全部切换到独立`close_fridge_rgbd_ratio00_seed42_8gpu`。它从公开X-WAM pretrained的step 0启动，不扫描、不隔离、不恢复4卡正式实验或P3 smoke checkpoint。
+- 本地没有Clariden多节点/Torch运行时；真实跨节点NCCL、显存、首个optimizer update、8-shard checkpoint及恢复仍为`cluster-pending`。
+
 ## 2026-08-18 — RGBD-P3门禁关闭与CloseFridge正式训练入口
 
 - 用户回报Clariden Job `3108551`的CloseFridge RGB-D真实batch、有限正depth loss、四卡optimizer update及step 2→4严格恢复全部通过，联合audit为`ok=true/result=pass`。本次反馈没有commit SHA，因此只记录Job和机器结果，不补造Git provenance。

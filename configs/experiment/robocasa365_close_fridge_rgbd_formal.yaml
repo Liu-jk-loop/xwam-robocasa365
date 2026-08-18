@@ -1,6 +1,6 @@
 # CloseFridge单任务RGB-D正式训练：ratio0、固定3000步scheduler和停止点。
 exp_root: ./experiments/
-exp_name: close_fridge_rgbd_ratio00_seed42_4gpu
+exp_name: close_fridge_rgbd_ratio00_seed42_8gpu
 seed: 42
 
 lr: 1e-5
@@ -22,7 +22,7 @@ enable_tensorboard: false
 enable_wandb: true
 wandb_project: xwam-robocasa365
 wandb_entity: null
-wandb_name: close_fridge_rgbd_ratio00_seed42_4gpu
+wandb_name: close_fridge_rgbd_ratio00_seed42_8gpu
 wandb_group: close_fridge_rgbd_seed42
 wandb_mode: online
 wandb_require_api_key: true

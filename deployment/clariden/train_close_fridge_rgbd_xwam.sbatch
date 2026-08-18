@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #SBATCH --account=aa004
 #SBATCH --partition=normal
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=64
 #SBATCH --time=12:00:00
-#SBATCH --job-name=xwam_cf_rgbd
-#SBATCH --output=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/close-fridge-rgbd-formal-%j.log
+#SBATCH --job-name=xwam_cf_rgbd8
+#SBATCH --output=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/close-fridge-rgbd-formal-8gpu-%j.log
 #SBATCH --export=ALL
 
 set -Eeuo pipefail
@@ -28,12 +28,12 @@ WAN_DIR="$DEPLOY_STORE/checkpoints/xwam/wan22_5b"
 PRETRAINED="$DEPLOY_STORE/checkpoints/xwam/pretrained/checkpoints/last.ckpt"
 MODEL_CONFIG=configs/model/wan22_5b_robocasa365_atomic_rgbd.yaml
 DATA_CONFIG=configs/data/robocasa365_close_fridge_rgbd_formal.yaml
-HARDWARE_CONFIG=configs/hardware/gh200x4_96gb_gbs128_rgbd_single_task.yaml
+HARDWARE_CONFIG=configs/hardware/gh200x8_96gb_gbs128_rgbd_single_task.yaml
 EXPERIMENT_CONFIG=configs/experiment/robocasa365_close_fridge_rgbd_formal.yaml
 
 TOTAL_STEPS=3000
 EXP_ROOT="$DEPLOY_CAPSCR/experiments/xwam"
-EXP_NAME=close_fridge_rgbd_ratio00_seed42_4gpu
+EXP_NAME=close_fridge_rgbd_ratio00_seed42_8gpu
 EXP_DIR="$EXP_ROOT/$EXP_NAME"
 RUN_DIR="$EXP_DIR/runs"
 HOT_CHECKPOINT_ROOT="$DEPLOY_IOPS/xwam_run/$EXP_NAME/checkpoints"
@@ -45,13 +45,13 @@ WANDB_PROJECT="${WANDB_PROJECT:-xwam-robocasa365}"
 WANDB_ENTITY="${WANDB_ENTITY:-}"
 WANDB_ROOT="$DEPLOY_IOPS/wandb/xwam/$EXP_NAME"
 WANDB_CACHE_DIR="$DEPLOY_IOPS/cache/wandb"
-PLAN_JSON="$RUN_DIR/close-fridge-rgbd-formal-${SLURM_JOB_ID}-plan.json"
-PLAN_ENV="$RUN_DIR/close-fridge-rgbd-formal-${SLURM_JOB_ID}-plan.env"
-RUN_ID="close-fridge-rgbd-formal-${SLURM_JOB_ID}"
-MAIN_LOG="$DEPLOY_STORE/logs/xwam/close-fridge-rgbd-formal-${SLURM_JOB_ID}.log"
-TRAIN_LOG="$DEPLOY_STORE/logs/xwam/close-fridge-rgbd-formal-${SLURM_JOB_ID}-train.log"
-FAILURE_REPORT="$DEPLOY_STORE/logs/xwam/close-fridge-rgbd-formal-${SLURM_JOB_ID}-failure.txt"
-FINAL_AUDIT="$DEPLOY_STORE/manifests/xwam/atomic9_rgbd/close_fridge_rgbd_formal_${SLURM_JOB_ID}.json"
+PLAN_JSON="$RUN_DIR/close-fridge-rgbd-formal-8gpu-${SLURM_JOB_ID}-plan.json"
+PLAN_ENV="$RUN_DIR/close-fridge-rgbd-formal-8gpu-${SLURM_JOB_ID}-plan.env"
+RUN_ID="close-fridge-rgbd-formal-8gpu-${SLURM_JOB_ID}"
+MAIN_LOG="$DEPLOY_STORE/logs/xwam/close-fridge-rgbd-formal-8gpu-${SLURM_JOB_ID}.log"
+TRAIN_LOG="$DEPLOY_STORE/logs/xwam/close-fridge-rgbd-formal-8gpu-${SLURM_JOB_ID}-train.log"
+FAILURE_REPORT="$DEPLOY_STORE/logs/xwam/close-fridge-rgbd-formal-8gpu-${SLURM_JOB_ID}-failure.txt"
+FINAL_AUDIT="$DEPLOY_STORE/manifests/xwam/atomic9_rgbd/close_fridge_rgbd_formal_8gpu_${SLURM_JOB_ID}.json"
 
 export XWAM_FAILURE_REPORT="$FAILURE_REPORT"
 export XWAM_MAIN_LOG="$MAIN_LOG"
@@ -62,7 +62,7 @@ source "$REPO/deployment/clariden/error_trap.sh"
 xwam_install_err_trap
 
 cd "$REPO"
-test "${SLURM_NNODES:-0}" == 1
+test "${SLURM_NNODES:-0}" == 2
 test -s "$EDF"
 test -d "$RUNTIME_OVERLAY"
 test -d "$WANDB_OVERLAY"
@@ -121,7 +121,7 @@ echo "data_config=$DATA_CONFIG"
 echo "hardware_config=$HARDWARE_CONFIG"
 echo "experiment_config=$EXPERIMENT_CONFIG"
 echo "scheduler_steps=$TOTAL_STEPS target_steps=$TOTAL_STEPS"
-echo "global_batch_size=128 (4 GPUs x batch 8 x accumulation 4)"
+echo "global_batch_size=128 (8 GPUs x batch 4 x accumulation 4)"
 echo "rolling_checkpoints=$HOT_CHECKPOINT_ROOT (every 500 steps, max 2)"
 echo "durable_checkpoints=$DURABLE_CHECKPOINT_ROOT (every 1000 steps, unlimited)"
 echo "experiment_artifacts=$EXP_DIR (not deleted by this job)"
@@ -156,7 +156,7 @@ python scripts/plan_robocasa365_m6_formal_chunk.py \
   --checkpoint-root "$DURABLE_CHECKPOINT_ROOT" \
   --total-steps "$TOTAL_STEPS" \
   --chunk-steps "$TOTAL_STEPS" \
-  --expected-world-size 4 \
+  --expected-world-size 8 \
   --output-json "$PLAN_JSON" \
   --output-env "$PLAN_ENV" \
   --quarantine-incomplete-root "$HOT_QUARANTINE_ROOT" \
@@ -181,8 +181,11 @@ EVENTS="$RUN_DIR/${RUN_ID}_checkpoint_events.jsonl"
 OPTIMIZER_DIR="$RUN_DIR/${RUN_ID}_optimizer_state"
 
 XWAM_PHASE=close_fridge_rgbd_formal_training
-srun --nodes=1 \
-  --ntasks=1 \
+MASTER_ADDR="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | sed -n '1p')"
+MASTER_PORT="$((20000 + SLURM_JOB_ID % 20000))"
+test -n "$MASTER_ADDR"
+srun --nodes=2 \
+  --ntasks=2 \
   --ntasks-per-node=1 \
   --kill-on-bad-exit=1 \
   --environment="$EDF" \
@@ -215,11 +218,22 @@ srun --nodes=1 \
     WANDB_CACHE_DIR="$WANDB_CACHE_DIR" \
     WANDB_MODE=online \
     WANDB_RESUME=allow \
+    MASTER_ADDR="$MASTER_ADDR" \
+    MASTER_PORT="$MASTER_PORT" \
     XWAM_FAILURE_REPORT="$FAILURE_REPORT" \
     XWAM_MAIN_LOG="$MAIN_LOG" \
     XWAM_TRAIN_LOG="$TRAIN_LOG" \
   bash -lc '
 set -Eeuo pipefail
+NODE_RANK="${SLURM_NODEID:?SLURM_NODEID is required}"
+NODE_TRAIN_LOG="$TRAIN_LOG"
+NODE_FAILURE_REPORT="$XWAM_FAILURE_REPORT"
+if [[ "$NODE_RANK" != 0 ]]; then
+  NODE_TRAIN_LOG="${TRAIN_LOG%.log}-node${NODE_RANK}.log"
+fi
+NODE_FAILURE_REPORT="${XWAM_FAILURE_REPORT%.txt}-node${NODE_RANK}.txt"
+export XWAM_FAILURE_REPORT="$NODE_FAILURE_REPORT"
+export XWAM_TRAIN_LOG="$NODE_TRAIN_LOG"
 export XWAM_PHASE=close_fridge_rgbd_formal_training_container
 source "$REPO/deployment/clariden/error_trap.sh"
 xwam_install_err_trap
@@ -243,6 +257,7 @@ assert all("GH200" in name.upper() for name in names), names
 print("CloseFridge RGB-D formal GPU preflight:", names)
 PY
 
+if [[ "$NODE_RANK" == 0 ]]; then
 python - <<"PY"
 import importlib.metadata
 import os
@@ -258,6 +273,7 @@ assert os.environ.get("WANDB_API_KEY")
 assert wandb.login(verify=True)
 print("wandb authentication: api_key_env pass")
 PY
+fi
 
 export SLURM_JOB_NAME=interactive
 unset SLURM_NTASKS SLURM_NTASKS_PER_NODE SLURM_PROCID SLURM_LOCALID SLURM_NODEID
@@ -291,7 +307,13 @@ git rev-parse HEAD
 test -z "$(git status --porcelain)"
 nvidia-smi
 free -h
-python "${TRAIN_ARGS[@]}" 2>&1 | tee "$TRAIN_LOG"
+python -m torch.distributed.run \
+  --nnodes 2 \
+  --nproc-per-node 4 \
+  --node-rank "$NODE_RANK" \
+  --master-addr "$MASTER_ADDR" \
+  --master-port "$MASTER_PORT" \
+  "${TRAIN_ARGS[@]}" 2>&1 | tee "$NODE_TRAIN_LOG"
 '
 
 XWAM_PHASE=close_fridge_rgbd_formal_artifact_audit
@@ -304,6 +326,7 @@ srun --nodes=1 --ntasks=1 --kill-on-bad-exit=1 --environment="$EDF" \
     METADATA="$METADATA" \
     RESULT="$RESULT" \
     EVENTS="$EVENTS" \
+    OPTIMIZER_DIR="$OPTIMIZER_DIR" \
     TRAIN_LOG="$TRAIN_LOG" \
     EXPECTED_STEP="$XWAM_PLAN_TARGET_STEP" \
     EXPECTED_WANDB_RUN_ID="$WANDB_RUN_ID" \
@@ -333,7 +356,8 @@ checks = {
     "target_step": int(result.get("global_step", -1)) == expected_step == 3000,
     "clean_git": metadata["git"]["dirty"] is False,
     "close_fridge": metadata["dataset"]["task_name"] == "CloseFridge",
-    "world_size_four": int(metadata["topology"]["world_size"]) == 4,
+    "world_size_eight": int(metadata["topology"]["world_size"]) == 8,
+    "two_node_topology": int(metadata["topology"]["num_nodes"]) == 2 and int(metadata["topology"]["devices_per_node"]) == 4,
     "scheduler_3000": int(metadata["training"]["num_training_steps"]) == 3000,
     "wandb_identity": metadata["tracking"]["wandb"]["run_id"] == os.environ["EXPECTED_WANDB_RUN_ID"],
     "wandb_auth": metadata["tracking"]["wandb"]["auth"] == "api_key_env",
@@ -341,7 +365,8 @@ checks = {
     "ratio_zero": "clean_action_ratio: 0.0" in resolved,
     "augmentation_enabled": "augment: true" in resolved,
     "global_batch_128": "global_batch_size: 128" in resolved,
-    "microbatch_contract": "batch_size_per_gpu: 8" in resolved and "accumulate_grad_batches: 4" in resolved,
+    "microbatch_contract": "batch_size_per_gpu: 4" in resolved and "accumulate_grad_batches: 4" in resolved,
+    "configured_topology": "formal_world_size: 8" in resolved and "formal_num_nodes: 2" in resolved and "formal_devices_per_node: 4" in resolved,
     "zero_one_fp32": "deepspeed_stage: 1" in resolved and "deepspeed_fp32_optimizer_states: true" in resolved,
     "gradient_checkpointing": "use_gradient_checkpointing: true" in resolved,
     "rolling_checkpoint_contract": "save_interval: 500" in resolved and "save_top_k: 2" in resolved,
@@ -350,6 +375,29 @@ checks = {
 }
 checkpoint = Path(result["last_checkpoint"])
 checks["complete_checkpoint"] = checkpoint.is_dir()
+model_states = sorted(checkpoint.glob("**/mp_rank_*_model_states.pt"))
+checks["model_state_present"] = bool(model_states) and all(
+    path.stat().st_size > 0 for path in model_states
+)
+optimizer_reports = sorted(Path(os.environ["OPTIMIZER_DIR"]).glob("optimizer_state_rank_*.json"))
+optimizer_ranks = sorted(
+    int(json.loads(path.read_text())["global_rank"]) for path in optimizer_reports
+)
+checks["eight_optimizer_reports"] = optimizer_ranks == list(range(8))
+optimizer_pattern = re.compile(
+    r"^(?:[^/]+_)?zero_pp_rank_(\d+)_mp_rank_\d+_optim_states\.pt$"
+)
+optimizer_shards = [
+    path
+    for path in checkpoint.glob("**/*zero_pp_rank_*_optim_states.pt")
+    if optimizer_pattern.fullmatch(path.name)
+]
+checkpoint_ranks = sorted(
+    int(optimizer_pattern.fullmatch(path.name).group(1)) for path in optimizer_shards
+)
+checks["eight_checkpoint_shards"] = checkpoint_ranks == list(range(8)) and all(
+    path.stat().st_size > 0 for path in optimizer_shards
+)
 errors = [name for name, passed in checks.items() if not passed]
 payload = {
     "schema_version": 1,

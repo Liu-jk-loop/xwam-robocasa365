@@ -73,7 +73,7 @@ class RoboCasa365RGBDTrainingContractTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         hardware = (
             REPO_ROOT
-            / "configs/hardware/gh200x4_96gb_gbs128_rgbd_single_task.yaml"
+            / "configs/hardware/gh200x8_96gb_gbs128_rgbd_single_task.yaml"
         ).read_text(encoding="utf-8")
         experiment = (
             REPO_ROOT
@@ -94,13 +94,16 @@ class RoboCasa365RGBDTrainingContractTests(unittest.TestCase):
             self.assertIn(expected, data)
         for expected in (
             "devices: 4",
-            "batch_size_per_gpu: 8",
+            "batch_size_per_gpu: 4",
             "accumulate_grad_batches: 4",
             "global_batch_size: 128",
             "deepspeed_stage: 1",
             "deepspeed_offload_optimizer: false",
             "deepspeed_fp32_optimizer_states: true",
             "use_gradient_checkpointing: true",
+            "formal_world_size: 8",
+            "formal_num_nodes: 2",
+            "formal_devices_per_node: 4",
         ):
             self.assertIn(expected, hardware)
         for expected in (
@@ -114,10 +117,18 @@ class RoboCasa365RGBDTrainingContractTests(unittest.TestCase):
         ):
             self.assertIn(expected, experiment)
         for expected in (
+            "#SBATCH --nodes=2",
+            "#SBATCH --ntasks-per-node=1",
             "#SBATCH --gpus-per-node=4",
             "#SBATCH --time=12:00:00",
             "close_fridge_rgbd_resume_3108551.json",
-            "--expected-world-size 4",
+            "--expected-world-size 8",
+            'srun --nodes=2 \\\n  --ntasks=2',
+            "python -m torch.distributed.run",
+            "--nnodes 2",
+            '"world_size_eight"',
+            '"eight_optimizer_reports"',
+            '"eight_checkpoint_shards"',
             'HOT_CHECKPOINT_ROOT="$DEPLOY_IOPS/xwam_run/$EXP_NAME/checkpoints"',
             'DURABLE_CHECKPOINT_ROOT="$DEPLOY_STORE/checkpoints/xwam/$EXP_NAME/checkpoints"',
             '"dataset.depth_cache_root=$DEPTH_CACHE_ROOT"',
@@ -127,6 +138,7 @@ class RoboCasa365RGBDTrainingContractTests(unittest.TestCase):
         ):
             self.assertIn(expected, job)
         self.assertNotIn("rm -", job)
+        self.assertNotIn("close_fridge_rgbd_ratio00_seed42_4gpu", job)
 
         runbook = (REPO_ROOT / "docs/CLUSTER_RUNBOOK.md").read_text(
             encoding="utf-8"
@@ -135,8 +147,8 @@ class RoboCasa365RGBDTrainingContractTests(unittest.TestCase):
             "sbatch deployment/clariden/train_close_fridge_rgbd_xwam.sbatch",
             runbook,
         )
-        self.assertIn("4×batch8×accum4=GBS128", runbook)
-        self.assertIn("4×batch4×accum8=GBS128", runbook)
+        self.assertIn("8×batch4×accum4=GBS128", runbook)
+        self.assertIn("8×batch2×accum8=GBS128", runbook)
 
     def test_runner_rejects_missing_or_misaligned_depth_batch(self) -> None:
         runner = (REPO_ROOT / "runners/xwam_runner.py").read_text(encoding="utf-8")

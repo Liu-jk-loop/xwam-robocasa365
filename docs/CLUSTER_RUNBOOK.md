@@ -1385,10 +1385,10 @@ find "$SMOKE_EXP" -maxdepth 3 -type f -print | sort
 如果该目录随后消失，应检查当前挂载和平台scratch生命周期；不要把它解释为训练脚本执行了
 cleanup。正式训练的可恢复checkpoint不依赖这个目录。
 
-正式实验固定CloseFridge、公开X-WAM pretrained、ratio0、seed42、3000 optimizer steps和
-`4×batch8×accum4=GBS128`。RGB-D额外增加depth分支，因此micro-batch先使用8，而不是
-RGB-only单任务的16；ZeRO-1、GPU AdamW、BF16计算、FP32 optimizer state和gradient
-checkpointing保持正式设置。
+首版4卡、单卡batch8设置被用户判定会OOM。当前正式实验固定CloseFridge、公开X-WAM
+pretrained、ratio0、seed42、3000 optimizer steps和2节点×每节点4卡，使用
+`8×batch4×accum4=GBS128`。ZeRO-1、GPU AdamW、BF16计算、FP32 optimizer state和
+gradient checkpointing保持正式设置；8卡实验从step 0开始，禁止恢复任何4-rank checkpoint。
 
 先更新主训练clone并确认门禁、depth缓存和工作区：
 
@@ -1421,23 +1421,23 @@ unset WANDB_API_KEY
 每500步在IOPS保留最多2份滚动checkpoint，每1000步在Store永久保存，step 3000另存final：
 
 ```text
-/iopsstor/scratch/cscs/zjingchen/terry_nys/xwam_run/close_fridge_rgbd_ratio00_seed42_4gpu/checkpoints/
-/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/checkpoints/xwam/close_fridge_rgbd_ratio00_seed42_4gpu/checkpoints/
+/iopsstor/scratch/cscs/zjingchen/terry_nys/xwam_run/close_fridge_rgbd_ratio00_seed42_8gpu/checkpoints/
+/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/checkpoints/xwam/close_fridge_rgbd_ratio00_seed42_8gpu/checkpoints/
 ```
 
 如果12小时先到，等待原Job完全退出后，重新执行同一组隐藏输入和`sbatch`命令。planner会从
-IOPS/Store中最新的完整四rankcheckpoint恢复；文件锁会拒绝两个并发作业写同一实验。不要
+IOPS/Store中最新的完整八rankcheckpoint恢复；文件锁会拒绝两个并发作业写同一实验。不要
 恢复P3 smoke、RGB-only或其他任务的checkpoint，也不要修改实验名后复用原W&B run。
 
 正常达到step 3000后，Store报告必须为`ok=true/result=pass`：
 
 ```text
-/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/manifests/xwam/atomic9_rgbd/close_fridge_rgbd_formal_<JOB_ID>.json
+/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/manifests/xwam/atomic9_rgbd/close_fridge_rgbd_formal_8gpu_<JOB_ID>.json
 ```
 
-如果首轮在正式forward/backward阶段CUDA OOM，反馈train log和峰值显存；下一档只把硬件层
-改为`4×batch4×accum8=GBS128`并从step 0重启，不降低GBS、不启用CPU optimizer offload，
-也不从内存布局不同的半成品checkpoint继续。
+如果8卡batch4仍在正式forward/backward阶段CUDA OOM，反馈两个节点的train log和峰值显存；
+下一档只把硬件层改为`8×batch2×accum8=GBS128`并从step 0重启，不降低GBS、不启用CPU
+optimizer offload，也不从内存布局不同的半成品checkpoint继续。
 
 ## 外部模型路径
 
