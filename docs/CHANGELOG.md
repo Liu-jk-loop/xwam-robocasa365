@@ -1,5 +1,12 @@
 # 变更记录
 
+## 2026-08-18 — 修正RGB-D评测的experiment/checkpoint分离路径
+
+- Job `3111158`在评测preflight的`test -s "$EXPERIMENT_DIR/config.yaml"`失败；未进入模型加载、server或client阶段。
+- 原因是评测脚本误把IOPS滚动checkpoint目录当作experiment目录。训练实际将resolved `config.yaml`保存到Capstor scratch `experiments/xwam/...`，将频繁写入的checkpoint保存到IOPS `xwam_run/.../checkpoints`。
+- 评测入口现将`EXPERIMENT_DIR`与`CHECKPOINT_ROOT`显式拆分：前者只读`config.yaml`，后者定位step1000并唯一搜索step1500。训练逻辑和现有checkpoint均不改动。
+- 修正后的四路评测仍需Clariden重新提交，状态为`cluster-pending`。
+
 ## 2026-08-18 — CloseFridge RGB-D四路checkpoint/seed评测
 
 - 保持CloseFridge RGB-D训练配置和2节8卡训练作业不变；训练由用户手动在期望步数停止，本轮不改trainer/planner/scheduler停止逻辑。

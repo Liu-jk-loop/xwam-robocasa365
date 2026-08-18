@@ -1441,6 +1441,9 @@ optimizer offload，也不从内存布局不同的半成品checkpoint继续。
 
 训练脚本保持原3000步停止点。若当前实验由用户手动保留step1000和step1500
 checkpoint，在独立评测clone中拉取同一commit后提交四路RGB-D评测：
+评测从Capstor scratch `experiments/xwam/close_fridge_rgbd_ratio00_seed42_8gpu/config.yaml`
+重建模型结构，从IOPS `xwam_run/close_fridge_rgbd_ratio00_seed42_8gpu/checkpoints/`
+加载权重；两个根目录不得互相推导或混用。
 
 ```bash
 EVAL_REPO="$DEPLOY_STORE/src/xwam-robocasa365-eval"

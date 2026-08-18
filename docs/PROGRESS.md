@@ -33,7 +33,7 @@
 - P3 batch/短训练：Job `3108551`已完成4×GH200一体化门禁；真实RGB-D batch、step 0→2保存、step 2→4严格恢复、有限正depth loss及四rank FP32 optimizer证据全部通过。用户未提供本次commit SHA，不补造Git provenance。
 - P3产物保存：smoke脚本把metadata/result/checkpoint写在Capstor scratch的`experiments/xwam/close_fridge_rgbd_resume_gate_3108551`，脚本没有删除或移动逻辑；Store中的batch/audit和训练日志是永久证据。是否存在平台侧scratch生命周期不由仓库脚本推断。
 - P4正式训练：首版4×GH200、单卡batch8被用户判定会OOM；未提供Job ID、峰值显存或日志，因此只记录结果，不补造provenance。当前入口为2节点×4卡、`batch4×accum4×8=GBS128`，使用新的`*_8gpu`实验/W&B/checkpoint目录并从公开pretrained step 0开始，不读取4-rank checkpoint。本轮不改训练作业的3000步planner/trainer/scheduler合同；用户手动在期望步数停止并保留step1000/1500 checkpoint。
-- P4评测：新增单节点4卡四路CloseFridge RGB-D入口；GPU0/1加载step1000，GPU2/3加载step1500，每个checkpoint分别从episode seed42和seed7开始评测50 episodes。四路各有独立broker/server/client/日志/结果，模型seed固定42；最终生成四个summary和`comparison.json`。policy按RGB-D结构严格加载，在线推理固定`run_depth=false`；真实四卡加载与200 episodes为`cluster-pending`。
+- P4评测：新增单节点4卡四路CloseFridge RGB-D入口；GPU0/1加载step1000，GPU2/3加载step1500，每个checkpoint分别从episode seed42和seed7开始评测50 episodes。四路各有独立broker/server/client/日志/结果，模型seed固定42；最终生成四个summary和`comparison.json`。Job `3111158`在preflight暴露评测默认路径把IOPS checkpoint root误当作Capstor experiment dir，未加载模型；现已拆分两个根目录并等待Clariden重提。policy按RGB-D结构严格加载，在线推理固定`run_depth=false`。
 
 ## Clariden 部署状态
 

@@ -15,6 +15,7 @@
 set -Eeuo pipefail
 
 DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
+DEPLOY_CAPSCR=/capstor/scratch/cscs/zjingchen/terry_nys
 DEPLOY_IOPS=/iopsstor/scratch/cscs/zjingchen/terry_nys
 # 评测使用独立clone，不与正在训练的主仓库共享工作区。
 REPO="${XWAM_EVAL_REPO:-$DEPLOY_STORE/src/xwam-robocasa365-eval}"
@@ -26,8 +27,9 @@ RUNTIME_OVERLAY="$DEPLOY_IOPS/python/xwam-nvtx-0.2.15"
 WAN_DIR="$DEPLOY_STORE/checkpoints/xwam/wan22_5b"
 BASE_TOPOLOGY="$REPO/configs/evaluation/robocasa365_m6_atomic18_8server_16client.json"
 
-EXPERIMENT_DIR="${XWAM_RGBD_EVAL_EXPERIMENT_DIR:-$DEPLOY_IOPS/xwam_run/close_fridge_rgbd_ratio00_seed42_8gpu}"
-CHECKPOINT_1000="${XWAM_RGBD_EVAL_CHECKPOINT_1000:-$EXPERIMENT_DIR/checkpoints/epoch=5-step=1000.ckpt}"
+EXPERIMENT_DIR="${XWAM_RGBD_EVAL_EXPERIMENT_DIR:-$DEPLOY_CAPSCR/experiments/xwam/close_fridge_rgbd_ratio00_seed42_8gpu}"
+CHECKPOINT_ROOT="${XWAM_RGBD_EVAL_CHECKPOINT_ROOT:-$DEPLOY_IOPS/xwam_run/close_fridge_rgbd_ratio00_seed42_8gpu/checkpoints}"
+CHECKPOINT_1000="${XWAM_RGBD_EVAL_CHECKPOINT_1000:-$CHECKPOINT_ROOT/epoch=5-step=1000.ckpt}"
 CHECKPOINT_1500="${XWAM_RGBD_EVAL_CHECKPOINT_1500:-}"
 EVAL_ID="${XWAM_RGBD_EVAL_ID:-step1000-1500_seed42-7_target_50ep}"
 EPISODES="${XWAM_RGBD_EVAL_EPISODES:-50}"
@@ -65,6 +67,7 @@ test -s "$ROBOCASA_EDF"
 test -d "$RUNTIME_OVERLAY"
 test -d "$EXPERIMENT_DIR"
 test -s "$EXPERIMENT_DIR/config.yaml"
+test -d "$CHECKPOINT_ROOT"
 test -d "$CHECKPOINT_1000"
 test -s "$CHECKPOINT_1000/checkpoint/mp_rank_00_model_states.pt"
 test -s "$WAN_DIR/config.json"
@@ -75,10 +78,10 @@ test -z "$(git status --porcelain)" || xwam_fail "Independent evaluation repo mu
 # epoch编号取决于实际clip数；只按global step匹配1500 checkpoint，不硬编epoch。
 if [[ -z "$CHECKPOINT_1500" ]]; then
   shopt -s nullglob
-  checkpoint_1500_matches=("$EXPERIMENT_DIR"/checkpoints/epoch=*-step=1500.ckpt)
+  checkpoint_1500_matches=("$CHECKPOINT_ROOT"/epoch=*-step=1500.ckpt)
   shopt -u nullglob
   if [[ "${#checkpoint_1500_matches[@]}" -ne 1 ]]; then
-    xwam_fail "Expected exactly one epoch=*-step=1500.ckpt under $EXPERIMENT_DIR/checkpoints; found ${#checkpoint_1500_matches[@]}"
+    xwam_fail "Expected exactly one epoch=*-step=1500.ckpt under $CHECKPOINT_ROOT; found ${#checkpoint_1500_matches[@]}"
   fi
   CHECKPOINT_1500="${checkpoint_1500_matches[0]}"
 fi
@@ -99,6 +102,7 @@ EXPECTED_CONTRACT="$CONTROL_ROOT/evaluation_contract.expected.txt"
   printf 'eval_id=%s\n' "$EVAL_ID"
   printf 'task=CloseFridge\n'
   printf 'experiment_dir=%s\n' "$(realpath "$EXPERIMENT_DIR")"
+  printf 'checkpoint_root=%s\n' "$(realpath "$CHECKPOINT_ROOT")"
   printf 'checkpoint_1000=%s\n' "$(realpath "$CHECKPOINT_1000")"
   printf 'checkpoint_1500=%s\n' "$(realpath "$CHECKPOINT_1500")"
   printf 'matrix=step1000_seed42,step1000_seed7,step1500_seed42,step1500_seed7\n'
@@ -123,6 +127,7 @@ fi
 echo "eval_id=$EVAL_ID"
 echo "repo=$REPO commit=$(git rev-parse HEAD)"
 echo "experiment_dir=$EXPERIMENT_DIR"
+echo "checkpoint_root=$CHECKPOINT_ROOT"
 echo "checkpoint_1000=$CHECKPOINT_1000"
 echo "checkpoint_1500=$CHECKPOINT_1500"
 echo "matrix=step1000/gpu0/seed42, step1000/gpu1/seed7, step1500/gpu2/seed42, step1500/gpu3/seed7"

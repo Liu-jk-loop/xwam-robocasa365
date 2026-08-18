@@ -164,6 +164,10 @@ class RoboCasa365RGBDTrainingContractTests(unittest.TestCase):
             "#SBATCH --cpus-per-task=64",
             "#SBATCH --mem=450G",
             "close_fridge_rgbd_ratio00_seed42_8gpu",
+            'DEPLOY_CAPSCR=/capstor/scratch/cscs/zjingchen/terry_nys',
+            'EXPERIMENT_DIR="${XWAM_RGBD_EVAL_EXPERIMENT_DIR:-$DEPLOY_CAPSCR/experiments/xwam/close_fridge_rgbd_ratio00_seed42_8gpu}"',
+            'CHECKPOINT_ROOT="${XWAM_RGBD_EVAL_CHECKPOINT_ROOT:-$DEPLOY_IOPS/xwam_run/close_fridge_rgbd_ratio00_seed42_8gpu/checkpoints}"',
+            'CHECKPOINT_1000="${XWAM_RGBD_EVAL_CHECKPOINT_1000:-$CHECKPOINT_ROOT/epoch=5-step=1000.ckpt}"',
             "epoch=5-step=1000.ckpt",
             "epoch=*-step=1500.ckpt",
             "XWAM_RGBD_EVAL_EPISODES:-50",
@@ -185,6 +189,7 @@ class RoboCasa365RGBDTrainingContractTests(unittest.TestCase):
         self.assertIn("CHECKPOINT_0=", job)
         self.assertIn("CHECKPOINT_3=", job)
         self.assertNotIn("trainer_max_steps", job)
+        self.assertNotIn('"$EXPERIMENT_DIR"/checkpoints', job)
         self.assertIn("runner = XWAMRunner(config=config, run_depth=False)", policy)
         self.assertIn('"training_use_depth": training_use_depth', policy)
         self.assertIn('"inference_run_depth": False', policy)
