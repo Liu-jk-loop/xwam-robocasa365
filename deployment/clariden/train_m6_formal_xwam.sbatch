@@ -25,12 +25,19 @@ MANIFEST="${XWAM_M6_MANIFEST:-$DEPLOY_STORE/manifests/xwam/m6/robocasa365_m6_ato
 STATS="${XWAM_M6_STATS:-$DEPLOY_STORE/manifests/xwam/m6/robocasa365_m6_atomic_seen18_global_stats.json}"
 PREFLIGHT="${XWAM_M6_PREFLIGHT:-$DEPLOY_STORE/manifests/xwam/m6/robocasa365_m6_gh200_preflight.json}"
 GATE_AUDIT="${XWAM_M6_GATE_AUDIT:-$DEPLOY_STORE/logs/xwam/debug/m6-gate-3053436-audit.json}"
+GATE_REQUIRE_ZERO="${XWAM_M6_GATE_REQUIRE_ZERO:-true}"
 FORMAL_NUM_NODES="${XWAM_M6_NUM_NODES:-1}"
 FORMAL_DEVICES_PER_NODE="${XWAM_M6_DEVICES_PER_NODE:-4}"
 FORMAL_WORLD_SIZE="$((FORMAL_NUM_NODES * FORMAL_DEVICES_PER_NODE))"
 HARDWARE_CONFIG="${XWAM_M6_HARDWARE_CONFIG:-configs/hardware/gh200x4_96gb_gbs128.yaml}"
+MODEL_CONFIG="${XWAM_M6_MODEL_CONFIG:-configs/model/wan22_5b_robocasa365_atomic.yaml}"
 DATA_CONFIG="${XWAM_M6_DATA_CONFIG:-configs/data/robocasa365_m6_atomic_seen18.yaml}"
 EXPERIMENT_CONFIG="${XWAM_M6_EXPERIMENT_CONFIG:-configs/experiment/robocasa365_m6_gh200_rgb_formal.yaml}"
+EXPECT_DEPTH="${XWAM_M6_EXPECT_DEPTH:-false}"
+DEPTH_CACHE_ROOT="${XWAM_M6_DEPTH_CACHE_ROOT:-}"
+DEPTH_ENCODING="${XWAM_M6_DEPTH_ENCODING:-}"
+DEPTH_MANIFEST="${XWAM_M6_DEPTH_MANIFEST:-}"
+DEPTH_AUDIT="${XWAM_M6_DEPTH_AUDIT:-}"
 LOG_STEM="${XWAM_M6_LOG_STEM:-m6-formal}"
 
 DEFAULT_TOTAL_STEPS=16390
@@ -80,6 +87,12 @@ cd "$REPO"
 [[ "$FORMAL_DEVICES_PER_NODE" == 4 ]] || {
   xwam_fail "X-WAM Clariden formal training requires 4 GPUs per node"
 }
+[[ "$GATE_REQUIRE_ZERO" == true || "$GATE_REQUIRE_ZERO" == false ]] || {
+  xwam_fail "XWAM_M6_GATE_REQUIRE_ZERO must be true or false"
+}
+[[ "$EXPECT_DEPTH" == true || "$EXPECT_DEPTH" == false ]] || {
+  xwam_fail "XWAM_M6_EXPECT_DEPTH must be true or false"
+}
 [[ "${SLURM_NNODES:-0}" == "$FORMAL_NUM_NODES" ]] || {
   xwam_fail "Slurm allocation node count does not match XWAM_M6_NUM_NODES"
 }
@@ -98,8 +111,22 @@ for artifact in "$MANIFEST" "$STATS" "$PREFLIGHT" "$GATE_AUDIT"; do
   grep -q '"ok": true' "$artifact"
   grep -q '"result": "pass"' "$artifact"
 done
-grep -q '"same_zero_stage": true' "$GATE_AUDIT"
-grep -q '"zero_stage": 1' "$GATE_AUDIT"
+if [[ "$GATE_REQUIRE_ZERO" == true ]]; then
+  grep -q '"same_zero_stage": true' "$GATE_AUDIT"
+  grep -q '"zero_stage": 1' "$GATE_AUDIT"
+fi
+if [[ "$EXPECT_DEPTH" == true ]]; then
+  test -d "$DEPTH_CACHE_ROOT"
+  test -s "$DEPTH_ENCODING"
+  test -s "$DEPTH_MANIFEST"
+  test -s "$DEPTH_AUDIT"
+  grep -q '"task_count": 9' "$DEPTH_MANIFEST"
+  grep -q '"ok": true' "$DEPTH_MANIFEST"
+  grep -q '"result": "pass"' "$DEPTH_MANIFEST"
+  grep -q '"task_count": 9' "$DEPTH_AUDIT"
+  grep -q '"ok": true' "$DEPTH_AUDIT"
+  grep -q '"result": "pass"' "$DEPTH_AUDIT"
+fi
 test -z "$(git status --porcelain)" || {
   git status --short >&2
   xwam_fail "Git worktree must be clean before M6 formal training"
@@ -137,11 +164,13 @@ echo "wandb_entity=$WANDB_ENTITY"
 echo "wandb_run_id=$WANDB_RUN_ID"
 echo "formal_topology=${FORMAL_NUM_NODES}x${FORMAL_DEVICES_PER_NODE} world_size=$FORMAL_WORLD_SIZE"
 echo "hardware_config=$HARDWARE_CONFIG"
+echo "model_config=$MODEL_CONFIG"
 echo "data_config=$DATA_CONFIG"
 echo "experiment_config=$EXPERIMENT_CONFIG"
 echo "manifest=$MANIFEST"
 echo "global_stats=$STATS"
 echo "total_steps=$TOTAL_STEPS"
+echo "expect_depth=$EXPECT_DEPTH depth_cache_root=$DEPTH_CACHE_ROOT"
 echo "rolling_checkpoints=$HOT_CHECKPOINT_ROOT (every 500 steps, max 5)"
 echo "durable_checkpoints=$DURABLE_CHECKPOINT_ROOT (every 3000 steps, unlimited)"
 echo "failure_report=$FAILURE_REPORT"
@@ -253,8 +282,13 @@ srun --nodes="$FORMAL_NUM_NODES" \
     FORMAL_DEVICES_PER_NODE="$FORMAL_DEVICES_PER_NODE" \
     FORMAL_WORLD_SIZE="$FORMAL_WORLD_SIZE" \
     HARDWARE_CONFIG="$HARDWARE_CONFIG" \
+    MODEL_CONFIG="$MODEL_CONFIG" \
     DATA_CONFIG="$DATA_CONFIG" \
     EXPERIMENT_CONFIG="$EXPERIMENT_CONFIG" \
+    EXPECT_DEPTH="$EXPECT_DEPTH" \
+    DEPTH_CACHE_ROOT="$DEPTH_CACHE_ROOT" \
+    DEPTH_ENCODING="$DEPTH_ENCODING" \
+    DEPTH_MANIFEST="$DEPTH_MANIFEST" \
     MASTER_ADDR="$MASTER_ADDR" \
     MASTER_PORT="$MASTER_PORT" \
     XWAM_FAILURE_REPORT="$FAILURE_REPORT" \
@@ -316,7 +350,7 @@ fi
 
 TRAIN_ARGS=(
   scripts/train_sft.py
-  model_config=configs/model/wan22_5b_robocasa365_atomic.yaml
+  "model_config=$MODEL_CONFIG"
   "data_config=$DATA_CONFIG"
   "hardware_config=$HARDWARE_CONFIG"
   "experiment_config=$EXPERIMENT_CONFIG"
@@ -332,6 +366,13 @@ TRAIN_ARGS=(
   "trainer_max_steps=$TARGET_STEP"
   "save_final_checkpoint=$SAVE_FINAL"
 )
+if [[ "$EXPECT_DEPTH" == true ]]; then
+  TRAIN_ARGS+=(
+    "dataset.depth_cache_root=$DEPTH_CACHE_ROOT"
+    "dataset.depth_encoding_path=$DEPTH_ENCODING"
+    "dataset.depth_cache_manifest=$DEPTH_MANIFEST"
+  )
+fi
 if [[ -n "$RESUME_CHECKPOINT" ]]; then
   TRAIN_ARGS+=("resume_checkpoint=$RESUME_CHECKPOINT")
 fi

@@ -1,0 +1,32 @@
+# Atomic9 RGB-D正式训练：2节点×4卡，8×batch4×accum4=GBS128。
+precision: bf16-mixed
+devices: 4
+batch_size_per_gpu: 4
+accumulate_grad_batches: 4
+global_batch_size: 128
+num_workers_per_gpu: 4
+prefetch_factor: 2
+use_gradient_checkpointing: true
+enable_segment_timing: true
+segment_timing_interval_steps: 20
+
+formal_zero_stage: 1
+deepspeed_stage: 1
+deepspeed_offload_optimizer: false
+deepspeed_offload_optimizer_device: cpu
+deepspeed_pin_memory: false
+deepspeed_overlap_comm: true
+deepspeed_bucket_size: 500000000
+deepspeed_fp32_optimizer_states: true
+deepspeed_exclude_frozen_parameters: false
+distributed_timeout_minutes: 90
+
+m6_formal_guard: true
+formal_modality: rgbd
+formal_accelerator: GH200
+formal_minimum_memory_gib: 90
+formal_world_size: 8
+formal_num_nodes: 2
+formal_devices_per_node: 4
+audit_optimizer_state_dtype: true
+allow_distributed_generator_state: true

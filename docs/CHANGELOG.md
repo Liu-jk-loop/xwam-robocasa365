@@ -1,5 +1,14 @@
 # 变更记录
 
+## 2026-08-19 — Atomic9 ratio0 RGB-D全量缓存与8卡正式训练入口
+
+- CloseFridge RGB-D单任务评测已完成：step1000的seed42/seed7均为48%，step1500为88%/84%。这证明训练链路可用，但不能单凭单任务成功率区分更好的收敛与过拟合；根据用户决定，不再为这一点追加单任务训练，直接进入Atomic9 RGB-D对照。
+- 新增Atomic9全量depth cache作业：复用已冻结的全局inverse-metric-depth encoding，按现有Atomic9任务清单生成全部episode和三路camera缓存。作业依赖sidecar恢复；已完成的CloseFridge不重生成，12小时到时后可重提同一作业继续补齐。
+- 新增Atomic9 RGB-D data/model/hardware/experiment组合：任务、自然比例采样、16D/12D global stats、seed42、LR、warmup、`clean_action_ratio=0`和8500 optimizer steps均与Atomic9 RGB ratio0对照一致。depth不改变state/action normalization，因此复用已审计的RGB manifest/global stats。
+- 正式训练固定2节点×4 GH200、单卡batch4、累积4、GBS128、ZeRO-1 GPU AdamW、BF16计算、FP32 optimizer state和gradient checkpointing；使用独立实验/W&B/checkpoint目录，从公开X-WAM pretrained step0启动，不读取CloseFridge单任务权重。
+- 通用M6正式入口增加向后兼容的model/depth覆盖。RGB默认行为不变；RGB-D在启动前强制检查缓存、encoding和9任务PASS manifest，正式合同要求`use_depth=true/depth_loss_weight>0`，运行审计要求每个已记录step的depth loss有限且大于0。
+- 本地完成sbatch语法和37项聚焦回归；全量depth生成、8卡显存/NCCL、正式训练和恢复均为`cluster-pending`。
+
 ## 2026-08-18 — 修正RGB-D评测的experiment/checkpoint分离路径
 
 - Job `3111158`在评测preflight的`test -s "$EXPERIMENT_DIR/config.yaml"`失败；未进入模型加载、server或client阶段。

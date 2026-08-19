@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""审计 M6 RGB-only 正式5-epoch训练的完整运行证据。"""
+"""审计 M6 RGB-only/RGB-D 正式训练的完整运行证据。"""
 
 from __future__ import annotations
 

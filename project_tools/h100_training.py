@@ -209,6 +209,13 @@ def validate_m6_formal_training_contract(
         else fixed_training_steps > 0
         and int(get("num_training_steps")) == fixed_training_steps
     )
+    formal_modality = str(get("formal_modality", "rgb_only")).lower()
+    if formal_modality not in {"rgb_only", "rgbd"}:
+        raise ValueError(
+            f"M6正式训练不支持 formal_modality={formal_modality!r}"
+        )
+    use_depth = bool(get("use_depth"))
+    depth_loss_weight = float(get("depth_loss_weight"))
     checks = {
         "configured_world_size": int(world_size) == expected_world_size,
         "configured_topology": expected_world_size
@@ -224,8 +231,6 @@ def validate_m6_formal_training_contract(
         "full_checkpoint_initially": not bool(
             get("deepspeed_exclude_frozen_parameters")
         ),
-        "rgb_only": not bool(get("use_depth"))
-        and float(get("depth_loss_weight")) == 0.0,
         "formal_schedule": formal_schedule_ok,
         "natural_sampling": str(get("dataset").get("expected_sampling"))
         == "natural_proportional",
@@ -245,6 +250,10 @@ def validate_m6_formal_training_contract(
             and int(get("segment_timing_interval_steps", 0)) > 0
         ),
     }
+    if formal_modality == "rgb_only":
+        checks["rgb_only"] = not use_depth and depth_loss_weight == 0.0
+    else:
+        checks["rgbd_auxiliary_depth"] = use_depth and depth_loss_weight > 0.0
     failed = [name for name, passed in checks.items() if not passed]
     if failed:
         raise ValueError(f"M6正式训练配置合同失败：{failed}")
@@ -258,6 +267,7 @@ def validate_m6_formal_training_contract(
         "batch_size_per_gpu": per_device_batch,
         "accumulate_grad_batches": accumulate,
         "global_batch_size": actual_global_batch,
+        "formal_modality": formal_modality,
         "num_workers_per_gpu": int(get("num_workers_per_gpu", 0)),
         "use_gradient_checkpointing": bool(get("use_gradient_checkpointing", False)),
         "cache_frozen_text_embeddings": bool(
@@ -553,7 +563,9 @@ def _optimizer_audit(
     }
 
 
-def _metrics_audit(log_path: str | Path) -> dict[str, Any]:
+def _metrics_audit(
+    log_path: str | Path, *, expect_depth: bool = False
+) -> dict[str, Any]:
     path = Path(log_path).expanduser().resolve()
     records, errors = parse_console_metrics(
         path.read_text(encoding="utf-8", errors="replace")
@@ -587,18 +599,25 @@ def _metrics_audit(log_path: str | Path) -> dict[str, Any]:
         for record in records
         if "train/action_proprio_supervision_ratio" in record["metrics"]
     ]
+    depth_losses = [
+        float(record["metrics"].get("train/depth_loss", math.inf))
+        for record in records
+    ]
     checks = {
         "metrics_present": bool(records) and not missing,
         "metrics_finite": bool(records) and not non_finite and not errors,
-        "depth_loss_zero": bool(records)
-        and all(
-            abs(float(record["metrics"].get("train/depth_loss", math.inf))) <= 1e-8
-            for record in records
-        ),
         "supervision_ratio_valid": bool(ratios)
         and all(0.0 <= ratio <= 1.0 for ratio in ratios),
         "supervised_batch_observed": any(ratio > 0.0 for ratio in ratios),
     }
+    if expect_depth:
+        checks["depth_loss_positive"] = bool(depth_losses) and all(
+            math.isfinite(value) and value > 0.0 for value in depth_losses
+        )
+    else:
+        checks["depth_loss_zero"] = bool(depth_losses) and all(
+            abs(value) <= 1e-8 for value in depth_losses
+        )
     return {
         "path": str(path),
         "steps": [int(record["step"]) for record in records],
@@ -625,7 +644,8 @@ def _run_contract(
     result = _load_json(result_path)
     events = _load_events(events_path)
     optimizer = _optimizer_audit(optimizer_dir, expected_world_size=expected_world_size)
-    metrics = _metrics_audit(log_path)
+    expect_depth = bool((metadata.get("dataset") or {}).get("use_depth", False))
+    metrics = _metrics_audit(log_path, expect_depth=expect_depth)
     training = metadata.get("training") or {}
     runtime = metadata.get("formal_runtime") or metadata.get("h100_runtime") or {}
     formal_contract = (

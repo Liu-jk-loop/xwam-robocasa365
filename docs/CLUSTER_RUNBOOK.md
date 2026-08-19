@@ -1484,6 +1484,61 @@ step1500在同一`checkpoints/`下按`epoch=*-step=1500.ckpt`唯一匹配；如�
 评测policy按`use_depth=true`构造两模态权重结构并严格加载checkpoint，但生成调用
 固定`run_depth=false`，模拟器client仍只发送三路RGB与16D state，无需在线渲染depth。
 
+## Atomic9 ratio0 RGB-D全量训练
+
+该实验直接与Atomic9 RGB ratio0对齐：9任务、自然比例采样、seed42、
+GBS128、LR/warmup和8500 optimizer steps不变。不加载CloseFridge单任务
+checkpoint，正式训练从公开X-WAM pretrained step0开始。
+
+先更新主训练clone，确认已冻结的depth encoding存在，再提交全量缓存作业：
+
+```bash
+DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
+REPO="$DEPLOY_STORE/src/xwam-robocasa365"
+RGBD_EVIDENCE="$DEPLOY_STORE/manifests/xwam/atomic9_rgbd"
+
+cd "$REPO"
+git switch dev/atomic-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+test -z "$(git status --porcelain)"
+test -s "$RGBD_EVIDENCE/robocasa365_inverse_metric_global_q_v1.json"
+
+sbatch deployment/clariden/build_atomic9_rgbd_cache_xwam.sbatch
+```
+
+作业使用现有atomic depth cache root和sidecar恢复机制，已完成的CloseFridge
+视频不会重生成。如果12小时到时但尚未补齐9任务，等原Job完全退出后
+重提同一条`sbatch`命令。只有下列两份报告均为PASS才能训练：
+
+```bash
+DEPTH_MANIFEST="$RGBD_EVIDENCE/robocasa365_atomic9_rgbd_cache_manifest.json"
+DEPTH_AUDIT="$RGBD_EVIDENCE/robocasa365_atomic9_rgbd_cache_audit.json"
+test -s "$DEPTH_MANIFEST"
+test -s "$DEPTH_AUDIT"
+grep -E '"(task_count|ok|result)"' "$DEPTH_MANIFEST" "$DEPTH_AUDIT"
+```
+
+预期两份报告都包含`task_count=9`、`ok=true`和`result=pass`。然后使用
+隐藏输入提交2节点×4 GH200正式训练：
+
+```bash
+cd "$REPO"
+test -z "$(git status --porcelain)"
+read -rsp 'W&B API key: ' WANDB_API_KEY
+echo
+export WANDB_API_KEY
+sbatch deployment/clariden/train_atomic9_ratio00_rgbd_xwam_8gpu.sbatch
+unset WANDB_API_KEY
+```
+
+训练配置为`8×batch4×accum4=GBS128`、ZeRO-1 GPU AdamW、BF16计算、FP32
+optimizer state和gradient checkpointing。每500步保存IOPS滚动checkpoint，每3000步
+保存Store持久checkpoint，最终停在8500步。12小时未训完时，等原Job退出后
+重提同一训练作业；planner只从该Atomic9 RGB-D实验的完整8-rank checkpoint恢复。
+
+训练启动后首段日志至少要确认：`formal_modality=rgbd`、`global_batch_size=128`、
+`zero_stage=1`、`use_depth=true`，且已记录step的`train/depth_loss`有限并大于0。
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：
