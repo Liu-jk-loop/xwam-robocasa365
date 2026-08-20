@@ -136,6 +136,7 @@ class Atomic9RgbdTrainingTest(unittest.TestCase):
             '"dataset.depth_encoding_path=$DEPTH_ENCODING"',
             '"dataset.depth_cache_manifest=$DEPTH_MANIFEST"',
             '"milestone_checkpoint_dir=$DURABLE_CHECKPOINT_ROOT/milestones"',
+            'MILESTONE_STEP="$MILESTONE_STEP"',
         ):
             self.assertIn(expected, shared)
 

@@ -1,5 +1,11 @@
 # 变更记录
 
+## 2026-08-20 — 修复Atomic9 RGB-D两节点训练未传递里程碑步数
+
+- Job `3129585`的外层failure report停在`phase=training_srun/line=258`。结合该commit的两节点命令可确定：外层已解析`MILESTONE_STEP=6855`，但`env` 参数没有把它传入节点shell；内层`set -u`在训练入口前读取未定义变量并立即退出。该Job未进入模型加载、forward/backward或checkpoint，不是OOM。
+- 两节点`srun` 现显式传递`MILESTONE_STEP`，节点内仍使用已审计的6855步保存第5 epoch永久checkpoint。14,000步停止点、8卡拓扑、depth配置和其他保存逻辑不变。
+- 新增静态回归防止外层变量存在但分布式节点未传递。本地测试和sbatch语法通过；修复后首次两节点启动为`cluster-pending`。
+
 ## 2026-08-20 — Atomic9 RGB-D改为14000步并永久保留真实第5 epoch
 
 - 集群preflight确认Atomic9有175,514个有效clips，GBS128时每epoch为1,371步；因此真实第5 epoch是step6855，8 epoch是10,968步。之前的8500是人工固定步数，实际约6.20 epoch，不是5 epoch。

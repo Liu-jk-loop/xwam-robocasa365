@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：RGBD-P5——Atomic9 ratio0 RGB-D正式训练
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Atomic9 RGB ratio0已完成，后续新训练默认ratio0。RGBD-P1～P3均通过；CloseFridge RGB-D step1000的seed42/7成功率均48%，step1500为88%/84%。单任务高分是否来自过拟合尚不能判定；按用户决定直接扩展到Atomic9 RGB-D。代码已准备全量depth cache和2节点8卡正式训练，等待集群执行。
+- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Atomic9 RGB ratio0已完成，后续新训练默认ratio0。RGBD-P1～P3均通过；CloseFridge RGB-D step1000的seed42/7成功率均48%，step1500为88%/84%。Atomic9 RGB-D的14k preflight已PASS；Job `3129585`因外层未向两节点shell传递`MILESTONE_STEP`，在进入Python训练前退出，不是OOM。传参修复已完成本地验证，等待重提。
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
