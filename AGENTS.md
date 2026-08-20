@@ -27,6 +27,7 @@
 - Run Torch, CUDA, DeepSpeed, simulator, dataset, training, and rollout validation on the Starlight cluster.
 - Record the tested Git commit, command, configuration, environment, GPU, logs, and outcome for every cluster validation.
 - Prefer a small deterministic smoke test before any multi-GPU training job.
+- Before publishing any `deployment/clariden` change, run the Slurm environment-contract checker from the repository workflow skill. `bash -n` alone does not validate variables crossing an explicit `srun env` boundary.
 
 ## Implementation boundaries
 

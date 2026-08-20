@@ -14,6 +14,7 @@ MATERIAL_PREFIXES = (
     ".agents/",
     "configs/",
     "data/",
+    "deployment/",
     "evaluation/",
     "modules/",
     "runners/",
@@ -79,6 +80,18 @@ def main() -> int:
         print(f"material changes: {', '.join(material)}", file=sys.stderr)
         print(f"missing updates: {', '.join(missing)}", file=sys.stderr)
         return 1
+
+    slurm_checker = (
+        Path(__file__).resolve().parent / "check_slurm_env_contract.py"
+    )
+    slurm_result = subprocess.run(
+        [sys.executable, str(slurm_checker)],
+        check=False,
+        text=True,
+    )
+    if slurm_result.returncode != 0:
+        print("error: Slurm environment contract check failed", file=sys.stderr)
+        return slurm_result.returncode
 
     print(f"change-record check: passed ({len(material)} material path(s), required docs updated)")
     return 0

@@ -1,5 +1,13 @@
 # 变更记录
 
+## 2026-08-20 — 增加Slurm跨shell变量传递强制审查门禁
+
+- Job `3129585`暴露出原有审查只覆盖sbatch语法和目标脚本静态断言，无法发现外层变量在单引号节点shell中使用却未通过`srun env`传递的问题；这种错误会在排队结束、资源已分配后才由`set -u`触发。
+- 项目workflow skill新增无依赖静态检查器，审计全部`deployment/clariden/*.sbatch`中的“外层定义 → `srun env`显式传递 → 节点shell读取”合同。缺少任意变量即返回非零，并报告文件、节点shell行号和变量名。
+- 新增正反回归：故意漏传`MILESTONE_STEP`必须失败，显式传递和节点内局部变量必须通过；另对当前全部Clariden作业执行全仓合同检查。
+- 发布门禁`check_change_record.py`现自动调用该审计，并把`deployment/`纳入必须同步更新中文CHANGELOG/PROGRESS的material scope。`AGENTS.md`和项目skill明确规定`bash -n`不能替代跨shell变量审查。
+- 本地全仓29份sbatch合同检查和4项聚焦测试通过；该机制不执行Torch、Slurm或GPU代码，属于`local-static`，无需消耗超算排队资源。
+
 ## 2026-08-20 — 修复Atomic9 RGB-D两节点训练未传递里程碑步数
 
 - Job `3129585`的外层failure report停在`phase=training_srun/line=258`。结合该commit的两节点命令可确定：外层已解析`MILESTONE_STEP=6855`，但`env` 参数没有把它传入节点shell；内层`set -u`在训练入口前读取未定义变量并立即退出。该Job未进入模型加载、forward/backward或checkpoint，不是OOM。

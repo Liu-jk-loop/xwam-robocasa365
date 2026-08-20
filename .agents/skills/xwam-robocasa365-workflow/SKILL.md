@@ -42,7 +42,21 @@ description: Manage X-WAM adaptation, debugging, training, evaluation, documenta
 5. 在 `docs/PROGRESS.md` 中用中文记录阶段状态、证据、阻塞项和下一步。
 6. 只有对应实现已经存在时，才能加入精确的超算命令。
 
+## 审查分布式作业边界
+
+任何包含 `srun ... env ... bash -lc '...'` 的作业都必须把节点shell读取的外层变量逐项显式传入，不能依赖提交shell的隐式继承。
+
+1. 修改 `deployment/clariden/*.sbatch` 后，运行 `python .agents/skills/xwam-robocasa365-workflow/scripts/check_slurm_env_contract.py`。
+2. 新增外层变量时，核对“外层定义 → `srun env` 传递 → 节点内读取”三处名称完全一致。
+3. 对影响训练入口、恢复、停止步数、checkpoint或产物路径的变量增加回归测试；测试必须证明漏传时检查失败、显式传递后通过。
+4. `bash -n` 只能作为语法检查，不能替代变量边界审计。
+5. 发布前的 `check_change_record.py` 会再次运行该检查；任何失败都禁止提交超算正式作业。
+
 超算反馈使用 `references/cluster-feedback-template.md`；只针对模板记录的 commit 和解析后配置进行诊断。
+
+## 对高成本作业执行双遍审查
+
+第一遍按用户约束核对任务集、初始化、RGB/RGB-D、节点/GPU/GBS、训练步数、checkpoint保留、分支和路径，不能凭上一轮记忆补值。第二遍从最终diff重新审查进程边界、配置与checkpoint分离、恢复来源、停止条件、持久化目录及失败报告；此遍不得把“已有测试覆盖”当作已核对。正式启动命令只能在两遍审查和全部`local-static`门禁通过后交付，仍需集群验证的内容明确标记为`cluster-pending`。
 
 ## 发布与交接
 
