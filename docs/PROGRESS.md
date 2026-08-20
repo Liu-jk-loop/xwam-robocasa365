@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | P1～P4已完成；进入Atomic9扩展 | CloseFridge loader/depth loss/resume PASS；step1000两组48%，step1500为88%/84% | 生成并审计Atomic9全量depth cache |
-| M6 Atomic 正式训练与评测 | RGB对照已完成；Atomic9 ratio0 RGB-D待运行 | RGB-D 8-epoch调度与epoch5永久checkpoint已完成本地验证 | depth manifest及8-epoch preflight PASS后启动2节点8卡、GBS128训练 |
+| M6 Atomic 正式训练与评测 | RGB对照已完成；Atomic9 ratio0 RGB-D待运行 | 真实每epoch=1371步；14k调度与epoch5永久checkpoint已完成本地验证 | depth manifest及14k preflight PASS后启动2节点8卡、GBS128训练 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
 ## RGB-D 当前进程
@@ -33,7 +33,7 @@
 - P3 batch/短训练：Job `3108551`已完成4×GH200一体化门禁；真实RGB-D batch、step 0→2保存、step 2→4严格恢复、有限正depth loss及四rank FP32 optimizer证据全部通过。用户未提供本次commit SHA，不补造Git provenance。
 - P3产物保存：smoke脚本把metadata/result/checkpoint写在Capstor scratch的`experiments/xwam/close_fridge_rgbd_resume_gate_3108551`，脚本没有删除或移动逻辑；Store中的batch/audit和训练日志是永久证据。是否存在平台侧scratch生命周期不由仓库脚本推断。
 - P4单任务训练/评测：2节点8卡、`batch4×accum4×8=GBS128`完成至指定checkpoint。四路评测最终结果为step1000 seed42/7均48%，step1500 seed42/7为88%/84%。step1500高成功率不能单独证明不过拟合，但已足以关闭工程链路门禁。
-- P5 Atomic9 RGB-D：直接对齐Atomic9 RGB ratio0的9任务、自然采样、global stats、seed42和GBS128，训练量改为由真实manifest计算8个完整epoch。滚动checkpoint仍每500步且最多5个，第5 epoch额外保存到Store独立milestones目录供后续评测。先复用冻结encoding和CloseFridge sidecar补齐9任务全量depth cache，再从公开X-WAM pretrained step0启动2节点8卡训练；不从CloseFridge权重迁移。当前为`cluster-pending`。
+- P5 Atomic9 RGB-D：集群preflight已验证真实数据为175,514 clips、GBS128、每epoch 1,371步；第5 epoch=6,855，8 epoch=10,968，旧8500步实际约6.20 epoch。按用户决定，正式训练固定14,000步（约10.21 epoch）。滚动checkpoint仍每500步且最多5个，真实第5 epoch额外保存到Store独立milestones目录供后续评测。先补齐9任务全量depth cache，再从公开X-WAM pretrained step0启动2节点8卡训练；不从CloseFridge权重迁移。当前为`cluster-pending`。
 
 ## Clariden 部署状态
 

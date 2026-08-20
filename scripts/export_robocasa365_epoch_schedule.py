@@ -15,6 +15,7 @@ def resolve_epoch_schedule(
     *,
     expected_epochs: int,
     milestone_epoch: int,
+    expected_total_steps: int | None = None,
 ) -> dict[str, int]:
     path = Path(preflight_path).expanduser().resolve()
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -24,16 +25,23 @@ def resolve_epoch_schedule(
     total_steps = int(schedule.get("num_training_steps", -1))
     if payload.get("ok") is not True or payload.get("result") != "pass":
         raise ValueError(f"preflight不是PASS：{path}")
-    if schedule.get("schedule_mode") != "epochs":
-        raise ValueError("8-epoch训练必须使用epochs调度，不能使用fixed_steps")
+    schedule_mode = str(schedule.get("schedule_mode", ""))
+    if schedule_mode not in {"epochs", "fixed_steps"}:
+        raise ValueError(f"不支持的schedule_mode：{schedule_mode!r}")
     if epochs != int(expected_epochs) or epochs <= 0:
         raise ValueError(f"epoch数不一致：{epochs} != {expected_epochs}")
     if not 0 < int(milestone_epoch) < epochs:
         raise ValueError("里程碑epoch必须位于完整训练区间内")
-    if steps_per_epoch <= 0 or total_steps != steps_per_epoch * epochs:
+    if steps_per_epoch <= 0:
+        raise ValueError(f"steps_per_epoch必须为正整数：{steps_per_epoch}")
+    if schedule_mode == "epochs" and total_steps != steps_per_epoch * epochs:
         raise ValueError(
             f"epoch调度不自洽：steps_per_epoch={steps_per_epoch}, "
             f"epochs={epochs}, total_steps={total_steps}"
+        )
+    if expected_total_steps is not None and total_steps != int(expected_total_steps):
+        raise ValueError(
+            f"固定训练步数不一致：{total_steps} != {expected_total_steps}"
         )
     return {
         "XWAM_SCHEDULE_NUM_EPOCHS": epochs,
@@ -69,12 +77,14 @@ def main() -> int:
     parser.add_argument("--preflight", required=True)
     parser.add_argument("--expected-epochs", type=int, required=True)
     parser.add_argument("--milestone-epoch", type=int, required=True)
+    parser.add_argument("--expected-total-steps", type=int)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
     schedule = resolve_epoch_schedule(
         args.preflight,
         expected_epochs=args.expected_epochs,
         milestone_epoch=args.milestone_epoch,
+        expected_total_steps=args.expected_total_steps,
     )
     output = write_schedule_env(args.output, schedule)
     print(json.dumps(schedule, ensure_ascii=False, indent=2, sort_keys=True))

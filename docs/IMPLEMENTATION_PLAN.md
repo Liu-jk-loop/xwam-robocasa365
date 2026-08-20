@@ -257,7 +257,7 @@ RoboCasa365 原生数据
 
 1. 复用已冻结的全局inverse-depth encoding和CloseFridge完整缓存sidecar，按Atomic9任务清单生成其余8任务全部episode/三相机depth；中断后重提同一作业只补缺失产物。
 2. 缓存manifest必须覆盖9任务且`ok=true/result=pass`；每个子Dataset在训练前严格验证它自身的episode、camera、帧数和sidecar。
-3. 训练与Atomic9 RGB ratio0保持任务、自然比例采样、16D/12D global stats、seed42、LR、warmup和GBS128不变；仅开启depth辅助loss并使用2节点8卡的低micro-batch配置。训练量由冻结manifest精确计算8个epoch，不猜测固定步数。
+3. 训练与Atomic9 RGB ratio0保持任务、自然比例采样、16D/12D global stats、seed42、LR、warmup和GBS128不变；仅开启depth辅助loss并使用2节点8卡的低micro-batch配置。正式停止点固定14,000步，preflight依据真实manifest同时记录其约10.21 epoch的折算。
 4. 常规滚动checkpoint每500步保存且最多5个；第5 epoch结束时额外写入Store独立milestone checkpoint，后续top-k淘汰不得删除它。
 5. 从公开X-WAM pretrained step0开始，不加载CloseFridge单任务权重。与RGB对照使用独立W&B、checkpoint和结果目录。
 

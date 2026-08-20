@@ -1,4 +1,4 @@
-# Atomic9 RGB-D 8-epoch对照：与RGB ratio0一致的任务、seed、GBS和ratio。
+# Atomic9 RGB-D 14000-step实验：与RGB ratio0一致的任务、seed、GBS和ratio。
 exp_root: ./experiments/
 exp_name: robocasa365_atomic9_fastwam_overlap_ratio00_rgbd_seed42_8gpu
 seed: 42
@@ -7,10 +7,9 @@ lr: 1e-5
 weight_decay: 0.01
 num_warmup_steps: 200
 num_train_epochs: 8
-# 由Atomic9 manifest的真实valid clips在启动时计算8个完整epoch。
-num_training_steps: null
-formal_fixed_training_steps: null
-formal_num_train_epochs: 8
+# 8 epoch仅用于preflight折算；正式停止点按用户要求固定14000步。
+num_training_steps: 14000
+formal_fixed_training_steps: 14000
 trainer_max_steps: null
 gradient_clip_val: 1.0
 gradient_clip_algorithm: norm

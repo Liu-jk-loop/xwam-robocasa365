@@ -1487,7 +1487,7 @@ step1500在同一`checkpoints/`下按`epoch=*-step=1500.ckpt`唯一匹配；如�
 ## Atomic9 ratio0 RGB-D全量训练
 
 该实验直接与Atomic9 RGB ratio0对齐：9任务、自然比例采样、seed42、
-GBS128和LR/warmup不变，训练量改为8个完整epoch。不加载CloseFridge单任务
+GBS128和LR/warmup不变，训练量固定为14,000步。不加载CloseFridge单任务
 checkpoint，正式训练从公开X-WAM pretrained step0开始。
 
 先更新主训练clone，确认已冻结的depth encoding存在，再提交全量缓存作业：
@@ -1519,26 +1519,27 @@ grep -E '"(task_count|ok|result)"' "$DEPTH_MANIFEST" "$DEPTH_AUDIT"
 ```
 
 预期两份报告都包含`task_count=9`、`ok=true`和`result=pass`。然后使用
-独立短作业从真实manifest计算8 epoch总步数和第5 epoch里程碑：
+独立短作业审计14,000步停止点，并从真实manifest计算第5 epoch里程碑：
 
 ```bash
-sbatch deployment/clariden/prepare_atomic9_rgbd_8epoch_preflight_xwam.sbatch
+sbatch deployment/clariden/prepare_atomic9_rgbd_14000step_preflight_xwam.sbatch
 ```
 
 短作业PASS后检查导出的调度：
 
 ```bash
-PREFLIGHT="$RGBD_EVIDENCE/robocasa365_atomic9_ratio00_rgbd_8epoch_preflight.json"
-SCHEDULE_ENV="$RGBD_EVIDENCE/robocasa365_atomic9_ratio00_rgbd_8epoch_schedule.env"
+PREFLIGHT="$RGBD_EVIDENCE/robocasa365_atomic9_ratio00_rgbd_14000step_preflight.json"
+SCHEDULE_ENV="$RGBD_EVIDENCE/robocasa365_atomic9_ratio00_rgbd_14000step_schedule.env"
 test -s "$PREFLIGHT"
 test -s "$SCHEDULE_ENV"
 grep -E '"(schedule_mode|num_train_epochs|steps_per_epoch|num_training_steps|effective_num_train_epochs|ok|result)"' "$PREFLIGHT"
 cat "$SCHEDULE_ENV"
 ```
 
-preflight必须为`epochs`调度、`num_train_epochs=8`、`effective_num_train_epochs=8.0`
-且PASS。`schedule.env`只包含整数，其中总步数是`steps_per_epoch×8`，
-里程碑步数是`steps_per_epoch×5`。不要手动猜测这两个步数。
+preflight必须为`fixed_steps`调度、`num_training_steps=14000`且PASS。
+`schedule.env`中总步数必须为14,000，里程碑步数是真实
+`steps_per_epoch×5`。已知manifest下每epoch为1,371步，因此第5 epoch应为6,855步；
+旧step8500约为6.20 epoch，不再标记为第5 epoch。
 
 然后使用隐藏输入提交2节点×4 GH200正式训练：
 
@@ -1556,7 +1557,7 @@ unset WANDB_API_KEY
 optimizer state和gradient checkpointing。每500步保存IOPS滚动checkpoint，每3000步
 保存Store持久checkpoint。滚动目录仍最多保留5个；第5 epoch边界另外保存
 `$DEPLOY_STORE/checkpoints/xwam/robocasa365_atomic9_fastwam_overlap_ratio00_rgbd_seed42_8gpu/checkpoints/milestones/epoch5-step=*.ckpt`，
-后续滚动top-k不会删除它。训练最终在第8 epoch边界停止。12小时未训完时，等原Job退出后
+后续滚动top-k不会删除它。训练最终在step14,000停止。12小时未训完时，等原Job退出后
 重提同一训练作业；planner只从该Atomic9 RGB-D实验的完整8-rank checkpoint恢复。
 
 训练启动后首段日志至少要确认：`formal_modality=rgbd`、`global_batch_size=128`、
