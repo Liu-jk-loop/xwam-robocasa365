@@ -203,8 +203,10 @@ def validate_m6_formal_training_contract(
     fixed_training_steps = get("formal_fixed_training_steps")
     if fixed_training_steps is not None:
         fixed_training_steps = int(fixed_training_steps)
+    expected_num_train_epochs = int(get("formal_num_train_epochs", 5))
     formal_schedule_ok = (
-        int(get("num_train_epochs")) == 5
+        expected_num_train_epochs > 0
+        and int(get("num_train_epochs")) == expected_num_train_epochs
         if fixed_training_steps is None
         else fixed_training_steps > 0
         and int(get("num_training_steps")) == fixed_training_steps
@@ -267,6 +269,7 @@ def validate_m6_formal_training_contract(
         "batch_size_per_gpu": per_device_batch,
         "accumulate_grad_batches": accumulate,
         "global_batch_size": actual_global_batch,
+        "num_train_epochs": expected_num_train_epochs,
         "formal_modality": formal_modality,
         "num_workers_per_gpu": int(get("num_workers_per_gpu", 0)),
         "use_gradient_checkpointing": bool(get("use_gradient_checkpointing", False)),
@@ -710,7 +713,8 @@ def _run_contract(
         == int(expected_world_size),
         "clean_git": bool(git.get("commit")) and git.get("dirty") is False,
         "formal_schedule": (
-            int(training.get("num_train_epochs", -1)) == 5
+            int(training.get("num_train_epochs", -1))
+            == int(formal_contract.get("num_train_epochs", 5))
             if training.get("schedule_mode", "epochs") == "epochs"
             else int(training.get("fixed_training_steps", -1))
             == int(training.get("num_training_steps", -2))
@@ -724,6 +728,25 @@ def _run_contract(
         "optimizer_state_pass": all(optimizer["checks"].values()),
         "metrics_pass": all(metrics["checks"].values()),
     }
+    milestone_storage = checkpoint_storage.get("milestone") or {}
+    milestone_step = int(milestone_storage.get("interval_steps", 0))
+    milestone_checkpoint = None
+    if milestone_step > 0 and int(expected_step) >= milestone_step:
+        milestone_directory = Path(
+            str(milestone_storage.get("directory", ""))
+        ).expanduser()
+        candidates = sorted(
+            milestone_directory.glob(f"*step={milestone_step}.ckpt")
+        )
+        if len(candidates) == 1:
+            milestone_checkpoint = _checkpoint_layout(
+                candidates[0], expected_world_size=expected_world_size
+            )
+        checks["milestone_checkpoint_preserved"] = (
+            len(candidates) == 1
+            and bool(milestone_checkpoint)
+            and all(milestone_checkpoint["checks"].values())
+        )
     if require_final_checkpoint:
         checks["final_checkpoint_complete"] = any(
             event.get("event") == "final_checkpoint_save_complete"
@@ -748,6 +771,7 @@ def _run_contract(
         "checkpoint": checkpoint,
         "wandb": wandb,
         "checkpoint_storage": checkpoint_storage,
+        "milestone_checkpoint": milestone_checkpoint,
         "completed_checkpoint_events": completed_checkpoint_events,
     }
 

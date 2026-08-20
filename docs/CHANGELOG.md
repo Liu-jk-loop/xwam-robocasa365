@@ -1,5 +1,13 @@
 # 变更记录
 
+## 2026-08-20 — Atomic9 RGB-D改为8 epoch并永久保留第5 epoch
+
+- 按用户决定，Atomic9 ratio0 RGB-D不再固定8500步，改为依据已冻结Atomic9 manifest的真实valid clips、GBS128计算8个完整epoch。任务、自然采样、global stats、ratio0、seed42、LR/warmup和2节点8卡配置不变。
+- 新增独立8-epoch preflight，从PASS JSON导出只包含整数的schedule env。训练作业不猜测每epoch步数，直接source该文件取得总步数和第5 epoch边界；preflight强制`epochs`调度且验证`total_steps = steps_per_epoch × 8`。
+- 常规IOPS滚动checkpoint仍每500步保存、最多5个；Store持久checkpoint逻辑不变。额外增加独立`milestones/epoch5-step=*.ckpt`，在第5 epoch结束时保存完整8-rank训练状态，不受滚动top-k淘汰。
+- 通用正式训练合同现支持显式非5-epoch计划；旧RGB/Atomic18默认仍为5 epoch。正式audit在已越过里程碑步数时检查第5 epoch checkpoint唯一且model/八个optimizer shard完整。
+- 本地聚焦测试、sbatch语法、Python编译、Ruff和diff检查通过；新preflight、第5 epoch集群checkpoint及8 epoch训练均为`cluster-pending`。
+
 ## 2026-08-19 — Atomic9 ratio0 RGB-D全量缓存与8卡正式训练入口
 
 - CloseFridge RGB-D单任务评测已完成：step1000的seed42/seed7均为48%，step1500为88%/84%。这证明训练链路可用，但不能单凭单任务成功率区分更好的收敛与过拟合；根据用户决定，不再为这一点追加单任务训练，直接进入Atomic9 RGB-D对照。

@@ -279,6 +279,58 @@ class M6H100TrainingTest(unittest.TestCase):
             self.assertFalse(mismatch["ok"])
             self.assertFalse(mismatch["checks"]["expected_wandb_run"])
 
+    def test_formal_chunk_preserves_a_completed_milestone_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifacts = _write_gate_run(
+                Path(tmp),
+                name="formal-milestone",
+                global_step=1000,
+                resume_checkpoint=None,
+                commit="m" * 40,
+            )
+            run_root = Path(artifacts["metadata_path"]).parent
+            milestone = run_root / "milestones" / "epoch5-step=500.ckpt" / "checkpoint"
+            milestone.mkdir(parents=True)
+            (milestone / "mp_rank_00_model_states.pt").write_bytes(b"model")
+            for rank in range(4):
+                (
+                    milestone
+                    / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt"
+                ).write_bytes(b"optimizer")
+            metadata = json.loads(Path(artifacts["metadata_path"]).read_text())
+            metadata["checkpoint"]["storage"]["milestone"] = {
+                "directory": str((run_root / "milestones").resolve()),
+                "interval_steps": 500,
+                "save_top_k": -1,
+                "filename": "epoch5-{step}",
+            }
+            Path(artifacts["metadata_path"]).write_text(json.dumps(metadata))
+            artifacts.pop("checkpoint")
+
+            report = build_m6_formal_chunk_report(
+                **artifacts,
+                expected_step=1000,
+                expected_resume_checkpoint=None,
+                expected_wandb_run_id="persistent-run-id",
+                expected_rolling_checkpoint_root=str(run_root / "hot"),
+                expected_durable_checkpoint_root=str(run_root / "durable"),
+            )
+            self.assertTrue(report["ok"], report)
+            self.assertTrue(
+                report["run"]["checks"]["milestone_checkpoint_preserved"]
+            )
+
+            (milestone / "bf16_zero_pp_rank_3_mp_rank_00_optim_states.pt").unlink()
+            failed = build_m6_formal_chunk_report(
+                **artifacts,
+                expected_step=1000,
+                expected_resume_checkpoint=None,
+                expected_wandb_run_id="persistent-run-id",
+                expected_rolling_checkpoint_root=str(run_root / "hot"),
+                expected_durable_checkpoint_root=str(run_root / "durable"),
+            )
+            self.assertFalse(failed["ok"])
+
     def test_eight_gpu_formal_chunk_audits_all_ranks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             artifacts = _write_gate_run(

@@ -1,4 +1,4 @@
-# Atomic9 RGB-D对照：与RGB ratio0一致的任务、seed、GBS和8500 optimizer steps。
+# Atomic9 RGB-D 8-epoch对照：与RGB ratio0一致的任务、seed、GBS和ratio。
 exp_root: ./experiments/
 exp_name: robocasa365_atomic9_fastwam_overlap_ratio00_rgbd_seed42_8gpu
 seed: 42
@@ -6,9 +6,11 @@ seed: 42
 lr: 1e-5
 weight_decay: 0.01
 num_warmup_steps: 200
-num_train_epochs: 5
-num_training_steps: 8500
-formal_fixed_training_steps: 8500
+num_train_epochs: 8
+# 由Atomic9 manifest的真实valid clips在启动时计算8个完整epoch。
+num_training_steps: null
+formal_fixed_training_steps: null
+formal_num_train_epochs: 8
 trainer_max_steps: null
 gradient_clip_val: 1.0
 gradient_clip_algorithm: norm
@@ -39,6 +41,9 @@ durable_checkpoint_dir: null
 durable_save_interval: 3000
 durable_save_top_k: -1
 durable_save_last: false
+milestone_checkpoint_dir: null
+milestone_checkpoint_interval: null
+milestone_checkpoint_filename: epoch5-{step}
 final_checkpoint_dir: null
 save_final_checkpoint: true
 resume_checkpoint: null

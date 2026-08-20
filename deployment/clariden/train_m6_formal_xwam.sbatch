@@ -39,6 +39,7 @@ DEPTH_ENCODING="${XWAM_M6_DEPTH_ENCODING:-}"
 DEPTH_MANIFEST="${XWAM_M6_DEPTH_MANIFEST:-}"
 DEPTH_AUDIT="${XWAM_M6_DEPTH_AUDIT:-}"
 LOG_STEM="${XWAM_M6_LOG_STEM:-m6-formal}"
+MILESTONE_STEP="${XWAM_M6_MILESTONE_STEP:-}"
 
 DEFAULT_TOTAL_STEPS=16390
 TOTAL_STEPS="${XWAM_M6_TOTAL_STEPS:-$DEFAULT_TOTAL_STEPS}"
@@ -93,6 +94,14 @@ cd "$REPO"
 [[ "$EXPECT_DEPTH" == true || "$EXPECT_DEPTH" == false ]] || {
   xwam_fail "XWAM_M6_EXPECT_DEPTH must be true or false"
 }
+if [[ -n "$MILESTONE_STEP" ]]; then
+  [[ "$MILESTONE_STEP" =~ ^[1-9][0-9]*$ ]] || {
+    xwam_fail "XWAM_M6_MILESTONE_STEP must be a positive integer"
+  }
+  ((MILESTONE_STEP < TOTAL_STEPS)) || {
+    xwam_fail "XWAM_M6_MILESTONE_STEP must be smaller than total steps"
+  }
+fi
 [[ "${SLURM_NNODES:-0}" == "$FORMAL_NUM_NODES" ]] || {
   xwam_fail "Slurm allocation node count does not match XWAM_M6_NUM_NODES"
 }
@@ -173,6 +182,9 @@ echo "total_steps=$TOTAL_STEPS"
 echo "expect_depth=$EXPECT_DEPTH depth_cache_root=$DEPTH_CACHE_ROOT"
 echo "rolling_checkpoints=$HOT_CHECKPOINT_ROOT (every 500 steps, max 5)"
 echo "durable_checkpoints=$DURABLE_CHECKPOINT_ROOT (every 3000 steps, unlimited)"
+if [[ -n "$MILESTONE_STEP" ]]; then
+  echo "milestone_checkpoint=$DURABLE_CHECKPOINT_ROOT/milestones (step $MILESTONE_STEP)"
+fi
 echo "failure_report=$FAILURE_REPORT"
 
 XWAM_PHASE=planner_srun
@@ -371,6 +383,13 @@ if [[ "$EXPECT_DEPTH" == true ]]; then
     "dataset.depth_cache_root=$DEPTH_CACHE_ROOT"
     "dataset.depth_encoding_path=$DEPTH_ENCODING"
     "dataset.depth_cache_manifest=$DEPTH_MANIFEST"
+  )
+fi
+if [[ -n "$MILESTONE_STEP" ]]; then
+  TRAIN_ARGS+=(
+    "milestone_checkpoint_dir=$DURABLE_CHECKPOINT_ROOT/milestones"
+    "milestone_checkpoint_interval=$MILESTONE_STEP"
+    "milestone_checkpoint_filename=epoch5-{step}"
   )
 fi
 if [[ -n "$RESUME_CHECKPOINT" ]]; then

@@ -371,6 +371,7 @@ def main():
     ]
     checkpoint_callback = None
     durable_checkpoint_callback = None
+    milestone_checkpoint_callback = None
     checkpoint_events_path = run_dir / f"{run_id}_checkpoint_events.jsonl"
     optimizer_audit_dir = run_dir / f"{run_id}_optimizer_state"
     if bool(config.get("audit_optimizer_state_dtype", False)):
@@ -430,6 +431,43 @@ def main():
                 **durable_monitor,
             )
             callbacks.insert(2, durable_checkpoint_callback)
+        milestone_checkpoint_dir_value = config.get("milestone_checkpoint_dir")
+        if milestone_checkpoint_dir_value:
+            milestone_checkpoint_dir = Path(
+                str(milestone_checkpoint_dir_value)
+            ).expanduser()
+            milestone_interval = int(config.get("milestone_checkpoint_interval", 0))
+            if milestone_interval <= 0:
+                raise ValueError("milestone_checkpoint_interval 必须为正整数")
+            if milestone_checkpoint_dir.resolve() in {
+                checkpoint_dir.resolve(),
+                (
+                    durable_checkpoint_dir.resolve()
+                    if durable_checkpoint_callback is not None
+                    else None
+                ),
+            }:
+                raise ValueError("milestone checkpoint必须使用独立目录")
+            milestone_checkpoint_callback = ResourceAwareModelCheckpoint(
+                diagnostics_path=checkpoint_events_path,
+                checkpoint_tier="milestone",
+                synchronize_after_save=bool(
+                    config.get("checkpoint_post_save_barrier", False)
+                ),
+                dirpath=milestone_checkpoint_dir,
+                filename=str(
+                    config.get("milestone_checkpoint_filename", "milestone-{step}")
+                ),
+                save_top_k=-1,
+                save_last=False,
+                save_weights_only=False,
+                save_on_exception=False,
+                every_n_train_steps=milestone_interval,
+                enable_version_counter=False,
+            )
+            # 里程碑先于滚动checkpoint保存；即使作业随后中断，
+            # 下一次resume也不会因top-k淘汰而丢失指定epoch。
+            callbacks.insert(1, milestone_checkpoint_callback)
         final_checkpoint_dir = Path(
             config.get("final_checkpoint_dir")
             or durable_checkpoint_dir_value
@@ -460,6 +498,20 @@ def main():
                     ),
                 }
                 if durable_checkpoint_callback is not None
+                else None
+            ),
+            "milestone": (
+                {
+                    "directory": str(milestone_checkpoint_dir.resolve()),
+                    "interval_steps": milestone_interval,
+                    "save_top_k": -1,
+                    "filename": str(
+                        config.get(
+                            "milestone_checkpoint_filename", "milestone-{step}"
+                        )
+                    ),
+                }
+                if milestone_checkpoint_callback is not None
                 else None
             ),
             "final_directory": str(final_checkpoint_dir.resolve()),

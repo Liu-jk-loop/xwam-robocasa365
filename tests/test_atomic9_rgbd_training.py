@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -35,8 +37,10 @@ class Atomic9RgbdTrainingTest(unittest.TestCase):
                 "deepspeed_exclude_frozen_parameters": False,
                 "use_depth": True,
                 "depth_loss_weight": 1.0,
-                "formal_fixed_training_steps": 8500,
-                "num_training_steps": 8500,
+                "formal_fixed_training_steps": None,
+                "formal_num_train_epochs": 8,
+                "num_train_epochs": 8,
+                "num_training_steps": None,
                 "dataset": {"expected_sampling": "natural_proportional"},
                 "train_subset_size": None,
                 "train_shuffle": True,
@@ -51,6 +55,7 @@ class Atomic9RgbdTrainingTest(unittest.TestCase):
         )
         self.assertEqual(contract["formal_modality"], "rgbd")
         self.assertEqual(contract["global_batch_size"], 128)
+        self.assertEqual(contract["num_train_epochs"], 8)
         self.assertTrue(all(contract["checks"].values()))
 
     def test_rgbd_metrics_require_a_finite_positive_depth_loss(self) -> None:
@@ -97,7 +102,9 @@ class Atomic9RgbdTrainingTest(unittest.TestCase):
             self.assertIn(expected, cache)
         for expected in (
             "#SBATCH --nodes=2",
-            "XWAM_M6_TOTAL_STEPS=8500",
+            'source "$SCHEDULE_ENV"',
+            'XWAM_M6_TOTAL_STEPS="$XWAM_SCHEDULE_TOTAL_STEPS"',
+            'XWAM_M6_MILESTONE_STEP="$XWAM_SCHEDULE_MILESTONE_STEP"',
             "XWAM_M6_EXPECT_DEPTH=true",
             "XWAM_M6_DEPTH_AUDIT=",
             "wan22_5b_robocasa365_atomic_rgbd.yaml",
@@ -109,7 +116,10 @@ class Atomic9RgbdTrainingTest(unittest.TestCase):
         self.assertIn("expected_task_count: 9", data)
         self.assertIn("expected_sampling: natural_proportional", data)
         self.assertIn("clean_action_ratio: 0.0", experiment)
-        self.assertIn("formal_fixed_training_steps: 8500", experiment)
+        self.assertIn("num_train_epochs: 8", experiment)
+        self.assertIn("formal_fixed_training_steps: null", experiment)
+        self.assertIn("formal_num_train_epochs: 8", experiment)
+        self.assertIn("milestone_checkpoint_filename: epoch5-{step}", experiment)
         self.assertIn("batch_size_per_gpu: 4", hardware)
         self.assertIn("accumulate_grad_batches: 4", hardware)
         self.assertIn("formal_modality: rgbd", hardware)
@@ -125,8 +135,74 @@ class Atomic9RgbdTrainingTest(unittest.TestCase):
             '"dataset.depth_cache_root=$DEPTH_CACHE_ROOT"',
             '"dataset.depth_encoding_path=$DEPTH_ENCODING"',
             '"dataset.depth_cache_manifest=$DEPTH_MANIFEST"',
+            '"milestone_checkpoint_dir=$DURABLE_CHECKPOINT_ROOT/milestones"',
         ):
             self.assertIn(expected, shared)
+
+    def test_preflight_exports_exact_epoch_and_epoch5_steps(self) -> None:
+        preflight_job = (
+            REPO_ROOT
+            / "deployment/clariden/prepare_atomic9_rgbd_8epoch_preflight_xwam.sbatch"
+        ).read_text(encoding="utf-8")
+        self.assertIn("--epochs 8", preflight_job)
+        self.assertNotIn("--fixed-training-steps", preflight_job)
+        self.assertIn("--milestone-epoch 5", preflight_job)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            preflight = root / "preflight.json"
+            output = root / "schedule.env"
+            preflight.write_text(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "result": "pass",
+                        "schedule": {
+                            "schedule_mode": "epochs",
+                            "num_train_epochs": 8,
+                            "steps_per_epoch": 1733,
+                            "num_training_steps": 13864,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    "python",
+                    str(REPO_ROOT / "scripts/export_robocasa365_epoch_schedule.py"),
+                    "--preflight",
+                    str(preflight),
+                    "--expected-epochs",
+                    "8",
+                    "--milestone-epoch",
+                    "5",
+                    "--output",
+                    str(output),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            values = dict(
+                line.split("=", 1)
+                for line in output.read_text(encoding="utf-8").splitlines()
+            )
+            self.assertEqual(values["XWAM_SCHEDULE_TOTAL_STEPS"], "13864")
+            self.assertEqual(values["XWAM_SCHEDULE_MILESTONE_STEP"], "8665")
+
+    def test_training_entry_has_an_independent_milestone_checkpoint_tier(self) -> None:
+        entrypoint = (REPO_ROOT / "scripts/train_sft.py").read_text(encoding="utf-8")
+        for expected in (
+            'checkpoint_tier="milestone"',
+            'filename=str(',
+            "every_n_train_steps=milestone_interval",
+            "save_top_k=-1",
+            'callbacks.insert(1, milestone_checkpoint_callback)',
+            '"milestone": (',
+        ):
+            self.assertIn(expected, entrypoint)
 
 
 if __name__ == "__main__":
