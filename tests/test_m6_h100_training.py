@@ -279,6 +279,35 @@ class M6H100TrainingTest(unittest.TestCase):
             self.assertFalse(mismatch["ok"])
             self.assertFalse(mismatch["checks"]["expected_wandb_run"])
 
+    def test_formal_chunk_records_but_does_not_block_dirty_git(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifacts = _write_gate_run(
+                Path(tmp),
+                name="formal-dirty-git",
+                global_step=1000,
+                resume_checkpoint=None,
+                commit="d" * 40,
+            )
+            metadata_path = Path(artifacts["metadata_path"])
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata["git"]["dirty"] = True
+            metadata["git"]["status"] = ["?? wandb/"]
+            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+            artifacts.pop("checkpoint")
+
+            report = build_m6_formal_chunk_report(
+                **artifacts,
+                expected_step=1000,
+                expected_resume_checkpoint=None,
+                expected_wandb_run_id="persistent-run-id",
+                expected_rolling_checkpoint_root=str(metadata_path.parent / "hot"),
+                expected_durable_checkpoint_root=str(metadata_path.parent / "durable"),
+            )
+
+            self.assertTrue(report["ok"], report)
+            self.assertTrue(report["run"]["checks"]["git_commit_recorded"])
+            self.assertTrue(metadata["git"]["dirty"])
+
     def test_formal_chunk_preserves_a_completed_milestone_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             artifacts = _write_gate_run(

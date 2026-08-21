@@ -1,5 +1,12 @@
 # 变更记录
 
+## 2026-08-21 — 取消M6正式训练的Git clean阻塞门禁
+
+- Job `3133147`的两个节点均在`phase=training`、模型启动前被节点shell中的第二次`git status --porcelain`阻塞；两份train log均为空，因此不是OOM、NCCL、W&B认证或模型配置问题。
+- M6正式训练不再要求运行仓库保持clean：外层发现改动时只打印commit、warning和文件列表，节点内重复clean检查已删除。Git commit、dirty状态及具体文件仍由run metadata记录，保留追溯信息但不再消耗正式allocation阻塞运行。
+- 正式chunk audit由`clean_git`改为`git_commit_recorded`，只要求有效commit，不因运行时生成的未跟踪文件判失败。该放宽只针对M6正式训练；数据冻结、debug恢复门禁及发布前本地审查规则不变。
+- 新增dirty Git正式chunk回归，证明`dirty=true/status!=[]`时审计仍通过；真实2节点8卡重新启动为`cluster-pending`。
+
 ## 2026-08-20 — 增加Slurm跨shell变量传递强制审查门禁
 
 - Job `3129585`暴露出原有审查只覆盖sbatch语法和目标脚本静态断言，无法发现外层变量在单引号节点shell中使用却未通过`srun env`传递的问题；这种错误会在排队结束、资源已分配后才由`set -u`触发。

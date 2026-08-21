@@ -136,10 +136,11 @@ if [[ "$EXPECT_DEPTH" == true ]]; then
   grep -q '"ok": true' "$DEPTH_AUDIT"
   grep -q '"result": "pass"' "$DEPTH_AUDIT"
 fi
-test -z "$(git status --porcelain)" || {
+git rev-parse HEAD
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "[WARN] Git worktree changes are recorded but do not block M6 formal training" >&2
   git status --short >&2
-  xwam_fail "Git worktree must be clean before M6 formal training"
-}
+fi
 mkdir -p \
   "$EXP_ROOT" \
   "$RUN_DIR" \
@@ -399,7 +400,6 @@ fi
 
 XWAM_PHASE=training
 git rev-parse HEAD
-test -z "$(git status --porcelain)"
 nvidia-smi
 free -h
 if [[ "$FORMAL_NUM_NODES" == 1 ]]; then

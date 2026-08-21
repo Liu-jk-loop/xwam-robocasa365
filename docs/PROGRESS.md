@@ -1,13 +1,13 @@
 # 项目进度
 
-更新时间：2026-08-20
+更新时间：2026-08-21
 
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：RGBD-P5——Atomic9 ratio0 RGB-D正式训练
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Atomic9 RGB ratio0已完成，后续新训练默认ratio0。RGBD-P1～P3均通过；CloseFridge RGB-D step1000的seed42/7成功率均48%，step1500为88%/84%。Atomic9 RGB-D的14k preflight已PASS；Job `3129585`因外层未向两节点shell传递`MILESTONE_STEP`，在进入Python训练前退出，不是OOM。传参修复已完成本地验证，等待重提；新增Slurm跨shell变量静态门禁已覆盖全部29份Clariden作业并接入发布检查。
+- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Atomic9 RGB ratio0已完成，后续新训练默认ratio0。RGBD-P1～P3均通过；CloseFridge RGB-D step1000的seed42/7成功率均48%，step1500为88%/84%。Atomic9 RGB-D的14k preflight已PASS。Job `3133147`通过里程碑传参后仍在模型启动前被重复Git clean检查阻塞，两节点train log均为空；M6正式训练现改为记录commit/dirty状态但不阻塞，等待重提。
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -35,6 +35,7 @@
 - P4单任务训练/评测：2节点8卡、`batch4×accum4×8=GBS128`完成至指定checkpoint。四路评测最终结果为step1000 seed42/7均48%，step1500 seed42/7为88%/84%。step1500高成功率不能单独证明不过拟合，但已足以关闭工程链路门禁。
 - P5 Atomic9 RGB-D：集群preflight已验证真实数据为175,514 clips、GBS128、每epoch 1,371步；第5 epoch=6,855，8 epoch=10,968，旧8500步实际约6.20 epoch。按用户决定，正式训练固定14,000步（约10.21 epoch）。滚动checkpoint仍每500步且最多5个，真实第5 epoch额外保存到Store独立milestones目录供后续评测。先补齐9任务全量depth cache，再从公开X-WAM pretrained step0启动2节点8卡训练；不从CloseFridge权重迁移。当前为`cluster-pending`。
 - P5发布审查：新增跨shell变量合同门禁，覆盖当前29份Clariden sbatch；漏传外层变量会在本地检查和变更记录门禁阶段直接失败，不再等到正式allocation内触发。检查器正反回归及全仓审计均已通过。
+- P5 Job `3133147`：两节点均在训练shell的重复Git clean门禁退出，未进入Python训练。该运行时门禁已取消，正式audit只要求commit被记录；dirty状态保留为metadata信息，不再决定作业成败。修复后的2节点8卡启动为`cluster-pending`。
 
 ## Clariden 部署状态
 

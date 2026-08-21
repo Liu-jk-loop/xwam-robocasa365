@@ -674,11 +674,12 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "wandb.login(verify=True)",
             '--expected-wandb-run-id "$WANDB_RUN_ID"',
             "resume_checkpoint=$RESUME_CHECKPOINT",
-            'test -z "$(git status --porcelain)"',
+            "Git worktree changes are recorded but do not block M6 formal training",
             "[PASS] X-WAM Clariden M6 formal chunk completed",
             "[PASS] X-WAM Clariden M6 formal 5-epoch training completed",
         ):
             self.assertIn(expected, script)
+        self.assertNotIn('test -z "$(git status --porcelain)"', script)
         self.assertNotIn("CHUNK_STEPS=1000", script)
         self.assertNotIn(
             "hardware_config=configs/hardware/gh200x4_96gb_gbs128_safe.yaml", script

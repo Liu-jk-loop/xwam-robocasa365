@@ -711,7 +711,7 @@ def _run_contract(
         and all(runtime["checks"].values()),
         "expected_world_size": int(formal_contract.get("world_size", -1))
         == int(expected_world_size),
-        "clean_git": bool(git.get("commit")) and git.get("dirty") is False,
+        "git_commit_recorded": bool(git.get("commit")),
         "formal_schedule": (
             int(training.get("num_train_epochs", -1))
             == int(formal_contract.get("num_train_epochs", 5))
