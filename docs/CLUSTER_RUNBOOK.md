@@ -1464,6 +1464,56 @@ grep -E '"(ok|result|macro_success_rate|macro_success_rate_delta)"' \
 每份`comparison.json`都必须为`ok=true/result=pass`，且两个checkpoint group各收齐
 9×50 episodes，才可写入ratio0/ratio0.5对比表。
 
+## Atomic9 ratio0 RGB-D：step 12000正式评测
+
+该作业保持此前Atomic9评测的4卡、8个policy server和16个simulator client布局。GPU 0/1
+运行seed 42～91，GPU 2/3运行seed 92～141；两组都完整覆盖Atomic9并加载同一份step
+12000权重。最终除两组各自的9×50结果外，还会生成每任务100 episodes的`combined`统计。
+RGB-D是训练辅助监督；在线policy输入仍为三路RGB和16D state，不要求模拟器实时提供深度。
+
+提交前确认Store永久checkpoint已经完整落盘：
+
+```bash
+DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
+EVAL_REPO="$DEPLOY_STORE/src/xwam-robocasa365-eval"
+EXP_NAME=robocasa365_atomic9_fastwam_overlap_ratio00_rgbd_seed42_8gpu
+CHECKPOINT_ROOT="$DEPLOY_STORE/checkpoints/xwam/$EXP_NAME/checkpoints"
+
+cd "$EVAL_REPO"
+python3 scripts/resolve_robocasa365_eval_checkpoints.py \
+  --checkpoint-root "$CHECKPOINT_ROOT" \
+  --group-step step12000_seed42=12000 \
+  --group-step step12000_seed92=12000 \
+  --expected-world-size 8 \
+  --output /tmp/xwam_atomic9_rgbd_12k_checkpoints.json \
+  --output-env /tmp/xwam_atomic9_rgbd_12k_checkpoints.env
+grep -E '"(ok|result|step|path)"' /tmp/xwam_atomic9_rgbd_12k_checkpoints.json
+```
+
+解析报告为`ok=true/result=pass`后提交：
+
+```bash
+cd "$EVAL_REPO"
+sbatch deployment/clariden/eval_atomic9_rgbd_step12000_xwam.sbatch
+```
+
+默认结果目录及验收命令：
+
+```bash
+EVAL_ID=atomic9_rgbd_step12000_seed42-141_target_100ep
+EVAL_ROOT=/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/atomic9-checkpoint-ab/$EVAL_ID
+
+test -s "$EVAL_ROOT/logs/checkpoint-resolution.json"
+test -s "$EVAL_ROOT/comparison.json"
+test -s "$EVAL_ROOT/summary_atomic9_step12000_seed42_vs_step12000_seed92.csv"
+grep -E '"(ok|result|checkpoint_step|seed_start|micro_success_rate|macro_success_rate)"' \
+  "$EVAL_ROOT/comparison.json"
+```
+
+重提同一合同使用同一`EVAL_ID`即可续跑；若要改变episode数或权重，必须使用新的eval ID。
+评测脚本不再因分支名或未提交文件阻塞；commit仍写入不可变合同，分支和工作区状态只写
+`logs/repo-state.txt`诊断文件，不会因为状态变化阻止同一合同续跑。
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：

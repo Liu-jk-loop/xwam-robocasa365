@@ -29,12 +29,29 @@ EXPERIMENT_DIR="$DEPLOY_CAPSCR/experiments/xwam/$EXP_NAME"
 CHECKPOINT_ROOT="${XWAM_ATOMIC9_CHECKPOINT_ROOT:-$DEPLOY_IOPS/xwam_run/$EXP_NAME/checkpoints}"
 MANIFEST="$DEPLOY_STORE/manifests/xwam/atomic9_ratio00/robocasa365_atomic9_fastwam_overlap_manifest.json"
 STATS="$DEPLOY_STORE/manifests/xwam/atomic9_ratio00/robocasa365_atomic9_fastwam_overlap_global_stats.json"
-TOPOLOGY="$REPO/configs/evaluation/robocasa365_atomic9_step6500_vs_step7500_8server_16client.json"
+TOPOLOGY="${XWAM_ATOMIC9_TOPOLOGY:-$REPO/configs/evaluation/robocasa365_atomic9_step6500_vs_step7500_8server_16client.json}"
 EVAL_ID="${XWAM_EVAL_ID:-atomic9_ratio00_step6500_vs_step7500_seed42_50ep}"
 EPISODES_PER_TASK="${XWAM_EVAL_EPISODES:-50}"
+GROUP_A="${XWAM_ATOMIC9_GROUP_A:-step6500}"
+GROUP_B="${XWAM_ATOMIC9_GROUP_B:-step7500}"
+STEP_A="${XWAM_ATOMIC9_STEP_A:-6500}"
+STEP_B="${XWAM_ATOMIC9_STEP_B:-7500}"
+REQUIRE_DEPTH="${XWAM_ATOMIC9_REQUIRE_DEPTH:-false}"
 
 if [[ -z "$EVAL_ID" || ! "$EVAL_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "[FAIL] XWAM_EVAL_ID must contain only A-Za-z0-9._-" >&2
+  exit 2
+fi
+if [[ ! "$GROUP_A" =~ ^[A-Za-z][A-Za-z0-9_]*$ || ! "$GROUP_B" =~ ^[A-Za-z][A-Za-z0-9_]*$ || "$GROUP_A" == "$GROUP_B" ]]; then
+  echo "[FAIL] evaluation group names must be distinct identifiers" >&2
+  exit 2
+fi
+if [[ ! "$STEP_A" =~ ^[1-9][0-9]*$ || ! "$STEP_B" =~ ^[1-9][0-9]*$ ]]; then
+  echo "[FAIL] evaluation checkpoint steps must be positive integers" >&2
+  exit 2
+fi
+if [[ "$REQUIRE_DEPTH" != true && "$REQUIRE_DEPTH" != false ]]; then
+  echo "[FAIL] XWAM_ATOMIC9_REQUIRE_DEPTH must be true or false" >&2
   exit 2
 fi
 EVAL_ROOT="$DEPLOY_IOPS/x-wam-eval/atomic9-checkpoint-ab/$EVAL_ID"
@@ -46,7 +63,7 @@ STOP_FILE="$CONTROL_ROOT/stop-policy"
 CHECKPOINT_REPORT="$LOG_ROOT/checkpoint-resolution.json"
 CHECKPOINT_ENV="$CONTROL_ROOT/checkpoint-resolution.env"
 SUMMARY_JSON="$EVAL_ROOT/comparison.json"
-SUMMARY_CSV="$EVAL_ROOT/summary_atomic9_step6500_vs_step7500.csv"
+SUMMARY_CSV="$EVAL_ROOT/summary_atomic9_${GROUP_A}_vs_${GROUP_B}.csv"
 mkdir -p "$RESULT_ROOT" "$LOG_ROOT/clients" "$LOG_ROOT/servers" "$CONTROL_ROOT"
 exec > >(tee -a "$LOG_ROOT/job.log") 2> >(tee -a "$LOG_ROOT/job.err" >&2)
 
@@ -61,13 +78,6 @@ source "$REPO/deployment/clariden/error_trap.sh"
 xwam_install_err_trap
 
 cd "$REPO"
-[[ "$(git branch --show-current)" == eval/atomic9-checkpoint-ab ]] || {
-  xwam_fail "Evaluation clone must use eval/atomic9-checkpoint-ab"
-}
-test -z "$(git status --porcelain)" || {
-  git status --short >&2
-  xwam_fail "Git worktree must be clean before Atomic9 checkpoint comparison"
-}
 [[ "$EPISODES_PER_TASK" =~ ^[1-9][0-9]*$ ]] || {
   xwam_fail "XWAM_EVAL_EPISODES must be a positive integer"
 }
@@ -79,23 +89,34 @@ test -s "$ROBOCASA_ROOT/robocasa/models/assets/fixtures/sinks/Sink025/model.xml"
 test -d "$RUNTIME_OVERLAY"
 test -d "$EXPERIMENT_DIR"
 test -s "$EXPERIMENT_DIR/config.yaml"
+if [[ "$REQUIRE_DEPTH" == true ]]; then
+  grep -Eq '^[[:space:]]*use_depth:[[:space:]]*true[[:space:]]*$' "$EXPERIMENT_DIR/config.yaml" || {
+    xwam_fail "RGB-D evaluation requires use_depth=true in experiment config"
+  }
+fi
 test -d "$CHECKPOINT_ROOT"
 test -s "$WAN_DIR/config.json"
 test -s "$MANIFEST"
 test -s "$STATS"
 test -s "$TOPOLOGY"
+{
+  printf 'branch=%s\n' "$(git branch --show-current)"
+  printf 'commit=%s\n' "$(git rev-parse HEAD)"
+  git status --short
+} >"$LOG_ROOT/repo-state.txt"
 
 XWAM_PHASE=atomic9_checkpoint_resolution
 srun --nodes=1 --ntasks=1 --cpus-per-task=1 --environment="$XWAM_EDF" \
   env REPO="$REPO" CHECKPOINT_ROOT="$CHECKPOINT_ROOT" \
+    GROUP_A="$GROUP_A" GROUP_B="$GROUP_B" STEP_A="$STEP_A" STEP_B="$STEP_B" \
     CHECKPOINT_REPORT="$CHECKPOINT_REPORT" CHECKPOINT_ENV="$CHECKPOINT_ENV" \
   bash -lc '
 set -Eeuo pipefail
 cd "$REPO"
 python scripts/resolve_robocasa365_eval_checkpoints.py \
   --checkpoint-root "$CHECKPOINT_ROOT" \
-  --group-step step6500=6500 \
-  --group-step step7500=7500 \
+  --group-step "$GROUP_A=$STEP_A" \
+  --group-step "$GROUP_B=$STEP_B" \
   --expected-world-size 8 \
   --output "$CHECKPOINT_REPORT" \
   --output-env "$CHECKPOINT_ENV"
@@ -106,15 +127,17 @@ grep -q '"result": "pass"' "$CHECKPOINT_REPORT"
 test -s "$CHECKPOINT_ENV"
 # shellcheck disable=SC1090
 source "$CHECKPOINT_ENV"
-CHECKPOINT_6500="${XWAM_EVAL_CHECKPOINT_STEP6500:?missing step6500 checkpoint}"
-CHECKPOINT_7500="${XWAM_EVAL_CHECKPOINT_STEP7500:?missing step7500 checkpoint}"
-for checkpoint in "$CHECKPOINT_6500" "$CHECKPOINT_7500"; do
+GROUP_A_CHECKPOINT_KEY="XWAM_EVAL_CHECKPOINT_${GROUP_A^^}"
+GROUP_B_CHECKPOINT_KEY="XWAM_EVAL_CHECKPOINT_${GROUP_B^^}"
+CHECKPOINT_A="${!GROUP_A_CHECKPOINT_KEY:?missing group A checkpoint}"
+CHECKPOINT_B="${!GROUP_B_CHECKPOINT_KEY:?missing group B checkpoint}"
+for checkpoint in "$CHECKPOINT_A" "$CHECKPOINT_B"; do
   test -d "$checkpoint"
   test -s "$checkpoint/checkpoint/mp_rank_00_model_states.pt"
 done
 
 mkdir -p "$DEPLOY_IOPS/x-wam-eval/.locks"
-exec 9>"$DEPLOY_IOPS/x-wam-eval/.locks/atomic9-65v75-$EVAL_ID.lock"
+exec 9>"$DEPLOY_IOPS/x-wam-eval/.locks/atomic9-checkpoint-$EVAL_ID.lock"
 flock -n 9 || xwam_fail "Another evaluation is already writing $EVAL_ROOT"
 
 CONTRACT="$LOG_ROOT/evaluation_contract.txt"
@@ -122,10 +145,9 @@ EXPECTED_CONTRACT="$CONTROL_ROOT/evaluation_contract.expected.txt"
 {
   printf 'eval_id=%s\n' "$EVAL_ID"
   printf 'experiment_dir=%s\n' "$(realpath "$EXPERIMENT_DIR")"
-  printf 'checkpoint_step6500=%s\n' "$(realpath "$CHECKPOINT_6500")"
-  printf 'checkpoint_step7500=%s\n' "$(realpath "$CHECKPOINT_7500")"
+  printf 'group_a=%s\ncheckpoint_step_a=%s\ncheckpoint_a=%s\n' "$GROUP_A" "$STEP_A" "$(realpath "$CHECKPOINT_A")"
+  printf 'group_b=%s\ncheckpoint_step_b=%s\ncheckpoint_b=%s\n' "$GROUP_B" "$STEP_B" "$(realpath "$CHECKPOINT_B")"
   printf 'episodes_per_task=%s\n' "$EPISODES_PER_TASK"
-  printf 'repo_branch=%s\n' "$(git branch --show-current)"
   printf 'repo_commit=%s\n' "$(git rev-parse HEAD)"
   printf 'robocasa_commit=%s\n' "$(git -C "$ROBOCASA_ROOT" rev-parse HEAD)"
   printf 'robocasa_tracked_diff_sha256=%s\n' "$(git -C "$ROBOCASA_ROOT" diff --binary HEAD | sha256sum | awk '{print $1}')"
@@ -147,8 +169,8 @@ else
 fi
 
 echo "eval_id=$EVAL_ID"
-echo "checkpoint_step6500=$CHECKPOINT_6500 gpus=0,1"
-echo "checkpoint_step7500=$CHECKPOINT_7500 gpus=2,3"
+echo "$GROUP_A=$CHECKPOINT_A gpus=0,1"
+echo "$GROUP_B=$CHECKPOINT_B gpus=2,3"
 echo "episodes_per_task=$EPISODES_PER_TASK"
 echo "topology=8 servers / 16 clients / 4 GPUs / matched Atomic9 groups"
 echo "paired_client_tasks=PickPlaceSinkToCounter,OpenDrawer"
@@ -192,8 +214,8 @@ srun --overlap --nodes=1 --ntasks=1 --gpus-per-node=4 --cpus-per-task=16 \
     RUNTIME_OVERLAY="$RUNTIME_OVERLAY" \
     TOPOLOGY="$TOPOLOGY" \
     EXPERIMENT_DIR="$EXPERIMENT_DIR" \
-    CHECKPOINT_6500="$CHECKPOINT_6500" \
-    CHECKPOINT_7500="$CHECKPOINT_7500" \
+    GROUP_A="$GROUP_A" GROUP_B="$GROUP_B" \
+    CHECKPOINT_A="$CHECKPOINT_A" CHECKPOINT_B="$CHECKPOINT_B" \
     WAN_DIR="$WAN_DIR" \
     MANIFEST="$MANIFEST" \
     STATS="$STATS" \
@@ -209,8 +231,8 @@ export PYTHONPATH="$RUNTIME_OVERLAY${PYTHONPATH:+:$PYTHONPATH}"
 python evaluation/launch_robocasa365_m6_policy_pool.py \
   --topology "$TOPOLOGY" \
   --experiment-dir "$EXPERIMENT_DIR" \
-  --group-checkpoint "step6500=$CHECKPOINT_6500" \
-  --group-checkpoint "step7500=$CHECKPOINT_7500" \
+  --group-checkpoint "$GROUP_A=$CHECKPOINT_A" \
+  --group-checkpoint "$GROUP_B=$CHECKPOINT_B" \
   --wan-checkpoint-dir "$WAN_DIR" \
   --multitask-manifest "$MANIFEST" \
   --statistics-path "$STATS" \
@@ -233,8 +255,8 @@ for _ in $(seq 1 5400); do
 done
 test -s "$READY_FILE"
 grep -q '"ok": true' "$READY_FILE"
-grep -q '"step6500"' "$READY_FILE"
-grep -q '"step7500"' "$READY_FILE"
+grep -q "\"$GROUP_A\"" "$READY_FILE"
+grep -q "\"$GROUP_B\"" "$READY_FILE"
 
 XWAM_PHASE=atomic9_eval_client_pool_srun
 set +e
@@ -285,7 +307,8 @@ srun --overlap --nodes=1 --ntasks=1 --cpus-per-task=1 \
   --environment="$XWAM_EDF" \
   env REPO="$REPO" TOPOLOGY="$TOPOLOGY" RESULT_ROOT="$RESULT_ROOT" \
     EPISODES_PER_TASK="$EPISODES_PER_TASK" EVAL_ID="$EVAL_ID" \
-    CHECKPOINT_6500="$CHECKPOINT_6500" CHECKPOINT_7500="$CHECKPOINT_7500" \
+    GROUP_A="$GROUP_A" GROUP_B="$GROUP_B" \
+    CHECKPOINT_A="$CHECKPOINT_A" CHECKPOINT_B="$CHECKPOINT_B" \
     SUMMARY_JSON="$SUMMARY_JSON" SUMMARY_CSV="$SUMMARY_CSV" \
   bash -lc '
 set -Eeuo pipefail
@@ -294,8 +317,8 @@ python scripts/aggregate_robocasa365_checkpoint_comparison.py \
   --topology "$TOPOLOGY" \
   --output-root "$RESULT_ROOT" \
   --episodes-per-task "$EPISODES_PER_TASK" \
-  --group-checkpoint "step6500=$CHECKPOINT_6500" \
-  --group-checkpoint "step7500=$CHECKPOINT_7500" \
+  --group-checkpoint "$GROUP_A=$CHECKPOINT_A" \
+  --group-checkpoint "$GROUP_B=$CHECKPOINT_B" \
   --eval-id "$EVAL_ID" \
   --output "$SUMMARY_JSON" \
   --csv-output "$SUMMARY_CSV"
@@ -306,4 +329,4 @@ grep -q '"result": "pass"' "$SUMMARY_JSON"
 rm -f "$STOP_FILE" "$READY_FILE" "$EXPECTED_CONTRACT" "$CHECKPOINT_ENV"
 rmdir "$CONTROL_ROOT" "$EVAL_ROOT/.runtime" 2>/dev/null || true
 trap - EXIT INT TERM
-echo "[PASS] X-WAM Atomic9 step6500 vs step7500 evaluation: $SUMMARY_JSON"
+echo "[PASS] X-WAM Atomic9 $GROUP_A vs $GROUP_B evaluation: $SUMMARY_JSON"

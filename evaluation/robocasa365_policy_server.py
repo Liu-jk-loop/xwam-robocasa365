@@ -282,8 +282,7 @@ def _load_runtime(
 
     if str(config.dataset.get("format")) != "robocasa365_lerobot_v21":
         raise ValueError(f"M4.2 只允许 RoboCasa365 v2.1 dataset config：{config.dataset.get('format')!r}")
-    if bool(config.get("use_depth")):
-        raise ValueError("M4.2 首轮只允许 RGB-only / use_depth=false")
+    training_use_depth = bool(config.get("use_depth"))
     if int(config.get("action_dim")) != 12 or int(config.get("proprio_dim")) != 16:
         raise ValueError("M4.2 要求 model action_dim=12、proprio_dim=16")
     frame_skip = int(config.dataset.frame_skip)
@@ -343,6 +342,9 @@ def _load_runtime(
         "proprio_dim": int(config.proprio_dim),
         "denoise_steps": int(config.sample_steps),
         "action_denoise_steps": int(config.action_denoise_steps),
+        "training_use_depth": training_use_depth,
+        "inference_run_depth": False,
+        "online_depth_required": False,
         "compile_model": bool(args.compile_model),
         "excluded_frozen_load": getattr(runner, "_excluded_frozen_resume_report", None),
         "parameters": {

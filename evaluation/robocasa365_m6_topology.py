@@ -66,6 +66,7 @@ def load_m6_evaluation_topology(
                 raise BenchmarkContractError(f"comparison group非法：{group_name}")
             try:
                 checkpoint_step = int(raw_group["checkpoint_step"])
+                group_seed_start = int(raw_group.get("seed_start", seed_start))
                 gpus = [int(value) for value in raw_group["gpus"]]
                 server_ids = [int(value) for value in raw_group["server_ids"]]
                 client_ids = [int(value) for value in raw_group["client_ids"]]
@@ -75,6 +76,8 @@ def load_m6_evaluation_topology(
                 ) from exc
             if checkpoint_step <= 0:
                 raise BenchmarkContractError("comparison checkpoint step必须为正")
+            if group_seed_start < 0:
+                raise BenchmarkContractError("comparison group seed_start不能为负")
             if len(gpus) != 2 or len(set(gpus)) != 2:
                 raise BenchmarkContractError("每个comparison group必须独占两张GPU")
             if len(server_ids) != 4 or len(set(server_ids)) != 4:
@@ -84,6 +87,7 @@ def load_m6_evaluation_topology(
             comparison_groups[group_name] = {
                 **raw_group,
                 "checkpoint_step": checkpoint_step,
+                "seed_start": group_seed_start,
                 "gpus": gpus,
                 "server_ids": server_ids,
                 "client_ids": client_ids,
@@ -224,6 +228,11 @@ def load_m6_evaluation_topology(
             "server_id": server_id,
             "tasks": task_entries,
             "comparison_group": comparison_group,
+            "seed_start": (
+                comparison_groups[str(comparison_group)]["seed_start"]
+                if comparison_group is not None
+                else seed_start
+            ),
         }
     if set(clients) != set(range(16)) or server_client_counts != Counter({i: 2 for i in range(8)}):
         raise BenchmarkContractError("M6 topology 必须为每个 server 两个 client")

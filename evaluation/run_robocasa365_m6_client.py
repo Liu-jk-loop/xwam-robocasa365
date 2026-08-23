@@ -377,15 +377,17 @@ def _load_completed_episodes(
     task: str,
     topology: dict[str, Any],
     expected_episodes: int,
+    seed_start: int,
     comparison_group: str | None = None,
 ) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     payload = _read_json(path)
+    seed_start = int(seed_start)
     expected = {
         "task": task,
         "split": topology["scene"]["split"],
-        "seed_start": topology["seed_start"],
+        "seed_start": seed_start,
         "episodes_expected": expected_episodes,
         "max_steps": topology["max_steps_per_episode"],
         "replan_steps": topology["replan_steps"],
@@ -405,7 +407,7 @@ def _load_completed_episodes(
     episodes = payload.get("episodes")
     if not isinstance(episodes, list):
         raise BenchmarkContractError(f"已有{task} result缺少episodes")
-    expected_seeds = [int(topology["seed_start"]) + i for i in range(len(episodes))]
+    expected_seeds = [seed_start + i for i in range(len(episodes))]
     actual_seeds = [int(row["seed"]) for row in episodes]
     if actual_seeds != expected_seeds or len(episodes) > expected_episodes:
         raise BenchmarkContractError(f"已有{task} episode seed不是合法连续前缀")
@@ -435,7 +437,7 @@ def _write_task_result(
             "server_id": client["server_id"],
             "comparison_group": client.get("comparison_group"),
             "split": topology["scene"]["split"],
-            "seed_start": topology["seed_start"],
+            "seed_start": client["seed_start"],
             "model_seed": topology["model_seed"],
             "episodes_expected": expected_episodes,
             "episodes_completed": len(episodes),
@@ -493,6 +495,7 @@ def main() -> int:
                 task=task,
                 topology=topology,
                 expected_episodes=expected_episodes,
+                seed_start=int(client["seed_start"]),
                 comparison_group=client.get("comparison_group"),
             )
             if len(episodes) == expected_episodes:
@@ -501,7 +504,7 @@ def main() -> int:
             env = _create_environment(task, str(topology["scene"]["split"]))
             try:
                 for episode_index in range(len(episodes), expected_episodes):
-                    seed = int(topology["seed_start"]) + episode_index
+                    seed = int(client["seed_start"]) + episode_index
                     video_path = video_root / f"episode_{episode_index:03d}_seed{seed}.mp4"
                     print(f"[START] task={task} seed={seed}", flush=True)
                     row = _run_episode(
