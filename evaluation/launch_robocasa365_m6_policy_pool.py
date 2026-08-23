@@ -120,7 +120,7 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         action="append",
         dest="server_ids",
-        help="只启动指定server；可重复。默认启动0..7。",
+        help="只启动指定server；可重复。默认启动topology中的全部server。",
     )
     args = parser.parse_args()
     try:
@@ -169,7 +169,7 @@ def main() -> int:
             raise ValueError("schema v1 topology必须提供--checkpoint")
         if args.group_checkpoints:
             raise ValueError("schema v1 topology不能使用--group-checkpoint")
-    server_ids = sorted(args.server_ids or range(8))
+    server_ids = sorted(args.server_ids or topology["servers"])
     log_root = Path(args.log_root).expanduser().resolve()
     server_root = log_root / "servers"
     server_root.mkdir(parents=True, exist_ok=True)

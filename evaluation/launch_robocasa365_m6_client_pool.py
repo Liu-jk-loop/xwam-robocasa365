@@ -36,7 +36,7 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         action="append",
         dest="client_ids",
-        help="只启动指定client；可重复。默认启动0..15。",
+        help="只启动指定client；可重复。默认启动topology中的全部client。",
     )
     args = parser.parse_args()
     if args.episodes_per_task is not None and args.episodes_per_task <= 0:
@@ -55,7 +55,7 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     topology = load_m6_evaluation_topology(args.topology, REPO_ROOT)
-    client_ids = sorted(args.client_ids or range(16))
+    client_ids = sorted(args.client_ids or topology["clients"])
     output_root = Path(args.output_root).expanduser().resolve()
     log_root = Path(args.log_root).expanduser().resolve() / "clients"
     log_root.mkdir(parents=True, exist_ok=True)
@@ -136,7 +136,7 @@ def main() -> int:
         if failed:
             print(f"[FAIL] clients exited nonzero: {failed}", file=sys.stderr)
             return 1
-        print("[PASS] all 16 clients completed", flush=True)
+        print(f"[PASS] all {len(client_ids)} clients completed", flush=True)
         return 0
     finally:
         for process in processes:

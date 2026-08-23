@@ -227,6 +227,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "eval_close_fridge_ab_xwam.sbatch",
             "eval_fastwam_atomic9_xwam_b_shared4.sbatch",
             "eval_m6_atomic18_xwam.sbatch",
+            "eval_atomic9_rgbd_step12000_xwam.sbatch",
         ):
             result = subprocess.run(
                 ["bash", "-n", str(DEPLOY_ROOT / script)],
@@ -248,7 +249,8 @@ class ClaridenDeploymentTest(unittest.TestCase):
         for expected in (
             "#SBATCH --export=ALL",
             "#SBATCH --error=",
-            'EVAL_ROOT="$DEPLOY_IOPS/x-wam-eval/atomic18/$EVAL_ID"',
+            'EVAL_NAMESPACE="${XWAM_EVAL_NAMESPACE:-atomic18}"',
+            'EVAL_ROOT="$DEPLOY_IOPS/x-wam-eval/$EVAL_NAMESPACE/$EVAL_ID"',
             'ROBOCASA_ROOT="$DEPLOY_STORE/src/robocasa"',
             'ROBOSUITE_ROOT="$DEPLOY_STORE/src/robosuite"',
             "fixtures/sinks/Sink025/model.xml",
@@ -257,7 +259,8 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "evaluation_contract.txt",
             'LOG_ROOT="$EVAL_ROOT/logs"',
             'RESULT_ROOT="$EVAL_ROOT/results"',
-            'SUMMARY_CSV="$EVAL_ROOT/summary_atomic18.csv"',
+            'SUMMARY_STEM="${XWAM_EVAL_SUMMARY_STEM:-atomic18}"',
+            'SUMMARY_CSV="$EVAL_ROOT/summary_${SUMMARY_STEM}.csv"',
             '"$LOG_ROOT/server_launcher.log"',
             '--log-root "$LOG_ROOT"',
             'EVAL_ID="$EVAL_ID"',

@@ -61,7 +61,6 @@ def _aggregate_group(
 ) -> dict[str, Any]:
     errors: list[str] = []
     task_rows: list[dict[str, Any]] = []
-    group_seed_start = int(topology["comparison_groups"][group]["seed_start"])
     for client, task_entry in _entries_for_group(topology, group):
         task = str(task_entry["name"])
         result_path = root / group / task / "result.json"
@@ -77,7 +76,7 @@ def _aggregate_group(
             "comparison_group": group,
             "split": topology["scene"]["split"],
             "model_seed": topology["model_seed"],
-            "seed_start": group_seed_start,
+            "seed_start": topology["seed_start"],
             "episodes_expected": episodes_per_task,
             "episodes_completed": episodes_per_task,
             "max_steps": topology["max_steps_per_episode"],
@@ -96,7 +95,7 @@ def _aggregate_group(
             errors.append(f"{group}/{task} episode列表不完整")
         else:
             expected_seeds = [
-                group_seed_start + index
+                int(topology["seed_start"]) + index
                 for index in range(episodes_per_task)
             ]
             actual_seeds = [int(row.get("seed", -1)) for row in episodes]
@@ -143,7 +142,6 @@ def _aggregate_group(
         "result": "pass" if ok else "fail",
         "ok": ok,
         "checkpoint_step": topology["comparison_groups"][group]["checkpoint_step"],
-        "seed_start": group_seed_start,
         "checkpoint": checkpoint,
         "tasks": sorted(task_rows, key=lambda row: row["task"]),
         "overall": {
@@ -189,11 +187,7 @@ def aggregate_comparison(
     }
     ordered_groups = sorted(
         groups,
-        key=lambda name: (
-            int(groups[name]["checkpoint_step"]),
-            int(groups[name]["seed_start"]),
-            name,
-        ),
+        key=lambda name: int(groups[name]["checkpoint_step"]),
     )
     early_name, late_name = ordered_groups
     early_tasks = {row["task"]: row for row in groups[early_name]["tasks"]}
@@ -220,47 +214,6 @@ def aggregate_comparison(
     if set(early_tasks) != set(late_tasks):
         errors.append("两个checkpoint group的任务集合不一致")
     ok = not errors and all(report["ok"] for report in groups.values())
-    checkpoint_steps = {int(report["checkpoint_step"]) for report in groups.values()}
-    combined = None
-    if len(checkpoint_steps) == 1:
-        combined_tasks = []
-        for task in sorted(set(early_tasks) & set(late_tasks)):
-            rows = [early_tasks[task], late_tasks[task]]
-            episodes = sum(int(row["episodes"]) for row in rows)
-            successes = sum(int(row["successes"]) for row in rows)
-            combined_tasks.append(
-                {
-                    "task": task,
-                    "episodes": episodes,
-                    "successes": successes,
-                    "success_rate": successes / episodes if episodes else 0.0,
-                }
-            )
-        combined_episodes = sum(row["episodes"] for row in combined_tasks)
-        combined_successes = sum(row["successes"] for row in combined_tasks)
-        combined = {
-            "checkpoint_step": next(iter(checkpoint_steps)),
-            "seed_groups": {
-                name: int(report["seed_start"]) for name, report in groups.items()
-            },
-            "tasks": combined_tasks,
-            "overall": {
-                "tasks": len(combined_tasks),
-                "episodes": combined_episodes,
-                "successes": combined_successes,
-                "micro_success_rate": (
-                    combined_successes / combined_episodes
-                    if combined_episodes
-                    else 0.0
-                ),
-                "macro_success_rate": (
-                    sum(row["success_rate"] for row in combined_tasks)
-                    / len(combined_tasks)
-                    if combined_tasks
-                    else 0.0
-                ),
-            },
-        }
     return {
         "schema_version": 1,
         "result": "pass" if ok else "fail",
@@ -272,7 +225,6 @@ def aggregate_comparison(
         "seed_start": topology["seed_start"],
         "episodes_per_task": episodes_per_task,
         "groups": groups,
-        "combined": combined,
         "comparison": {
             "early_group": early_name,
             "late_group": late_name,

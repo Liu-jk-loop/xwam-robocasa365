@@ -2,11 +2,12 @@
 
 ## 2026-08-23 — Atomic9 RGB-D step 12000四卡评测
 
-- 新增`eval_atomic9_rgbd_step12000_xwam.sbatch`，沿用已验证的单节点4×GH200、每卡2个policy server、每server 2个simulator client配置，完整覆盖Atomic9。两个GPU组读取同一份Store永久step 12000 checkpoint，分别运行seed 42～91和92～141，避免重复episode并得到每任务100次联合统计。
-- schema v2 topology允许每个comparison group声明独立`seed_start`；client断点恢复与聚合器均按组校验连续seed。两个group指向同一checkpoint step时，`comparison.json`额外输出`combined`任务表与总体成功率；旧checkpoint对比topology未声明组seed时仍继承顶层seed，保持兼容。
+- 按用户纠正将step 12000评测改为单次Atomic9覆盖：只运行seed 42～91、每任务50 episodes，不再拆成seed42/92两组，也不生成100-episode合并结果。新topology固定单节点4×GH200、6个policy server和9个simulator client，每个client只执行一个任务。
+- server分布为GPU0=`server0/1`、GPU1=`server2/3`、GPU2=`server4`、GPU3=`server5`；client/server负载沿用已验证FastWAM Atomic9的`2/1/2/1/2/1`任务分组，但将最后一个server放到GPU3，使四张卡都参与X-WAM推理。
+- M6 topology新增显式`4gpu_6server_9client`资源档；既有8-server/16-client和schema v2 checkpoint对比合同保持不变。policy/client launcher按topology实际ID启动，单checkpoint聚合器按任务manifest动态校验9或18任务，不再硬编码18。
 - policy server允许加载`use_depth=true`训练配置，但明确以`run_depth=false`进行在线rollout：推理输入仍为三路RGB和16D state，不要求在线深度；startup report记录训练深度开关、在线深度关闭及无需深度输入。
-- 通用Atomic9对比sbatch新增group/step/topology/depth参数化，并取消对分支名或dirty worktree的阻塞；commit继续进入不可变评测合同，分支与工作区状态仅写独立诊断文件，不会阻止续跑。RGB-D wrapper优先从Store永久checkpoint根读取step 12000，避免训练继续运行时IOPS滚动淘汰。
-- 本地通过Atomic9 topology/解析/聚合单元测试、Python编译与两个Slurm脚本语法检查；本机无Torch、RoboCasa和Clariden，8份RGB-D模型加载、16 client EGL及最终成功率保持`cluster-pending`。
+- RGB-D wrapper从Store永久目录精确选择完整step 12000，要求model state和8份ZeRO optimizer shard；随后复用参数化单checkpoint M6评测入口。该入口可使用独立eval clone、Atomic9 manifest/stats和结果namespace，并不因分支名或dirty worktree阻塞。
+- 本地静态门禁覆盖compact topology、9任务聚合、launcher动态数量、checkpoint选择合同、Python编译和Slurm环境变量；真实6份RGB-D模型加载、9 client EGL及成功率保持`cluster-pending`。
 
 ## 2026-08-17 — Atomic9 ratio0.5同合同checkpoint评测入口
 

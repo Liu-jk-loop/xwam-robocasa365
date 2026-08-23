@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Aggregate and validate the eighteen lean M6 task results."""
+"""Aggregate and validate one topology-complete M6 task result set."""
 
 from __future__ import annotations
 
@@ -109,7 +109,8 @@ def aggregate(
         if task_rows
         else 0.0
     )
-    ok = not errors and len(task_rows) == 18
+    expected_task_count = len(topology["task_horizons"])
+    ok = not errors and len(task_rows) == expected_task_count
     return {
         "schema_version": 2,
         "result": "pass" if ok else "fail",

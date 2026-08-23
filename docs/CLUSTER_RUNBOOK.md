@@ -1466,10 +1466,10 @@ grep -E '"(ok|result|macro_success_rate|macro_success_rate_delta)"' \
 
 ## Atomic9 ratio0 RGB-D：step 12000正式评测
 
-该作业保持此前Atomic9评测的4卡、8个policy server和16个simulator client布局。GPU 0/1
-运行seed 42～91，GPU 2/3运行seed 92～141；两组都完整覆盖Atomic9并加载同一份step
-12000权重。最终除两组各自的9×50结果外，还会生成每任务100 episodes的`combined`统计。
-RGB-D是训练辅助监督；在线policy输入仍为三路RGB和16D state，不要求模拟器实时提供深度。
+该作业使用4卡、6个policy server和9个simulator client，只完整覆盖一次Atomic9。所有任务
+都运行seed 42～91、每任务50 episodes并加载同一份step 12000权重。GPU0/1各加载两个
+server，GPU2/3各加载一个server；9个client各自只执行一个任务。RGB-D是训练辅助监督；
+在线policy输入仍为三路RGB和16D state，不要求模拟器实时提供深度。
 
 提交前确认Store永久checkpoint已经完整落盘：
 
@@ -1480,17 +1480,12 @@ EXP_NAME=robocasa365_atomic9_fastwam_overlap_ratio00_rgbd_seed42_8gpu
 CHECKPOINT_ROOT="$DEPLOY_STORE/checkpoints/xwam/$EXP_NAME/checkpoints"
 
 cd "$EVAL_REPO"
-python3 scripts/resolve_robocasa365_eval_checkpoints.py \
-  --checkpoint-root "$CHECKPOINT_ROOT" \
-  --group-step step12000_seed42=12000 \
-  --group-step step12000_seed92=12000 \
-  --expected-world-size 8 \
-  --output /tmp/xwam_atomic9_rgbd_12k_checkpoints.json \
-  --output-env /tmp/xwam_atomic9_rgbd_12k_checkpoints.env
-grep -E '"(ok|result|step|path)"' /tmp/xwam_atomic9_rgbd_12k_checkpoints.json
+test -d "$CHECKPOINT_ROOT"
+find "$CHECKPOINT_ROOT" -maxdepth 1 -type d \
+  \( -name 'epoch=*-step=12000.ckpt' -o -name 'final-step=12000.ckpt' \) -print
 ```
 
-解析报告为`ok=true/result=pass`后提交：
+提交脚本会自行要求step 12000含model state与8份optimizer shard；不完整时在加载模型前退出：
 
 ```bash
 cd "$EVAL_REPO"
@@ -1500,14 +1495,13 @@ sbatch deployment/clariden/eval_atomic9_rgbd_step12000_xwam.sbatch
 默认结果目录及验收命令：
 
 ```bash
-EVAL_ID=atomic9_rgbd_step12000_seed42-141_target_100ep
-EVAL_ROOT=/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/atomic9-checkpoint-ab/$EVAL_ID
+EVAL_ID=atomic9_rgbd_step12000_seed42_target_50ep
+EVAL_ROOT=/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/atomic9-rgbd/$EVAL_ID
 
-test -s "$EVAL_ROOT/logs/checkpoint-resolution.json"
-test -s "$EVAL_ROOT/comparison.json"
-test -s "$EVAL_ROOT/summary_atomic9_step12000_seed42_vs_step12000_seed92.csv"
-grep -E '"(ok|result|checkpoint_step|seed_start|micro_success_rate|macro_success_rate)"' \
-  "$EVAL_ROOT/comparison.json"
+test -s "$EVAL_ROOT/aggregate.json"
+test -s "$EVAL_ROOT/summary_atomic9.csv"
+grep -E '"(ok|result|seed_start|micro_success_rate|macro_success_rate)"' \
+  "$EVAL_ROOT/aggregate.json"
 ```
 
 重提同一合同使用同一`EVAL_ID`即可续跑；若要改变episode数或权重，必须使用新的eval ID。

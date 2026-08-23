@@ -15,6 +15,7 @@ from evaluation.robocasa365_m6_topology import (
 from scripts.aggregate_robocasa365_checkpoint_comparison import (
     aggregate_comparison,
 )
+from scripts.aggregate_robocasa365_m6_evaluation import aggregate
 from scripts.resolve_robocasa365_eval_checkpoints import (
     resolve_exact_checkpoints,
 )
@@ -31,7 +32,7 @@ TOPOLOGY_65V75 = (
 )
 TOPOLOGY_RGBD_12K = (
     REPO_ROOT
-    / "configs/evaluation/robocasa365_atomic9_rgbd_step12000_seed42_92_8server_16client.json"
+    / "configs/evaluation/robocasa365_atomic9_rgbd_step12000_6server_9client.json"
 )
 ATOMIC9 = {
     "OpenStandMixerHead",
@@ -256,83 +257,73 @@ class Atomic9CheckpointComparisonTest(unittest.TestCase):
         self.assertNotIn('REPO="$DEPLOY_STORE/src/xwam-robocasa365"', script)
         self.assertNotIn('test -z "$(git status --porcelain)"', script)
 
-    def test_rgbd_step12000_uses_two_nonoverlapping_seed_groups(self) -> None:
+    def test_rgbd_step12000_uses_one_seed_range_and_six_servers(self) -> None:
         topology = load_m6_evaluation_topology(TOPOLOGY_RGBD_12K, REPO_ROOT)
+        self.assertEqual(topology["schema_version"], 1)
+        self.assertEqual(topology["resource_profile"], "4gpu_6server_9client")
+        self.assertEqual(topology["seed_start"], 42)
+        self.assertEqual(topology["episodes_per_task"], 50)
+        self.assertEqual(len(topology["servers"]), 6)
+        self.assertEqual(len(topology["clients"]), 9)
         self.assertEqual(
-            {
-                name: (group["checkpoint_step"], group["seed_start"])
-                for name, group in topology["comparison_groups"].items()
-            },
-            {
-                "step12000_seed42": (12000, 42),
-                "step12000_seed92": (12000, 92),
-            },
+            [topology["servers"][index]["gpu"] for index in range(6)],
+            [0, 0, 1, 1, 2, 3],
         )
-        for group_name, seed_start in (
-            ("step12000_seed42", 42),
-            ("step12000_seed92", 92),
-        ):
-            clients = [
-                client
-                for client in topology["clients"].values()
-                if client["comparison_group"] == group_name
-            ]
-            self.assertEqual({client["seed_start"] for client in clients}, {seed_start})
-            assigned = [task["name"] for client in clients for task in client["tasks"]]
-            self.assertEqual(set(assigned), ATOMIC9)
-            self.assertEqual(len(assigned), 9)
+        self.assertEqual(
+            Counter(client["server_id"] for client in topology["clients"].values()),
+            Counter({0: 2, 1: 1, 2: 2, 3: 1, 4: 2, 5: 1}),
+        )
+        assigned = [
+            task["name"]
+            for client in topology["clients"].values()
+            for task in client["tasks"]
+        ]
+        self.assertEqual(set(assigned), ATOMIC9)
+        self.assertEqual(len(assigned), 9)
+        self.assertTrue(all(len(client["tasks"]) == 1 for client in topology["clients"].values()))
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for group_name, seed_start in (
-                ("step12000_seed42", 42),
-                ("step12000_seed92", 92),
-            ):
-                for client in topology["clients"].values():
-                    if client["comparison_group"] != group_name:
-                        continue
-                    for task in client["tasks"]:
-                        result_path = root / group_name / task["name"] / "result.json"
-                        result_path.parent.mkdir(parents=True)
-                        result_path.write_text(
-                            json.dumps(
-                                {
-                                    "result": "pass",
-                                    "task": task["name"],
-                                    "client_id": client["client_id"],
-                                    "server_id": client["server_id"],
-                                    "comparison_group": group_name,
-                                    "split": "target",
-                                    "model_seed": 42,
-                                    "seed_start": seed_start,
-                                    "episodes_expected": 1,
-                                    "episodes_completed": 1,
-                                    "n_success": 1,
-                                    "success_rate": 1.0,
-                                    "mean_inference_time_s": 1.0,
-                                    "max_steps": 1000,
-                                    "replan_steps": 20,
-                                    "action_denoise_steps": 10,
-                                    "video_fps": 20,
-                                    "episodes": [{"seed": seed_start, "success": True}],
-                                }
-                            ),
-                            encoding="utf-8",
-                        )
-            report = aggregate_comparison(
+            for client in topology["clients"].values():
+                task = client["tasks"][0]
+                result_path = root / task["name"] / "result.json"
+                result_path.parent.mkdir(parents=True)
+                result_path.write_text(
+                    json.dumps(
+                        {
+                            "result": "pass",
+                            "task": task["name"],
+                            "client_id": client["client_id"],
+                            "server_id": client["server_id"],
+                            "comparison_group": None,
+                            "split": "target",
+                            "model_seed": 42,
+                            "seed_start": 42,
+                            "episodes_expected": 1,
+                            "episodes_completed": 1,
+                            "n_success": 1,
+                            "success_rate": 1.0,
+                            "mean_inference_time_s": 1.0,
+                            "max_steps": 1000,
+                            "replan_steps": 20,
+                            "action_denoise_steps": 10,
+                            "video_fps": 20,
+                            "episodes": [{"seed": 42, "success": True}],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            report = aggregate(
                 topology_path=TOPOLOGY_RGBD_12K,
                 output_root=root,
                 episodes_per_task=1,
-                group_checkpoints={
-                    "step12000_seed42": "/tmp/step12000.ckpt",
-                    "step12000_seed92": "/tmp/step12000.ckpt",
-                },
                 eval_id="unit-rgbd-12k",
+                checkpoint="/tmp/step12000.ckpt",
             )
             self.assertTrue(report["ok"], report["errors"])
-            self.assertEqual(report["combined"]["overall"]["tasks"], 9)
-            self.assertEqual(report["combined"]["overall"]["episodes"], 18)
-            self.assertEqual(report["combined"]["overall"]["successes"], 18)
+            self.assertEqual(report["overall"]["tasks"], 9)
+            self.assertEqual(report["overall"]["episodes"], 9)
+            self.assertEqual(report["overall"]["successes"], 9)
 
         wrapper = (
             REPO_ROOT / "deployment/clariden/eval_atomic9_rgbd_step12000_xwam.sbatch"
@@ -341,12 +332,23 @@ class Atomic9CheckpointComparisonTest(unittest.TestCase):
             "#SBATCH --gpus-per-node=4",
             "robocasa365_atomic9_fastwam_overlap_ratio00_rgbd_seed42_8gpu",
             "checkpoints/xwam/$EXP_NAME/checkpoints",
-            "XWAM_ATOMIC9_GROUP_A=step12000_seed42",
-            "XWAM_ATOMIC9_GROUP_B=step12000_seed92",
-            "XWAM_ATOMIC9_REQUIRE_DEPTH=true",
-            "eval_atomic9_step6500_vs_step7500_xwam.sbatch",
+            "robocasa365_atomic9_rgbd_step12000_6server_9client.json",
+            "atomic9_rgbd_step12000_seed42_target_50ep",
+            "XWAM_EVAL_REQUIRE_DEPTH=true",
+            "eval_m6_atomic18_xwam.sbatch",
         ):
             self.assertIn(expected, wrapper)
+        self.assertNotIn("seed92", wrapper)
+        self.assertNotIn("100ep", wrapper)
+
+        policy_pool = (
+            REPO_ROOT / "evaluation/launch_robocasa365_m6_policy_pool.py"
+        ).read_text(encoding="utf-8")
+        client_pool = (
+            REPO_ROOT / "evaluation/launch_robocasa365_m6_client_pool.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('args.server_ids or topology["servers"]', policy_pool)
+        self.assertIn('args.client_ids or topology["clients"]', client_pool)
 
         policy_server = (
             REPO_ROOT / "evaluation/robocasa365_policy_server.py"
