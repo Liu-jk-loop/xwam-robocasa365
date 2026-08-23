@@ -1508,6 +1508,46 @@ grep -E '"(ok|result|seed_start|micro_success_rate|macro_success_rate)"' \
 评测脚本不再因分支名或未提交文件阻塞；commit仍写入不可变合同，分支和工作区状态只写
 `logs/repo-state.txt`诊断文件，不会因为状态变化阻止同一合同续跑。
 
+### step 8500同合同补测
+
+step 8500复用上面的4卡、6 server、9 client、seed42～91和50 episodes/task合同。它不是
+每3000步永久保存点，先确认IOPS滚动目录仍有完整候选：
+
+```bash
+DEPLOY_IOPS=/iopsstor/scratch/cscs/zjingchen/terry_nys
+EXP_NAME=robocasa365_atomic9_fastwam_overlap_ratio00_rgbd_seed42_8gpu
+CHECKPOINT_ROOT="$DEPLOY_IOPS/xwam_run/$EXP_NAME/checkpoints"
+
+find "$CHECKPOINT_ROOT" -maxdepth 1 -type d \
+  \( -name 'epoch=*-step=8500.ckpt' -o -name 'final-step=8500.ckpt' \) -print
+```
+
+若存在，直接提交：
+
+```bash
+cd /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365-eval
+sbatch deployment/clariden/eval_atomic9_rgbd_step8500_xwam.sbatch
+```
+
+若8.5k已提前复制到其他checkpoint根，显式覆盖路径：
+
+```bash
+XWAM_RGBD_STEP8500_CHECKPOINT_ROOT=/absolute/checkpoints \
+  sbatch deployment/clariden/eval_atomic9_rgbd_step8500_xwam.sbatch
+```
+
+目录中必须有唯一、完整的精确step 8500；脚本不会回退到相邻step。默认结果验收：
+
+```bash
+EVAL_ID=atomic9_rgbd_step8500_seed42_target_50ep
+EVAL_ROOT=/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/atomic9-rgbd/$EVAL_ID
+
+test -s "$EVAL_ROOT/aggregate.json"
+test -s "$EVAL_ROOT/summary_atomic9.csv"
+grep -E '"(ok|result|seed_start|micro_success_rate|macro_success_rate)"' \
+  "$EVAL_ROOT/aggregate.json"
+```
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：

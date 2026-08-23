@@ -228,6 +228,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "eval_fastwam_atomic9_xwam_b_shared4.sbatch",
             "eval_m6_atomic18_xwam.sbatch",
             "eval_atomic9_rgbd_step12000_xwam.sbatch",
+            "eval_atomic9_rgbd_step8500_xwam.sbatch",
         ):
             result = subprocess.run(
                 ["bash", "-n", str(DEPLOY_ROOT / script)],

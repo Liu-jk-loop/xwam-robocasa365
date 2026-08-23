@@ -5,9 +5,9 @@
 ## 当前状态
 
 - 当前分支：`eval/atomic9-checkpoint-ab`（独立评测工作区；训练分支仍为`dev/atomic-robocasa365`）
-- 当前阶段：Atomic9 ratio0 RGB-D step 12000闭环评测准备
+- 当前阶段：Atomic9 ratio0 RGB-D step 8500补充闭环评测准备
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：用户反馈Atomic9 ratio0 RGB-D训练已到step 12000；本分支已准备四卡、6 server、9 client、seed42～91正式评测入口，真实结果为`cluster-pending`。
+- 超算运行状态：用户反馈step 12000闭环评测已经完成，但尚未提供聚合成功率；本分支新增同合同step 8500补测入口，真实8.5k checkpoint存在性与评测结果为`cluster-pending`。
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | 已完成 | RGB-D replay、cache、loader、batch、短训练与resume门禁均由用户反馈通过 | 已关闭 |
-| M6 Atomic 正式训练与评测 | Atomic9 ratio0 RGB-D训练及step 12000评测 | 训练已到step 12000；6-server/9-client评测脚本静态门禁通过，集群结果待运行 | 完成step 12000、seed42～91、每任务50 episodes并汇总成功率 |
+| M6 Atomic 正式训练与评测 | Atomic9 ratio0 RGB-D checkpoint闭环比较 | step 12000评测已由用户反馈完成；step 8500同合同入口静态门禁通过 | 确认完整step 8500仍存在，完成seed42～91、每任务50 episodes并与12k比较 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
 ## Clariden 部署状态

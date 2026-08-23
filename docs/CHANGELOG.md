@@ -1,5 +1,12 @@
 # 变更记录
 
+## 2026-08-23 — Atomic9 RGB-D step 8500补充评测入口
+
+- 用户反馈step 12000评测已经完成，但尚未提供聚合成功率；新增step 8500独立提交入口，继续复用同一Atomic9 topology、4张GPU、6个policy server、9个单任务client、seed42～91和每任务50 episodes，不改变在线RGB+state推理合同。
+- 将原step 12000入口参数化为精确目标step与checkpoint root，默认值仍为Store永久step 12000，因此原提交命令和结果目录不变。step 8500薄wrapper只设置目标为8500、独立eval ID，并默认从该实验的IOPS滚动checkpoint目录查找。
+- step 8500不是每3000步永久保存点，训练继续到12000后可能已经被“每500步、最多5份”策略淘汰。脚本只接受model state与8份optimizer shard齐全的精确step 8500；缺失、不完整或候选不唯一时在加载模型前退出，也允许通过`XWAM_RGBD_STEP8500_CHECKPOINT_ROOT`指向此前备份的位置。
+- 本地验收覆盖8.5k wrapper资源与路径、12k默认向后兼容、精确step和八分片门禁、Python测试及sbatch语法。真实8.5k checkpoint存在性、6-server加载、450 episodes和聚合结果均为`cluster-pending`。
+
 ## 2026-08-23 — Atomic9 RGB-D step 12000四卡评测
 
 - 按用户纠正将step 12000评测改为单次Atomic9覆盖：只运行seed 42～91、每任务50 episodes，不再拆成seed42/92两组，也不生成100-episode合并结果。新topology固定单节点4×GH200、6个policy server和9个simulator client，每个client只执行一个任务。

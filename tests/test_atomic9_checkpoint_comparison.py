@@ -331,9 +331,12 @@ class Atomic9CheckpointComparisonTest(unittest.TestCase):
         for expected in (
             "#SBATCH --gpus-per-node=4",
             "robocasa365_atomic9_fastwam_overlap_ratio00_rgbd_seed42_8gpu",
+            'CHECKPOINT_STEP="${XWAM_RGBD_EVAL_STEP:-12000}"',
+            'CHECKPOINT_ROOT="${XWAM_RGBD_EVAL_CHECKPOINT_ROOT:-',
             "checkpoints/xwam/$EXP_NAME/checkpoints",
             "robocasa365_atomic9_rgbd_step12000_6server_9client.json",
-            "atomic9_rgbd_step12000_seed42_target_50ep",
+            "atomic9_rgbd_step${CHECKPOINT_STEP}_seed42_target_50ep",
+            '[[ "${#optimizer_shards[@]}" -eq 8 ]]',
             "XWAM_EVAL_REQUIRE_DEPTH=true",
             "eval_m6_atomic18_xwam.sbatch",
         ):
@@ -355,6 +358,24 @@ class Atomic9CheckpointComparisonTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn('"inference_run_depth": False', policy_server)
         self.assertNotIn("首轮只允许 RGB-only", policy_server)
+
+    def test_rgbd_step8500_reuses_the_step12000_evaluation_contract(self) -> None:
+        wrapper = (
+            REPO_ROOT / "deployment/clariden/eval_atomic9_rgbd_step8500_xwam.sbatch"
+        ).read_text(encoding="utf-8")
+        for expected in (
+            "#SBATCH --gpus-per-node=4",
+            "robocasa365_atomic9_fastwam_overlap_ratio00_rgbd_seed42_8gpu",
+            "XWAM_RGBD_EVAL_STEP=8500",
+            "XWAM_RGBD_STEP8500_CHECKPOINT_ROOT:-",
+            "DEPLOY_IOPS=/iopsstor/scratch/cscs/zjingchen/terry_nys",
+            "$DEPLOY_IOPS/xwam_run/$EXP_NAME/checkpoints",
+            "atomic9_rgbd_step8500_seed42_target_50ep",
+            "eval_atomic9_rgbd_step12000_xwam.sbatch",
+        ):
+            self.assertIn(expected, wrapper)
+        self.assertNotIn("seed92", wrapper)
+        self.assertNotIn("100ep", wrapper)
 
     def test_ratio05_wrappers_reuse_ratio00_evaluation_contract(self) -> None:
         cases = (

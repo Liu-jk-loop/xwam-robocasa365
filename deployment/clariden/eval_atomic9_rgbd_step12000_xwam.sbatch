@@ -18,10 +18,15 @@ DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
 DEPLOY_CAPSCR=/capstor/scratch/cscs/zjingchen/terry_nys
 REPO="$DEPLOY_STORE/src/xwam-robocasa365-eval"
 EXP_NAME=robocasa365_atomic9_fastwam_overlap_ratio00_rgbd_seed42_8gpu
-CHECKPOINT_ROOT="$DEPLOY_STORE/checkpoints/xwam/$EXP_NAME/checkpoints"
-CHECKPOINT_STEP=12000
+CHECKPOINT_ROOT="${XWAM_RGBD_EVAL_CHECKPOINT_ROOT:-$DEPLOY_STORE/checkpoints/xwam/$EXP_NAME/checkpoints}"
+CHECKPOINT_STEP="${XWAM_RGBD_EVAL_STEP:-12000}"
 
-# 只接受含model state与8份ZeRO optimizer shard的完整step 12000。优先final，
+if [[ ! "$CHECKPOINT_STEP" =~ ^[1-9][0-9]*$ ]]; then
+  echo "[FAIL] XWAM_RGBD_EVAL_STEP must be a positive integer" >&2
+  exit 2
+fi
+
+# 只接受含model state与8份ZeRO optimizer shard的完整目标step。优先final，
 # 否则要求epoch命名的候选唯一，避免把“最近checkpoint”误当成目标权重。
 checkpoint_complete() {
   local candidate="$1"
@@ -61,7 +66,7 @@ export XWAM_EVAL_STATS="$DEPLOY_STORE/manifests/xwam/atomic9_ratio00/robocasa365
 export XWAM_EVAL_TOPOLOGY="$REPO/configs/evaluation/robocasa365_atomic9_rgbd_step12000_6server_9client.json"
 export XWAM_EVAL_EXPERIMENT_DIR="$DEPLOY_CAPSCR/experiments/xwam/$EXP_NAME"
 export XWAM_EVAL_CHECKPOINT="$CHECKPOINT"
-export XWAM_EVAL_ID="${XWAM_RGBD_EVAL_ID:-atomic9_rgbd_step12000_seed42_target_50ep}"
+export XWAM_EVAL_ID="${XWAM_RGBD_EVAL_ID:-atomic9_rgbd_step${CHECKPOINT_STEP}_seed42_target_50ep}"
 export XWAM_EVAL_EPISODES="${XWAM_RGBD_EVAL_EPISODES:-50}"
 export XWAM_EVAL_NAMESPACE=atomic9-rgbd
 export XWAM_EVAL_SUMMARY_STEM=atomic9
