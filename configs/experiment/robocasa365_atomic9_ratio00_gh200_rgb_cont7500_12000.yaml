@@ -1,0 +1,57 @@
+# Atomic9 RGB-only低成本续训诊断：从旧实验step7500完整状态续到step12000。
+exp_root: ./experiments/
+exp_name: robocasa365_atomic9_ratio00_rgb_cont7500_12000_seed42_8gpu
+seed: 42
+
+# optimizer base lr保留源实验值；实际续训lr由constant_resume合同固定。
+lr: 1e-5
+weight_decay: 0.01
+num_warmup_steps: 200
+num_train_epochs: 5
+num_training_steps: 12000
+formal_fixed_training_steps: 12000
+trainer_max_steps: null
+lr_schedule_mode: constant_resume
+lr_continuation_start_step: 7500
+lr_continuation_expected_resume_step: 7500
+lr_continuation_end_step: 12000
+lr_continuation_learning_rate: 3.53909638412e-7
+lr_continuation_relative_tolerance: 0.05
+lr_continuation_source_base_lr: 1e-5
+lr_continuation_source_warmup_steps: 200
+lr_continuation_source_training_steps: 8500
+gradient_clip_val: 1.0
+gradient_clip_algorithm: norm
+
+clean_action_ratio: 0.0
+text_dropout_prob: 0.1
+train_subset_size: null
+train_subset_start: 0
+train_shuffle: true
+persist_generator_state: true
+
+enable_tensorboard: false
+enable_wandb: true
+wandb_project: xwam-robocasa365
+wandb_entity: null
+wandb_name: robocasa365_atomic9_ratio00_rgb_cont7500_12000_seed42_8gpu
+wandb_group: robocasa365_atomic9_fastwam_overlap_rgb_continuation
+wandb_mode: online
+wandb_require_api_key: true
+wandb_log_model: false
+enable_checkpointing: true
+checkpoint_dir: null
+save_interval: 500
+save_top_k: 5
+save_last: link
+save_on_exception: false
+durable_checkpoint_dir: null
+durable_save_interval: 3000
+durable_save_top_k: -1
+durable_save_last: false
+final_checkpoint_dir: null
+save_final_checkpoint: true
+resume_checkpoint: null
+log_interval: 20
+val_interval: 1000
+limit_val_batches: 0

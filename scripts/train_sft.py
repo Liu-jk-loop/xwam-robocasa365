@@ -43,6 +43,7 @@ from project_tools.training_run import (
     resolve_save_last,
     resolve_subset_indices,
     resolve_training_schedule,
+    resolve_learning_rate_schedule,
     write_json_atomic,
 )
 from project_tools.h100_training import (
@@ -322,6 +323,7 @@ def main():
             trainer_max_steps=config.get("trainer_max_steps"),
         )
     config.trainer_max_steps = int(schedule["trainer_max_steps"])
+    learning_rate_contract = resolve_learning_rate_schedule(config)
     resume_checkpoint = resolve_resume_checkpoint(config.get("resume_checkpoint"))
     config.resume_checkpoint = resume_checkpoint
     if (
@@ -732,6 +734,7 @@ def main():
                     ],
                 },
                 "training": schedule,
+                "learning_rate": learning_rate_contract,
                 "resume_checkpoint": resume_checkpoint,
                 "deepspeed": deepspeed_options,
                 "distributed_timeout_minutes": distributed_timeout_minutes,
@@ -901,6 +904,10 @@ def main():
             "checkpoint_events": str(checkpoint_events_path.resolve()),
             "memory_at_result": collect_memory_snapshot(),
             "optimizer_state_audit_dir": str(optimizer_audit_dir.resolve()),
+            "learning_rate": learning_rate_contract,
+            "lr_continuation_report": getattr(
+                model, "_lr_continuation_report", None
+            ),
         }
         if trainer.is_global_zero:
             write_json_atomic(run_result_path, result_payload)

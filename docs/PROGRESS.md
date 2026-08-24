@@ -1,13 +1,13 @@
 # 项目进度
 
-更新时间：2026-08-21
+更新时间：2026-08-24
 
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：RGBD-P5——Atomic9 ratio0 RGB-D正式训练
+- 当前阶段：Atomic9 ratio0 RGB step7500→12000低学习率续训诊断
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：M1～M4.3及Clariden基础/四卡恢复门禁均通过；Atomic9 RGB ratio0已完成，后续新训练默认ratio0。RGBD-P1～P3均通过；CloseFridge RGB-D step1000的seed42/7成功率均48%，step1500为88%/84%。Atomic9 RGB-D的14k preflight已PASS。Job `3133147`通过里程碑传参后仍在模型启动前被重复Git clean检查阻塞，两节点train log均为空；M6正式训练现改为记录commit/dirty状态但不阻塞，等待重提。
+- 超算运行状态：Atomic9 RGB-D step8500/12000闭环成功率为49.6%/56.9%。现有RGB只训练到step7500且使用8500步cosine，不能与RGB-D 12k直接归因比较；已准备从完整step7500恢复、以`3.53909638412e-7`恒定LR续到12000的独立诊断入口，真实恢复与首步LR连续性为`cluster-pending`。
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | P1～P4已完成；进入Atomic9扩展 | CloseFridge loader/depth loss/resume PASS；step1000两组48%，step1500为88%/84% | 生成并审计Atomic9全量depth cache |
-| M6 Atomic 正式训练与评测 | RGB对照已完成；Atomic9 ratio0 RGB-D待运行 | 真实每epoch=1371步；14k调度与epoch5永久checkpoint已完成本地验证 | depth manifest及14k preflight PASS后启动2节点8卡、GBS128训练 |
+| M6 Atomic 正式训练与评测 | Atomic9 RGB/RGB-D训练量诊断 | RGB-D 8.5k/12k为49.6%/56.9%；RGB现有轨迹停在7.5k | 通过续训preflight，从精确7.5k八分片恢复到12k并同合同评测 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
 ## RGB-D 当前进程
@@ -33,9 +33,16 @@
 - P3 batch/短训练：Job `3108551`已完成4×GH200一体化门禁；真实RGB-D batch、step 0→2保存、step 2→4严格恢复、有限正depth loss及四rank FP32 optimizer证据全部通过。用户未提供本次commit SHA，不补造Git provenance。
 - P3产物保存：smoke脚本把metadata/result/checkpoint写在Capstor scratch的`experiments/xwam/close_fridge_rgbd_resume_gate_3108551`，脚本没有删除或移动逻辑；Store中的batch/audit和训练日志是永久证据。是否存在平台侧scratch生命周期不由仓库脚本推断。
 - P4单任务训练/评测：2节点8卡、`batch4×accum4×8=GBS128`完成至指定checkpoint。四路评测最终结果为step1000 seed42/7均48%，step1500 seed42/7为88%/84%。step1500高成功率不能单独证明不过拟合，但已足以关闭工程链路门禁。
-- P5 Atomic9 RGB-D：集群preflight已验证真实数据为175,514 clips、GBS128、每epoch 1,371步；第5 epoch=6,855，8 epoch=10,968，旧8500步实际约6.20 epoch。按用户决定，正式训练固定14,000步（约10.21 epoch）。滚动checkpoint仍每500步且最多5个，真实第5 epoch额外保存到Store独立milestones目录供后续评测。先补齐9任务全量depth cache，再从公开X-WAM pretrained step0启动2节点8卡训练；不从CloseFridge权重迁移。当前为`cluster-pending`。
+- P5 Atomic9 RGB-D：全量cache、两节点训练与step8500/12000闭环评测已完成；同一9任务、seed42～91、50 episodes/task下成功率由49.6%升至56.9%，增加7.3 pp。该结果证明RGB-D轨迹在8.5k后仍改善，但由于RGB只到7.5k且学习率历史不同，尚不能把差值归因于depth。
 - P5发布审查：新增跨shell变量合同门禁，覆盖当前29份Clariden sbatch；漏传外层变量会在本地检查和变更记录门禁阶段直接失败，不再等到正式allocation内触发。检查器正反回归及全仓审计均已通过。
 - P5 Job `3133147`：两节点均在训练shell的重复Git clean门禁退出，未进入Python训练。该运行时门禁已取消，正式audit只要求commit被记录；dirty状态保留为metadata信息，不再决定作业成败。修复后的2节点8卡启动为`cluster-pending`。
+
+## RGB续训诊断当前进程
+
+- 源实验固定为`robocasa365_atomic9_fastwam_overlap_ratio00_rgb_seed42_8gpu`的完整step7500；planner要求model state与rank0～7八份ZeRO-1 optimizer shard齐全，不能回退到相邻step或从step0启动。
+- 新实验`robocasa365_atomic9_ratio00_rgb_cont7500_12000_seed42_8gpu`使用独立W&B、Capstor experiment、IOPS滚动和Store永久checkpoint目录；恢复后保留模型、AdamW moments、trainer和RNG状态，不覆盖旧RGB产物。
+- 源8500步cosine在step7500的理论LR为`3.53909638412e-7`。续训不重新warmup、不把scheduler直接改写为12000步cosine，而是将7500～12000固定为该LR；首轮要求精确恢复7500，后续重提要求精确恢复planner选中的新实验checkpoint，且每轮optimizer LR均在5%容差内，否则首个更新前退出。
+- 本地已完成LR公式、错误跳变拒绝、精确bootstrap、后续新目录resume、八分片缺失拒绝、sbatch语法与Slurm变量边界测试。CPU preflight、8卡真实恢复及step12000结果均为`cluster-pending`。
 
 ## Clariden 部署状态
 

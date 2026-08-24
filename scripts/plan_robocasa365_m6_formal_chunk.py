@@ -55,6 +55,8 @@ def main() -> int:
     parser.add_argument("--total-steps", type=int, default=16390)
     parser.add_argument("--chunk-steps", type=int, default=1000)
     parser.add_argument("--expected-world-size", type=int, default=4)
+    parser.add_argument("--bootstrap-checkpoint-root", action="append")
+    parser.add_argument("--bootstrap-step", type=int)
     parser.add_argument("--output-json", required=True)
     parser.add_argument("--output-env", required=True)
     parser.add_argument("--quarantine-incomplete-root", action="append", required=True)
@@ -64,6 +66,8 @@ def main() -> int:
         total_steps=args.total_steps,
         chunk_steps=args.chunk_steps,
         expected_world_size=args.expected_world_size,
+        bootstrap_checkpoint_root=args.bootstrap_checkpoint_root,
+        bootstrap_step=args.bootstrap_step,
     )
     plan = quarantine_m6_incomplete_checkpoints(plan, args.quarantine_incomplete_root)
     json_path = write_json_atomic(args.output_json, plan)

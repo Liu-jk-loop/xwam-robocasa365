@@ -40,6 +40,9 @@ DEPTH_MANIFEST="${XWAM_M6_DEPTH_MANIFEST:-}"
 DEPTH_AUDIT="${XWAM_M6_DEPTH_AUDIT:-}"
 LOG_STEM="${XWAM_M6_LOG_STEM:-m6-formal}"
 MILESTONE_STEP="${XWAM_M6_MILESTONE_STEP:-}"
+BOOTSTRAP_HOT_CHECKPOINT_ROOT="${XWAM_M6_BOOTSTRAP_HOT_CHECKPOINT_ROOT:-}"
+BOOTSTRAP_DURABLE_CHECKPOINT_ROOT="${XWAM_M6_BOOTSTRAP_DURABLE_CHECKPOINT_ROOT:-}"
+BOOTSTRAP_STEP="${XWAM_M6_BOOTSTRAP_STEP:-}"
 
 DEFAULT_TOTAL_STEPS=16390
 TOTAL_STEPS="${XWAM_M6_TOTAL_STEPS:-$DEFAULT_TOTAL_STEPS}"
@@ -101,6 +104,22 @@ if [[ -n "$MILESTONE_STEP" ]]; then
   ((MILESTONE_STEP < TOTAL_STEPS)) || {
     xwam_fail "XWAM_M6_MILESTONE_STEP must be smaller than total steps"
   }
+fi
+if [[ -n "$BOOTSTRAP_STEP" ]]; then
+  [[ "$BOOTSTRAP_STEP" =~ ^[1-9][0-9]*$ ]] || {
+    xwam_fail "XWAM_M6_BOOTSTRAP_STEP must be a positive integer"
+  }
+  ((BOOTSTRAP_STEP < TOTAL_STEPS)) || {
+    xwam_fail "XWAM_M6_BOOTSTRAP_STEP must be smaller than total steps"
+  }
+  [[ -n "$BOOTSTRAP_HOT_CHECKPOINT_ROOT" && -n "$BOOTSTRAP_DURABLE_CHECKPOINT_ROOT" ]] || {
+    xwam_fail "XWAM_M6_BOOTSTRAP_STEP requires both bootstrap checkpoint roots"
+  }
+  if [[ ! -d "$BOOTSTRAP_HOT_CHECKPOINT_ROOT" && ! -d "$BOOTSTRAP_DURABLE_CHECKPOINT_ROOT" ]]; then
+    xwam_fail "neither bootstrap checkpoint root exists"
+  fi
+elif [[ -n "$BOOTSTRAP_HOT_CHECKPOINT_ROOT" || -n "$BOOTSTRAP_DURABLE_CHECKPOINT_ROOT" ]]; then
+  xwam_fail "bootstrap checkpoint roots require XWAM_M6_BOOTSTRAP_STEP"
 fi
 [[ "${SLURM_NNODES:-0}" == "$FORMAL_NUM_NODES" ]] || {
   xwam_fail "Slurm allocation node count does not match XWAM_M6_NUM_NODES"
@@ -180,6 +199,9 @@ echo "experiment_config=$EXPERIMENT_CONFIG"
 echo "manifest=$MANIFEST"
 echo "global_stats=$STATS"
 echo "total_steps=$TOTAL_STEPS"
+echo "bootstrap_step=$BOOTSTRAP_STEP"
+echo "bootstrap_hot_checkpoints=$BOOTSTRAP_HOT_CHECKPOINT_ROOT"
+echo "bootstrap_durable_checkpoints=$BOOTSTRAP_DURABLE_CHECKPOINT_ROOT"
 echo "expect_depth=$EXPECT_DEPTH depth_cache_root=$DEPTH_CACHE_ROOT"
 echo "rolling_checkpoints=$HOT_CHECKPOINT_ROOT (every 500 steps, max 5)"
 echo "durable_checkpoints=$DURABLE_CHECKPOINT_ROOT (every 3000 steps, unlimited)"
@@ -200,6 +222,9 @@ srun --nodes=1 --ntasks=1 --kill-on-bad-exit=1 --environment="$EDF" \
     PLAN_ENV="$PLAN_ENV" \
     HOT_QUARANTINE_ROOT="$HOT_QUARANTINE_ROOT" \
     DURABLE_QUARANTINE_ROOT="$DURABLE_QUARANTINE_ROOT" \
+    BOOTSTRAP_HOT_CHECKPOINT_ROOT="$BOOTSTRAP_HOT_CHECKPOINT_ROOT" \
+    BOOTSTRAP_DURABLE_CHECKPOINT_ROOT="$BOOTSTRAP_DURABLE_CHECKPOINT_ROOT" \
+    BOOTSTRAP_STEP="$BOOTSTRAP_STEP" \
     TOTAL_STEPS="$TOTAL_STEPS" \
     CHUNK_STEPS="$CHUNK_STEPS" \
     FORMAL_WORLD_SIZE="$FORMAL_WORLD_SIZE" \
@@ -213,6 +238,14 @@ source "$REPO/deployment/clariden/error_trap.sh"
 xwam_install_err_trap
 cd "$REPO"
 export PYTHONPATH="$RUNTIME_OVERLAY${PYTHONPATH:+:$PYTHONPATH}"
+BOOTSTRAP_ARGS=()
+if [[ -n "$BOOTSTRAP_STEP" ]]; then
+  BOOTSTRAP_ARGS+=(
+    --bootstrap-checkpoint-root "$BOOTSTRAP_HOT_CHECKPOINT_ROOT"
+    --bootstrap-checkpoint-root "$BOOTSTRAP_DURABLE_CHECKPOINT_ROOT"
+    --bootstrap-step "$BOOTSTRAP_STEP"
+  )
+fi
 python scripts/plan_robocasa365_m6_formal_chunk.py \
   --checkpoint-root "$HOT_CHECKPOINT_ROOT" \
   --checkpoint-root "$DURABLE_CHECKPOINT_ROOT" \
@@ -222,7 +255,8 @@ python scripts/plan_robocasa365_m6_formal_chunk.py \
   --output-json "$PLAN_JSON" \
   --output-env "$PLAN_ENV" \
   --quarantine-incomplete-root "$HOT_QUARANTINE_ROOT" \
-  --quarantine-incomplete-root "$DURABLE_QUARANTINE_ROOT"
+  --quarantine-incomplete-root "$DURABLE_QUARANTINE_ROOT" \
+  "${BOOTSTRAP_ARGS[@]}"
 '
 
 XWAM_PHASE=plan_validation
@@ -275,6 +309,7 @@ srun --nodes="$FORMAL_NUM_NODES" \
     DURABLE_CHECKPOINT_ROOT="$DURABLE_CHECKPOINT_ROOT" \
     RUN_ID="$RUN_ID" \
     TARGET_STEP="$XWAM_PLAN_TARGET_STEP" \
+    RESUME_STEP="$XWAM_PLAN_COMPLETED_STEP" \
     RESUME_CHECKPOINT="$XWAM_PLAN_RESUME_CHECKPOINT" \
     SAVE_FINAL="$SAVE_FINAL" \
     TRAIN_LOG="$TRAIN_LOG" \
@@ -378,6 +413,7 @@ TRAIN_ARGS=(
   "durable_checkpoint_dir=$DURABLE_CHECKPOINT_ROOT"
   "final_checkpoint_dir=$DURABLE_CHECKPOINT_ROOT"
   "trainer_max_steps=$TARGET_STEP"
+  "lr_continuation_expected_resume_step=$RESUME_STEP"
   "save_final_checkpoint=$SAVE_FINAL"
 )
 if [[ "$EXPECT_DEPTH" == true ]]; then

@@ -1285,6 +1285,67 @@ final checkpoint。12小时未完成时，重新提交同一个训练脚本；pl
 model和8个ZeRO-1 optimizer shard都完整的最新checkpoint。不得把实验名、manifest或
 stats改成Atomic18路径后继续同一个W&B run。
 
+## Atomic9 RGB：step7500→12000低学习率续训诊断
+
+该实验不从头训练。它只接受旧Atomic9 ratio0 RGB实验的完整step7500，保留模型、
+AdamW、trainer和RNG状态，并将后续LR恒定为源8500步cosine在step7500的值
+`3.53909638412e-7`。新实验使用独立W&B和checkpoint目录，不覆盖旧RGB权重。
+
+先更新主训练clone并提交CPU preflight：
+
+```bash
+DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
+REPO="$DEPLOY_STORE/src/xwam-robocasa365"
+
+cd "$REPO"
+git pull --ff-only origin dev/atomic-robocasa365
+git rev-parse HEAD
+
+sbatch deployment/clariden/prepare_atomic9_ratio00_rgb_cont12000_preflight_xwam.sbatch
+```
+
+preflight必须报告精确7500恢复源、八份optimizer shard和目标12000：
+
+```bash
+EVIDENCE="$DEPLOY_STORE/manifests/xwam/atomic9_rgb_cont7500_12000"
+PREFLIGHT="$EVIDENCE/robocasa365_atomic9_ratio00_rgb_cont7500_12000_preflight.json"
+BOOTSTRAP="$EVIDENCE/robocasa365_atomic9_ratio00_rgb_cont7500_12000_bootstrap.json"
+
+grep -E '"(ok|result|fixed_training_steps|expected_task_count)"' "$PREFLIGHT"
+grep -E '"(completed_step|target_step|resume_checkpoint|bootstrap_step|expected_world_size)"' "$BOOTSTRAP"
+```
+
+期望为`ok=true/result=pass/fixed_training_steps=12000`，以及
+`completed_step=7500/target_step=12000/bootstrap_step=7500/expected_world_size=8`。
+缺失或不完整step7500会在这个15分钟作业内失败，不应提交正式8卡作业。
+
+确认后提交两节点续训：
+
+```bash
+cd "$REPO"
+test -n "${WANDB_API_KEY:-}"
+sbatch deployment/clariden/train_atomic9_ratio00_rgb_cont12000_xwam_8gpu.sbatch
+```
+
+首次恢复必须在train log中出现以下门禁，且不能先出现optimizer update：
+
+```text
+LR continuation guard: pass, global_step=7500, expected_lr=3.53909638412e-07
+```
+
+新产物目录：
+
+```text
+/iopsstor/scratch/cscs/zjingchen/terry_nys/xwam_run/robocasa365_atomic9_ratio00_rgb_cont7500_12000_seed42_8gpu/checkpoints
+/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/checkpoints/xwam/robocasa365_atomic9_ratio00_rgb_cont7500_12000_seed42_8gpu/checkpoints
+/capstor/scratch/cscs/zjingchen/terry_nys/experiments/xwam/robocasa365_atomic9_ratio00_rgb_cont7500_12000_seed42_8gpu
+```
+
+12小时未完成时重提同一训练脚本；planner会优先从新续训目录的最新完整checkpoint恢复，
+不会退回旧step7500。到step12000后要求final audit PASS，再使用与RGB-D相同的Atomic9、
+seed42～91和50 episodes/task合同评测。该结果只回答“旧RGB轨迹低LR续训后是否追近”，
+不能单独证明或否定depth的因果收益。
+
 ## Atomic9 ratio0.5：同scheduler、7500步严格对照训练
 
 该对照只改变`clean_action_ratio`和与之隔离所必需的实验身份。模型配置继续使用ratio0

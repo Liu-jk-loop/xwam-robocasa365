@@ -223,6 +223,8 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "smoke_m6_gate_xwam.sbatch",
             "train_m6_formal_xwam.sbatch",
             "train_m6_formal_xwam_8gpu.sbatch",
+            "prepare_atomic9_ratio00_rgb_cont12000_preflight_xwam.sbatch",
+            "train_atomic9_ratio00_rgb_cont12000_xwam_8gpu.sbatch",
             "train_close_fridge_ab_xwam.sbatch",
             "eval_close_fridge_ab_xwam.sbatch",
             "eval_close_fridge_rgbd_xwam.sbatch",

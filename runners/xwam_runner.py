@@ -1,6 +1,7 @@
 import os
 import logging
 import imageio.v2 as imageio
+import math
 import time
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
@@ -19,7 +20,10 @@ from project_tools.training_topology import (
     resolve_cpu_adam_options,
     resolve_optimizer_backend,
 )
-from project_tools.training_run import validate_excluded_frozen_resume_keys
+from project_tools.training_run import (
+    resolve_learning_rate_schedule,
+    validate_excluded_frozen_resume_keys,
+)
 
 
 class XWAMRunner(L.LightningModule):
@@ -32,6 +36,8 @@ class XWAMRunner(L.LightningModule):
         self._restored_generator_state = None
         self._allow_missing_frozen_resume_parameters = False
         self._excluded_frozen_resume_report = None
+        self._learning_rate_contract = resolve_learning_rate_schedule(config)
+        self._lr_continuation_report = None
         self._text_embedding_cache = OrderedDict()
         self._text_embedding_cache_max_entries = int(
             getattr(config, "max_cached_text_embeddings", 128)
@@ -359,11 +365,20 @@ class XWAMRunner(L.LightningModule):
                 **optimizer_kwargs,
             )
         print(f"Optimizer backend: {optimizer_backend}")
-        lr_scheduler = get_cosine_schedule_with_warmup(
-            optimizer,
-            num_warmup_steps=self.config.num_warmup_steps,
-            num_training_steps=self.config.num_training_steps,
-        )
+        if self._learning_rate_contract["mode"] == "constant_resume":
+            continuation_scale = float(
+                self._learning_rate_contract["continuation_scale"]
+            )
+            lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
+                optimizer,
+                lr_lambda=lambda _step: continuation_scale,
+            )
+        else:
+            lr_scheduler = get_cosine_schedule_with_warmup(
+                optimizer,
+                num_warmup_steps=self.config.num_warmup_steps,
+                num_training_steps=self.config.num_training_steps,
+            )
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
@@ -377,6 +392,48 @@ class XWAMRunner(L.LightningModule):
         self.generator_per_rank = torch.Generator(device="cpu").manual_seed(seed)
         if not self._apply_restored_generator_state():
             print(f"Setting generator for rank {self.global_rank} with seed {seed}")
+
+    def on_train_start(self):
+        contract = self._learning_rate_contract
+        if contract["mode"] != "constant_resume":
+            return
+        expected_step = int(contract["expected_resume_step"])
+        actual_step = int(self.global_step)
+        if actual_step != expected_step:
+            raise RuntimeError(
+                "constant_resume必须从planner选定的精确global step恢复："
+                f"actual={actual_step}, expected={expected_step}"
+            )
+        optimizer = self.trainer.optimizers[0]
+        actual_lrs = [float(group["lr"]) for group in optimizer.param_groups]
+        expected_lr = float(contract["continuation_learning_rate"])
+        tolerance = float(contract["relative_tolerance"])
+        if not actual_lrs or any(
+            not math.isclose(
+                value,
+                expected_lr,
+                rel_tol=tolerance,
+                abs_tol=max(1e-12, expected_lr * tolerance),
+            )
+            for value in actual_lrs
+        ):
+            raise RuntimeError(
+                "恢复checkpoint的optimizer lr与续训目标不连续："
+                f"actual={actual_lrs}, expected={expected_lr:.12g}, "
+                f"relative_tolerance={tolerance}"
+            )
+        self._lr_continuation_report = {
+            "result": "pass",
+            "global_step": actual_step,
+            "expected_learning_rate": expected_lr,
+            "actual_learning_rates": actual_lrs,
+            "relative_tolerance": tolerance,
+        }
+        print(
+            "LR continuation guard: pass, "
+            f"global_step={actual_step}, expected_lr={expected_lr:.12g}, "
+            f"actual_lrs={actual_lrs}"
+        )
 
     def _apply_restored_generator_state(self):
         if self._restored_generator_state is None or not hasattr(

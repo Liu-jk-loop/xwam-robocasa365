@@ -395,6 +395,8 @@ def resolve_m6_formal_chunk(
     total_steps: int,
     chunk_steps: int,
     expected_world_size: int = 4,
+    bootstrap_checkpoint_root: str | Path | list[str | Path] | None = None,
+    bootstrap_step: int | None = None,
 ) -> dict[str, Any]:
     """Select the newest complete checkpoint and the next absolute step target."""
     root_values = (
@@ -440,6 +442,71 @@ def resolve_m6_formal_chunk(
                         "checks": layout["checks"],
                     }
                 )
+    bootstrap_values = (
+        []
+        if bootstrap_checkpoint_root is None
+        else [bootstrap_checkpoint_root]
+        if isinstance(bootstrap_checkpoint_root, (str, Path))
+        else list(bootstrap_checkpoint_root)
+    )
+    if bool(bootstrap_values) != (bootstrap_step is not None):
+        raise ValueError(
+            "bootstrap checkpoint roots与bootstrap_step必须同时提供"
+        )
+    bootstrap_roots = [
+        Path(value).expanduser().resolve() for value in bootstrap_values
+    ]
+    if len(set(bootstrap_roots)) != len(bootstrap_roots):
+        raise ValueError(f"bootstrap checkpoint roots不能重复：{bootstrap_roots}")
+    resolved_bootstrap = None
+    if bootstrap_roots:
+        required_step = int(bootstrap_step)
+        if required_step <= 0 or required_step >= total:
+            raise ValueError("bootstrap_step必须位于正式续训目标内")
+        bootstrap_complete: list[tuple[int, int, Path]] = []
+        bootstrap_incomplete: list[str] = []
+        for root_index, root in enumerate(bootstrap_roots):
+            if not root.exists():
+                continue
+            for candidate in sorted(root.iterdir()):
+                match = pattern.fullmatch(candidate.name)
+                if (
+                    match is None
+                    or int(match.group(1)) != required_step
+                    or not candidate.is_dir()
+                ):
+                    continue
+                layout = _checkpoint_layout(
+                    candidate, expected_world_size=expected_world
+                )
+                if all(layout["checks"].values()):
+                    final_priority = (
+                        1 if candidate.name.startswith("final-step=") else 0
+                    )
+                    bootstrap_complete.append(
+                        (final_priority, root_index, candidate.resolve())
+                    )
+                else:
+                    bootstrap_incomplete.append(str(candidate.resolve()))
+        if bootstrap_complete:
+            _, _, bootstrap_path = max(
+                bootstrap_complete,
+                key=lambda item: (item[0], item[1], str(item[2])),
+            )
+            resolved_bootstrap = str(bootstrap_path)
+
+        newest_primary_step = max((item[0] for item in complete), default=0)
+        if newest_primary_step < required_step:
+            if resolved_bootstrap is None:
+                raise ValueError(
+                    f"找不到完整step {required_step}续训源；"
+                    f"bootstrap_roots={bootstrap_roots}, "
+                    f"incomplete={bootstrap_incomplete}"
+                )
+            # A checkpoint already written by the continuation run wins ties.
+            complete.append(
+                (required_step, -1, -1, Path(resolved_bootstrap))
+            )
     if complete:
         completed_step, _, _, resume_path = max(
             complete, key=lambda item: (item[0], item[1], item[2], str(item[3]))
@@ -460,6 +527,11 @@ def resolve_m6_formal_chunk(
     return {
         "checkpoint_root": str(roots[0]),
         "checkpoint_roots": [str(root) for root in roots],
+        "bootstrap_checkpoint_roots": [
+            str(root) for root in bootstrap_roots
+        ],
+        "bootstrap_step": int(bootstrap_step) if bootstrap_step is not None else None,
+        "bootstrap_checkpoint": resolved_bootstrap,
         "total_steps": total,
         "chunk_steps": chunk,
         "expected_world_size": expected_world,
@@ -657,6 +729,8 @@ def _run_contract(
     git = metadata.get("git") or {}
     sampler = (metadata.get("dataset") or {}).get("sampler_provenance") or {}
     wandb = (metadata.get("tracking") or {}).get("wandb") or {}
+    learning_rate = metadata.get("learning_rate") or {}
+    learning_rate_result = result.get("lr_continuation_report") or {}
     checkpoint_storage = (metadata.get("checkpoint") or {}).get("storage") or {}
     complete_steps = {
         int(event.get("global_step", -1))
@@ -728,6 +802,27 @@ def _run_contract(
         "optimizer_state_pass": all(optimizer["checks"].values()),
         "metrics_pass": all(metrics["checks"].values()),
     }
+    if learning_rate.get("mode") == "constant_resume":
+        expected_lr = float(learning_rate.get("continuation_learning_rate", -1.0))
+        tolerance = float(learning_rate.get("relative_tolerance", 0.0))
+        actual_lrs = learning_rate_result.get("actual_learning_rates") or []
+        checks["lr_continuation_guard"] = (
+            learning_rate_result.get("result") == "pass"
+            and int(learning_rate_result.get("global_step", -1))
+            == int(learning_rate.get("expected_resume_step", -2))
+            and expected_lr > 0
+            and 0 < tolerance <= 0.1
+            and bool(actual_lrs)
+            and all(
+                math.isclose(
+                    float(value),
+                    expected_lr,
+                    rel_tol=tolerance,
+                    abs_tol=max(1e-12, expected_lr * tolerance),
+                )
+                for value in actual_lrs
+            )
+        )
     milestone_storage = checkpoint_storage.get("milestone") or {}
     milestone_step = int(milestone_storage.get("interval_steps", 0))
     milestone_checkpoint = None
@@ -770,6 +865,8 @@ def _run_contract(
         "metrics": metrics,
         "checkpoint": checkpoint,
         "wandb": wandb,
+        "learning_rate": learning_rate,
+        "lr_continuation_report": learning_rate_result,
         "checkpoint_storage": checkpoint_storage,
         "milestone_checkpoint": milestone_checkpoint,
         "completed_checkpoint_events": completed_checkpoint_events,

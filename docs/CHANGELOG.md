@@ -1,5 +1,14 @@
 # 变更记录
 
+## 2026-08-24 — Atomic9 RGB step7500→12000低学习率续训诊断
+
+- 用户确认原Atomic9 ratio0 RGB训练实际停在step7500；为低成本判断RGB增加训练量后能否追近RGB-D 12k，不从公开权重重训。本实验明确标记为续训诊断，不冒充与RGB-D学习率历史完全匹配的depth因果对照。
+- 新增`constant_resume`学习率合同：保留源实验optimizer base LR `1e-5`，依据原warmup200/8500步cosine计算step7500 LR为`3.53909638412e-7`，随后恒定到step12000。首轮恢复钩子要求global step精确为7500；后续重提则要求精确等于planner从新续训目录选中的步数。每轮optimizer各param group实际LR都必须在5%容差内；直接把cosine horizon改成12000造成约9倍LR跳变会被配置和运行门禁拒绝。
+- 通用正式planner新增只读bootstrap roots与精确bootstrap step。新续训目录为空时只接受旧RGB根中model state和rank0～7 optimizer shard齐全的step7500；后续重提优先选择新续训目录中更晚的完整checkpoint。旧源不进入不完整checkpoint隔离逻辑，不会被移动或删除。
+- 新增独立experiment、W&B run、IOPS滚动、Store永久checkpoint及2节点8卡入口；GBS128、ratio0、任务、数据统计、seed和原RGB micro-batch配置不变。CPU preflight同时审计12000步manifest合同和精确7500完整恢复源，且不再以dirty Git阻塞运行。
+- run metadata/result记录学习率合同与实际恢复LR；正式chunk/final audit在`constant_resume`模式下强制要求LR连续性报告PASS。本地聚焦测试、Ruff、Python编译、三份sbatch语法和31份Slurm变量边界检查通过；CPU preflight、真实8卡恢复、首个optimizer update、12k checkpoint与闭环结果为`cluster-pending`。
+- 回滚本次代码不会修改或删除旧RGB/RGB-D checkpoint。若集群已启动新续训实验，其外部W&B与checkpoint目录需由用户另行确认后处理。
+
 ## 2026-08-21 — 取消M6正式训练的Git clean阻塞门禁
 
 - Job `3133147`的两个节点均在`phase=training`、模型启动前被节点shell中的第二次`git status --porcelain`阻塞；两份train log均为空，因此不是OOM、NCCL、W&B认证或模型配置问题。

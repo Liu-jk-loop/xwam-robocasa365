@@ -42,6 +42,7 @@ def _write_gate_run(
     resume_checkpoint: str | None,
     commit: str,
     world_size: int = 4,
+    continuation_resume_step: int | None = None,
 ) -> dict[str, str]:
     run_root = root / name
     checkpoint = run_root / "hot" / f"step={global_step}.ckpt"
@@ -113,6 +114,21 @@ def _write_gate_run(
         "trainer_max_steps": global_step,
         "resume_checkpoint": resume_checkpoint,
     }
+    if continuation_resume_step is not None:
+        metadata["learning_rate"] = {
+            "mode": "constant_resume",
+            "resume_start_step": 7500,
+            "expected_resume_step": continuation_resume_step,
+            "continuation_learning_rate": 3.53909638412e-7,
+            "relative_tolerance": 0.05,
+        }
+        result["lr_continuation_report"] = {
+            "result": "pass",
+            "global_step": continuation_resume_step,
+            "expected_learning_rate": 3.53909638412e-7,
+            "actual_learning_rates": [3.53909638412e-7],
+            "relative_tolerance": 0.05,
+        }
     metadata_path = run_root / "metadata.json"
     result_path = run_root / "result.json"
     events_path = run_root / "events.jsonl"
@@ -278,6 +294,48 @@ class M6H100TrainingTest(unittest.TestCase):
             )
             self.assertFalse(mismatch["ok"])
             self.assertFalse(mismatch["checks"]["expected_wandb_run"])
+
+    def test_continuation_chunk_requires_exact_resume_step_and_lr(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            resume_checkpoint = str(
+                (root / "continuation-hot" / "epoch=0-step=8000.ckpt").resolve()
+            )
+            artifacts = _write_gate_run(
+                root,
+                name="formal-continuation",
+                global_step=8500,
+                resume_checkpoint=resume_checkpoint,
+                commit="c" * 40,
+                continuation_resume_step=8000,
+            )
+            artifacts.pop("checkpoint")
+            common = {
+                **artifacts,
+                "expected_step": 8500,
+                "expected_resume_checkpoint": resume_checkpoint,
+                "expected_wandb_run_id": "persistent-run-id",
+                "expected_rolling_checkpoint_root": str(
+                    Path(artifacts["metadata_path"]).parent / "hot"
+                ),
+                "expected_durable_checkpoint_root": str(
+                    Path(artifacts["metadata_path"]).parent / "durable"
+                ),
+            }
+
+            report = build_m6_formal_chunk_report(**common)
+            self.assertTrue(report["ok"], report)
+            self.assertTrue(report["run"]["checks"]["lr_continuation_guard"])
+
+            result_path = Path(artifacts["result_path"])
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+            result["lr_continuation_report"]["actual_learning_rates"] = [1e-5]
+            result_path.write_text(json.dumps(result), encoding="utf-8")
+            failed = build_m6_formal_chunk_report(**common)
+            self.assertFalse(failed["ok"])
+            self.assertFalse(
+                failed["run"]["checks"]["lr_continuation_guard"]
+            )
 
     def test_formal_chunk_records_but_does_not_block_dirty_git(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

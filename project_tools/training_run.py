@@ -3,11 +3,96 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+def cosine_learning_rate_at_step(
+    *, base_lr: float, num_warmup_steps: int, num_training_steps: int, step: int
+) -> float:
+    """Return the Transformers half-cosine LR at one absolute optimizer step."""
+    learning_rate = float(base_lr)
+    warmup = int(num_warmup_steps)
+    total = int(num_training_steps)
+    current = int(step)
+    if learning_rate <= 0 or warmup < 0 or total <= warmup or current < 0:
+        raise ValueError("cosine学习率参数无效")
+    if current < warmup:
+        return learning_rate * current / max(1, warmup)
+    progress = (current - warmup) / (total - warmup)
+    return learning_rate * max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
+
+
+def resolve_learning_rate_schedule(config: Any) -> dict[str, Any]:
+    """Freeze the regular cosine or an LR-continuous resume schedule."""
+    get = config.get
+    mode = str(get("lr_schedule_mode", "cosine"))
+    base_lr = float(get("lr"))
+    total_steps = int(get("num_training_steps"))
+    warmup_steps = int(get("num_warmup_steps"))
+    if mode == "cosine":
+        return {
+            "mode": mode,
+            "base_learning_rate": base_lr,
+            "num_warmup_steps": warmup_steps,
+            "num_training_steps": total_steps,
+        }
+    if mode != "constant_resume":
+        raise ValueError(f"不支持lr_schedule_mode={mode!r}")
+
+    start_step = int(get("lr_continuation_start_step"))
+    end_step = int(get("lr_continuation_end_step"))
+    expected_resume_step = int(
+        get("lr_continuation_expected_resume_step", start_step)
+    )
+    source_base_lr = float(get("lr_continuation_source_base_lr"))
+    source_warmup = int(get("lr_continuation_source_warmup_steps"))
+    source_total = int(get("lr_continuation_source_training_steps"))
+    configured_lr = float(get("lr_continuation_learning_rate"))
+    relative_tolerance = float(get("lr_continuation_relative_tolerance", 0.05))
+    if start_step <= 0 or end_step <= start_step or end_step != total_steps:
+        raise ValueError("续训学习率必须满足0 < start_step < end_step == num_training_steps")
+    if not start_step <= expected_resume_step < end_step:
+        raise ValueError(
+            "lr_continuation_expected_resume_step必须位于续训区间内"
+        )
+    if not 0 < relative_tolerance <= 0.1:
+        raise ValueError("lr_continuation_relative_tolerance必须位于(0, 0.1]")
+    expected_lr = cosine_learning_rate_at_step(
+        base_lr=source_base_lr,
+        num_warmup_steps=source_warmup,
+        num_training_steps=source_total,
+        step=start_step,
+    )
+    if not math.isclose(configured_lr, expected_lr, rel_tol=1e-6, abs_tol=1e-12):
+        raise ValueError(
+            "续训学习率与源cosine在恢复点不连续："
+            f"configured={configured_lr:.12g}, expected={expected_lr:.12g}"
+        )
+    if not math.isclose(base_lr, source_base_lr, rel_tol=0.0, abs_tol=1e-15):
+        raise ValueError("续训optimizer base lr必须保持源实验值")
+    return {
+        "mode": mode,
+        "base_learning_rate": base_lr,
+        "num_warmup_steps": 0,
+        "num_training_steps": total_steps,
+        "resume_start_step": start_step,
+        "expected_resume_step": expected_resume_step,
+        "continuation_end_step": end_step,
+        "continuation_learning_rate": configured_lr,
+        "continuation_scale": configured_lr / base_lr,
+        "relative_tolerance": relative_tolerance,
+        "source_schedule": {
+            "mode": "cosine",
+            "base_learning_rate": source_base_lr,
+            "num_warmup_steps": source_warmup,
+            "num_training_steps": source_total,
+        },
+    }
 
 
 def resolve_training_schedule(
