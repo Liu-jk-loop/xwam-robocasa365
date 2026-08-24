@@ -377,6 +377,34 @@ class Atomic9CheckpointComparisonTest(unittest.TestCase):
         self.assertNotIn("seed92", wrapper)
         self.assertNotIn("100ep", wrapper)
 
+    def test_rgb_continuation_step12000_ignores_the_failed_final_save(self) -> None:
+        wrapper = (
+            REPO_ROOT
+            / "deployment/clariden/eval_atomic9_rgb_cont_step12000_xwam.sbatch"
+        ).read_text(encoding="utf-8")
+        for expected in (
+            "#SBATCH --gpus-per-node=4",
+            "robocasa365_atomic9_ratio00_rgb_cont7500_12000_seed42_8gpu",
+            "CHECKPOINT_STEP=12000",
+            "XWAM_RGB_CONT_EVAL_CHECKPOINT_ROOT:-",
+            "epoch=*-step=\"$CHECKPOINT_STEP\".ckpt",
+            "ignoring final-step=$CHECKPOINT_STEP.ckpt",
+            '[[ "${#all_shards[@]}" -eq 8 ]]',
+            "atomic9_rgb_cont_step12000_seed42_target_50ep",
+            "robocasa365_atomic9_rgbd_step12000_6server_9client.json",
+            "XWAM_EVAL_REQUIRE_DEPTH=false",
+            "eval_m6_atomic18_xwam.sbatch",
+        ):
+            self.assertIn(expected, wrapper)
+        self.assertNotIn('CHECKPOINT="$FINAL_CANDIDATE"', wrapper)
+        self.assertNotIn("seed92", wrapper)
+        self.assertNotIn("100ep", wrapper)
+
+        base = (
+            REPO_ROOT / "deployment/clariden/eval_m6_atomic18_xwam.sbatch"
+        ).read_text(encoding="utf-8")
+        self.assertIn("RGB-only evaluation requires use_depth=false", base)
+
     def test_ratio05_wrappers_reuse_ratio00_evaluation_contract(self) -> None:
         cases = (
             (

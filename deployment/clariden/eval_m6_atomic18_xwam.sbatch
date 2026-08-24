@@ -87,6 +87,10 @@ if [[ "$REQUIRE_DEPTH" == true ]]; then
   grep -Eq '^[[:space:]]*use_depth:[[:space:]]*true[[:space:]]*$' "$EXPERIMENT_DIR/config.yaml" || {
     xwam_fail "RGB-D evaluation requires use_depth=true in experiment config"
   }
+else
+  grep -Eq '^[[:space:]]*use_depth:[[:space:]]*false[[:space:]]*$' "$EXPERIMENT_DIR/config.yaml" || {
+    xwam_fail "RGB-only evaluation requires use_depth=false in experiment config"
+  }
 fi
 test -d "$CHECKPOINT"
 test -s "$CHECKPOINT/checkpoint/mp_rank_00_model_states.pt"

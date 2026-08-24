@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+#SBATCH --account=aa004
+#SBATCH --partition=normal
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --gpus-per-node=4
+#SBATCH --cpus-per-task=64
+#SBATCH --mem=450G
+#SBATCH --time=12:00:00
+#SBATCH --job-name=xwam_a9_r12k
+#SBATCH --output=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/atomic9-rgb-cont-12k-eval-%j.log
+#SBATCH --error=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/atomic9-rgb-cont-12k-eval-%j.err
+#SBATCH --export=ALL
+
+set -Eeuo pipefail
+
+DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
+DEPLOY_CAPSCR=/capstor/scratch/cscs/zjingchen/terry_nys
+REPO="$DEPLOY_STORE/src/xwam-robocasa365-eval"
+EXP_NAME=robocasa365_atomic9_ratio00_rgb_cont7500_12000_seed42_8gpu
+CHECKPOINT_ROOT="${XWAM_RGB_CONT_EVAL_CHECKPOINT_ROOT:-$DEPLOY_STORE/checkpoints/xwam/$EXP_NAME/checkpoints}"
+CHECKPOINT_STEP=12000
+
+# Job 3170526在rolling/durable step12000保存完成后、额外final保存/收尾阶段异常退出。
+# 因此这里故意忽略final-step=12000.ckpt，只接受唯一的完整epoch命名durable checkpoint。
+checkpoint_complete() {
+  local candidate="$1"
+  local rank
+  local rank_matches=()
+  local all_shards=()
+
+  [[ -d "$candidate" ]] || return 1
+  [[ -s "$candidate/checkpoint/mp_rank_00_model_states.pt" ]] || return 1
+  shopt -s nullglob
+  all_shards=("$candidate"/checkpoint/*zero_pp_rank_*_mp_rank_00_optim_states.pt)
+  shopt -u nullglob
+  [[ "${#all_shards[@]}" -eq 8 ]] || return 1
+  for rank in $(seq 0 7); do
+    shopt -s nullglob
+    rank_matches=("$candidate"/checkpoint/*zero_pp_rank_"$rank"_mp_rank_00_optim_states.pt)
+    shopt -u nullglob
+    [[ "${#rank_matches[@]}" -eq 1 ]] || return 1
+    [[ -s "${rank_matches[0]}" ]] || return 1
+  done
+}
+
+if [[ -e "$CHECKPOINT_ROOT/final-step=$CHECKPOINT_STEP.ckpt" ]]; then
+  echo "[INFO] ignoring final-step=$CHECKPOINT_STEP.ckpt from the abnormal shutdown"
+fi
+shopt -s nullglob
+epoch_candidates=("$CHECKPOINT_ROOT"/epoch=*-step="$CHECKPOINT_STEP".ckpt)
+shopt -u nullglob
+complete_candidates=()
+for candidate in "${epoch_candidates[@]}"; do
+  if checkpoint_complete "$candidate"; then
+    complete_candidates+=("$candidate")
+  fi
+done
+if [[ "${#complete_candidates[@]}" -ne 1 ]]; then
+  echo "[FAIL] expected exactly one complete epoch=*-step=$CHECKPOINT_STEP.ckpt under $CHECKPOINT_ROOT; found ${#complete_candidates[@]}" >&2
+  exit 2
+fi
+CHECKPOINT="${complete_candidates[0]}"
+
+export XWAM_EVAL_REPO="$REPO"
+export XWAM_EVAL_MANIFEST="$DEPLOY_STORE/manifests/xwam/atomic9_ratio00/robocasa365_atomic9_fastwam_overlap_manifest.json"
+export XWAM_EVAL_STATS="$DEPLOY_STORE/manifests/xwam/atomic9_ratio00/robocasa365_atomic9_fastwam_overlap_global_stats.json"
+# 复用RGB-D评测已验证的4 GPU / 6 server / 9 client映射；topology本身不携带depth输入。
+export XWAM_EVAL_TOPOLOGY="$REPO/configs/evaluation/robocasa365_atomic9_rgbd_step12000_6server_9client.json"
+export XWAM_EVAL_EXPERIMENT_DIR="$DEPLOY_CAPSCR/experiments/xwam/$EXP_NAME"
+export XWAM_EVAL_CHECKPOINT="$CHECKPOINT"
+export XWAM_EVAL_ID="${XWAM_RGB_CONT_EVAL_ID:-atomic9_rgb_cont_step12000_seed42_target_50ep}"
+export XWAM_EVAL_EPISODES="${XWAM_RGB_CONT_EVAL_EPISODES:-50}"
+export XWAM_EVAL_NAMESPACE=atomic9-rgb-cont
+export XWAM_EVAL_SUMMARY_STEM=atomic9
+export XWAM_EVAL_REQUIRE_DEPTH=false
+
+# GPU0/1各两个server，GPU2/3各一个server；9个client各评测一个Atomic9任务。
+# 全部任务只跑seed 42～91，每任务50 episodes。
+exec bash "$REPO/deployment/clariden/eval_m6_atomic18_xwam.sbatch"

@@ -1464,6 +1464,42 @@ grep -E '"(ok|result|macro_success_rate|macro_success_rate_delta)"' \
 每份`comparison.json`都必须为`ok=true/result=pass`，且两个checkpoint group各收齐
 9×50 episodes，才可写入ratio0/ratio0.5对比表。
 
+## Atomic9 ratio0 RGB续训：step 12000正式评测
+
+本轮使用RGB从step7500低学习率续训到step12000的权重，评测合同与RGB-D
+12k相同：单节点4卡、6个policy server、9个simulator client、seed42～91和
+50 episodes/task。由于训练Job `3170526`在常规rolling/durable保存完成后的额外
+final保存/收尾阶段退出，脚本只允许唯一的完整`epoch=*-step=12000.ckpt`，
+明确忽略`final-step=12000.ckpt`。
+
+更新独立评测clone并提交：
+
+```bash
+DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
+EVAL_REPO="$DEPLOY_STORE/src/xwam-robocasa365-eval"
+
+cd "$EVAL_REPO"
+git pull --ff-only origin eval/atomic9-checkpoint-ab
+git rev-parse HEAD
+sbatch deployment/clariden/eval_atomic9_rgb_cont_step12000_xwam.sbatch
+```
+
+脚本会在启动policy server前检查model state、8份非空optimizer shard及rank0～7完整性，
+并要求训练resolved config明确为`use_depth=false`。默认结果验收：
+
+```bash
+EVAL_ID=atomic9_rgb_cont_step12000_seed42_target_50ep
+EVAL_ROOT=/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/atomic9-rgb-cont/$EVAL_ID
+
+test -s "$EVAL_ROOT/aggregate.json"
+test -s "$EVAL_ROOT/summary_atomic9.csv"
+grep -E '"(ok|result|seed_start|micro_success_rate|macro_success_rate)"' \
+  "$EVAL_ROOT/aggregate.json"
+```
+
+中断后重提同一脚本会使用同一eval ID补跑缺失episode；若更换权重或episode数，
+必须设置新的`XWAM_RGB_CONT_EVAL_ID`。
+
 ## Atomic9 ratio0 RGB-D：step 12000正式评测
 
 该作业使用4卡、6个policy server和9个simulator client，只完整覆盖一次Atomic9。所有任务

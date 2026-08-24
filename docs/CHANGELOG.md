@@ -1,5 +1,12 @@
 # 变更记录
 
+## 2026-08-24 — Atomic9 RGB续训step 12000评测入口
+
+- RGB续训Job `3170526`已达到step12000，rolling与durable callback均记录`checkpoint_save_complete`；异常发生在额外final checkpoint/分布式收尾阶段，因此新评测入口明确忽略`final-step=12000.ckpt`。
+- 新脚本只从Store durable目录选择唯一的`epoch=*-step=12000.ckpt`，并在加载模型前要求非空model state、恰好8份非空ZeRO optimizer shard且rank 0～7各一份。缺失、重复或仅存可疑final目录均会直接失败。
+- 评测复用RGB-D 12k已验证的4 GPU/6 server/9 client topology和Atomic9任务分配，但强制resolved config为`use_depth=false`；seed42～91、50 episodes/task、target split、replan20及去噪设置不变。
+- 本次只修改独立`eval/atomic9-checkpoint-ab`分支，不影响训练分支。本地只能执行静态测试；真实checkpoint选择、6个policy server加载和450 episodes聚合为`cluster-pending`。
+
 ## 2026-08-23 — Atomic9 RGB-D step 8500补充评测入口
 
 - 用户反馈step 12000评测已经完成，但尚未提供聚合成功率；新增step 8500独立提交入口，继续复用同一Atomic9 topology、4张GPU、6个policy server、9个单任务client、seed42～91和每任务50 episodes，不改变在线RGB+state推理合同。
