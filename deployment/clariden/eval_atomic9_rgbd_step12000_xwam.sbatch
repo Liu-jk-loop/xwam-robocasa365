@@ -20,6 +20,7 @@ REPO="$DEPLOY_STORE/src/xwam-robocasa365-eval"
 EXP_NAME=robocasa365_atomic9_fastwam_overlap_ratio00_rgbd_seed42_8gpu
 CHECKPOINT_ROOT="${XWAM_RGBD_EVAL_CHECKPOINT_ROOT:-$DEPLOY_STORE/checkpoints/xwam/$EXP_NAME/checkpoints}"
 CHECKPOINT_STEP="${XWAM_RGBD_EVAL_STEP:-12000}"
+EXACT_CHECKPOINT="${XWAM_RGBD_EVAL_CHECKPOINT:-}"
 
 if [[ ! "$CHECKPOINT_STEP" =~ ^[1-9][0-9]*$ ]]; then
   echo "[FAIL] XWAM_RGBD_EVAL_STEP must be a positive integer" >&2
@@ -30,34 +31,56 @@ fi
 # 否则要求epoch命名的候选唯一，避免把“最近checkpoint”误当成目标权重。
 checkpoint_complete() {
   local candidate="$1"
+  local rank
+  local rank_matches=()
   local optimizer_shards=()
   [[ -d "$candidate" ]] || return 1
   [[ -s "$candidate/checkpoint/mp_rank_00_model_states.pt" ]] || return 1
   shopt -s nullglob
   optimizer_shards=("$candidate"/checkpoint/*zero_pp_rank_*_mp_rank_00_optim_states.pt)
   shopt -u nullglob
-  [[ "${#optimizer_shards[@]}" -eq 8 ]]
+  [[ "${#optimizer_shards[@]}" -eq 8 ]] || return 1
+  for rank in $(seq 0 7); do
+    shopt -s nullglob
+    rank_matches=("$candidate"/checkpoint/*zero_pp_rank_"$rank"_mp_rank_00_optim_states.pt)
+    shopt -u nullglob
+    [[ "${#rank_matches[@]}" -eq 1 ]] || return 1
+    [[ -s "${rank_matches[0]}" ]] || return 1
+  done
 }
 
 CHECKPOINT=""
-FINAL_CANDIDATE="$CHECKPOINT_ROOT/final-step=$CHECKPOINT_STEP.ckpt"
-if checkpoint_complete "$FINAL_CANDIDATE"; then
-  CHECKPOINT="$FINAL_CANDIDATE"
-else
-  shopt -s nullglob
-  epoch_candidates=("$CHECKPOINT_ROOT"/epoch=*-step="$CHECKPOINT_STEP".ckpt)
-  shopt -u nullglob
-  complete_candidates=()
-  for candidate in "${epoch_candidates[@]}"; do
-    if checkpoint_complete "$candidate"; then
-      complete_candidates+=("$candidate")
-    fi
-  done
-  if [[ "${#complete_candidates[@]}" -ne 1 ]]; then
-    echo "[FAIL] expected exactly one complete epoch=*-step=$CHECKPOINT_STEP.ckpt under $CHECKPOINT_ROOT; found ${#complete_candidates[@]}" >&2
+if [[ -n "$EXACT_CHECKPOINT" ]]; then
+  checkpoint_name="$(basename "$EXACT_CHECKPOINT")"
+  if [[ ! "$checkpoint_name" =~ ^(epoch=[0-9]+-step=|final-step=)${CHECKPOINT_STEP}\.ckpt$ ]]; then
+    echo "[FAIL] exact checkpoint basename does not match step $CHECKPOINT_STEP: $checkpoint_name" >&2
     exit 2
   fi
-  CHECKPOINT="${complete_candidates[0]}"
+  if ! checkpoint_complete "$EXACT_CHECKPOINT"; then
+    echo "[FAIL] exact checkpoint is incomplete: $EXACT_CHECKPOINT" >&2
+    exit 2
+  fi
+  CHECKPOINT="$EXACT_CHECKPOINT"
+else
+  FINAL_CANDIDATE="$CHECKPOINT_ROOT/final-step=$CHECKPOINT_STEP.ckpt"
+  if checkpoint_complete "$FINAL_CANDIDATE"; then
+    CHECKPOINT="$FINAL_CANDIDATE"
+  else
+    shopt -s nullglob
+    epoch_candidates=("$CHECKPOINT_ROOT"/epoch=*-step="$CHECKPOINT_STEP".ckpt)
+    shopt -u nullglob
+    complete_candidates=()
+    for candidate in "${epoch_candidates[@]}"; do
+      if checkpoint_complete "$candidate"; then
+        complete_candidates+=("$candidate")
+      fi
+    done
+    if [[ "${#complete_candidates[@]}" -ne 1 ]]; then
+      echo "[FAIL] expected exactly one complete epoch=*-step=$CHECKPOINT_STEP.ckpt under $CHECKPOINT_ROOT; found ${#complete_candidates[@]}" >&2
+      exit 2
+    fi
+    CHECKPOINT="${complete_candidates[0]}"
+  fi
 fi
 
 export XWAM_EVAL_REPO="$REPO"

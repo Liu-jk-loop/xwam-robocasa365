@@ -377,6 +377,37 @@ class Atomic9CheckpointComparisonTest(unittest.TestCase):
         self.assertNotIn("seed92", wrapper)
         self.assertNotIn("100ep", wrapper)
 
+    def test_rgbd_step13000_binds_the_exact_user_checkpoint(self) -> None:
+        wrapper = (
+            REPO_ROOT / "deployment/clariden/eval_atomic9_rgbd_step13000_xwam.sbatch"
+        ).read_text(encoding="utf-8")
+        for expected in (
+            "#SBATCH --gpus-per-node=4",
+            "robocasa365_atomic9_fastwam_overlap_ratio00_rgbd_seed42_8gpu",
+            "XWAM_RGBD_EVAL_STEP=13000",
+            "XWAM_RGBD_EVAL_CHECKPOINT=\"$CHECKPOINT\"",
+            "epoch=9-step=13000.ckpt",
+            "requires epoch=9-step=13000.ckpt",
+            "atomic9_rgbd_step13000_seed42_target_50ep",
+            "eval_atomic9_rgbd_step12000_xwam.sbatch",
+        ):
+            self.assertIn(expected, wrapper)
+        self.assertNotIn("seed92", wrapper)
+        self.assertNotIn("100ep", wrapper)
+
+        base = (
+            REPO_ROOT / "deployment/clariden/eval_atomic9_rgbd_step12000_xwam.sbatch"
+        ).read_text(encoding="utf-8")
+        for expected in (
+            'EXACT_CHECKPOINT="${XWAM_RGBD_EVAL_CHECKPOINT:-}"',
+            'CHECKPOINT="$EXACT_CHECKPOINT"',
+            "exact checkpoint basename does not match step",
+            "exact checkpoint is incomplete",
+            '[[ "${#rank_matches[@]}" -eq 1 ]]',
+            '[[ -s "${rank_matches[0]}" ]]',
+        ):
+            self.assertIn(expected, base)
+
     def test_rgb_continuation_step12000_ignores_the_failed_final_save(self) -> None:
         wrapper = (
             REPO_ROOT

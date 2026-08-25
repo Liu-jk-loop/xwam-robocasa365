@@ -1,5 +1,12 @@
 # 变更记录
 
+## 2026-08-25 — Atomic9 RGB-D step 13000最终补充评测
+
+- 用户指定RGB-D checkpoint为IOPS路径`xwam_run/robocasa365_atomic9_fastwam_overlap_ratio00_rgbd_seed42_8gpu/checkpoints/epoch=9-step=13000.ckpt`；新入口精确绑定该路径，不按目录搜索“最近step”、不回退相邻checkpoint、不优先final权重。
+- 通用RGB-D评测入口新增可选精确checkpoint参数；显式路径的basename必须与目标step一致。完整性门禁同时加强为非空model state、恰好8份非空optimizer shard及rank0～7各一份；原12k/8.5k的默认搜索行为保持兼容。
+- 13k继续复用Atomic9 RGB-D已验证的4 GPU/6 server/9 client、seed42～91、50 episodes/task、target split和在线RGB+state推理合同；使用独立eval ID和结果目录，不覆盖8.5k/12k产物。
+- 修改仅位于独立`eval/atomic9-checkpoint-ab`分支。本地158项dependency-light回归、sbatch语法及26份Slurm变量边界检查通过；真实13k分片、6个policy server和450 episodes为`cluster-pending`。
+
 ## 2026-08-24 — Atomic9 RGB续训step 12000评测入口
 
 - RGB续训Job `3170526`已达到step12000，rolling与durable callback均记录`checkpoint_save_complete`；异常发生在额外final checkpoint/分布式收尾阶段，因此新评测入口明确忽略`final-step=12000.ckpt`。

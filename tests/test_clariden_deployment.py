@@ -229,6 +229,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "eval_m6_atomic18_xwam.sbatch",
             "eval_atomic9_rgbd_step12000_xwam.sbatch",
             "eval_atomic9_rgbd_step8500_xwam.sbatch",
+            "eval_atomic9_rgbd_step13000_xwam.sbatch",
             "eval_atomic9_rgb_cont_step12000_xwam.sbatch",
         ):
             result = subprocess.run(

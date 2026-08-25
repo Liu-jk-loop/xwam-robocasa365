@@ -1584,6 +1584,40 @@ grep -E '"(ok|result|seed_start|micro_success_rate|macro_success_rate)"' \
   "$EVAL_ROOT/aggregate.json"
 ```
 
+### step 13000精确checkpoint最终补测
+
+13k复用同一个4卡、6 server、9 client、seed42～91和50 episodes/task合同，但不扫描
+checkpoint目录。默认权重严格绑定为：
+
+```text
+/iopsstor/scratch/cscs/zjingchen/terry_nys/xwam_run/robocasa365_atomic9_fastwam_overlap_ratio00_rgbd_seed42_8gpu/checkpoints/epoch=9-step=13000.ckpt
+```
+
+更新评测分支后直接提交：
+
+```bash
+cd /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365-eval
+git pull --ff-only origin eval/atomic9-checkpoint-ab
+git rev-parse HEAD
+sbatch deployment/clariden/eval_atomic9_rgbd_step13000_xwam.sbatch
+```
+
+入口会拒绝basename不是`epoch=9-step=13000.ckpt`对应step的权重，并检查model state、
+8份非空optimizer shard及rank0～7。默认结果验收：
+
+```bash
+EVAL_ID=atomic9_rgbd_step13000_seed42_target_50ep
+EVAL_ROOT=/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/atomic9-rgbd/$EVAL_ID
+
+test -s "$EVAL_ROOT/aggregate.json"
+test -s "$EVAL_ROOT/summary_atomic9.csv"
+grep -E '"(ok|result|seed_start|micro_success_rate|macro_success_rate)"' \
+  "$EVAL_ROOT/aggregate.json"
+```
+
+若仅为迁移该同一权重，可通过`XWAM_RGBD_STEP13000_CHECKPOINT`覆盖精确路径；文件名仍必须
+与step13000一致。更换checkpoint身份时必须同时使用新的`XWAM_RGBD_STEP13000_EVAL_ID`。
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：
