@@ -227,6 +227,22 @@ RoboCasa365 原生数据
 - 训练 DataLoader 中不会调用 MuJoCo 渲染。
 - 短程 RGB-D 训练烟测通过。
 
+#### M5-PM：PointMap几何监督与可选输入
+
+阶段执行过程：
+
+1. 先在CloseFridge前三个episode的首/中/尾帧冻结三路相机内参和camera-space XYZ数值合同；只生成小型审计产物，不写全量缓存。
+2. 合同通过后，逐episode恢复MJCF/state并直接生成`[T,3,256,320] float16` normalized PointMap `.npy`，通过sidecar和manifest支持中断恢复。
+3. loader使用memory-map读取PointMap；先完成`PointMap-Aux`辅助监督的batch、更新和resume门禁，再运行单任务与Atomic9实验。
+4. 辅助监督结果明确后，另行增加`PointMap-Flex`真输入流、stream dropout和cross-modality forcing；RGB-only与RGB+PointMap推理分别报告。
+
+验收条件：
+
+- 三路相机内参稳定且PointMap重投影、无效值、归一化和float16误差门禁通过。
+- 全量缓存开始前，P0 JSON必须为`ok=true/result=pass`；预计约283 GiB的Atomic9缓存不得提前生成。
+- PointMap正式训练loader不渲染depth、不解码depth、不在线生成XYZ。
+- `PointMap-Aux`不得描述为完整Flex-π；只有真正实现可选PointMap输入和cross-modality forcing后才进入第二层实验。
+
 ### M6：Atomic-only 正式训练与评测
 
 工作内容：

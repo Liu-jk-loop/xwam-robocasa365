@@ -1687,3 +1687,25 @@ test -s "$XWAM_CKPT/checkpoint/mp_rank_00_model_states.pt"
 ## 反馈要求
 
 复制 `.agents/skills/xwam-robocasa365-workflow/references/cluster-feedback-template.md`，填写所有适用字段并附上相关日志。不能只反馈最后一行异常。
+## PointMap P0：CloseFridge三路内参与数值合同
+
+本门禁只抽查3个episode的首/中/尾帧，不生成全量PointMap缓存，也不修改现有inverse-depth产物。作业需要一个GPU用于MuJoCo EGL渲染；PointMap公式和报告统计本身使用CPU/NumPy。
+
+```bash
+cd /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365
+git fetch origin dev/atomic-robocasa365
+git switch dev/atomic-robocasa365
+git pull --ff-only origin dev/atomic-robocasa365
+
+sbatch deployment/clariden/audit_close_fridge_pointmap_contract_xwam.sbatch
+```
+
+成功结束时主日志必须包含：
+
+```text
+pointmap_p0_report=...
+pointmap_p0_artifacts=...
+[PASS] CloseFridge three-camera PointMap numerical contract
+```
+
+反馈时提供JSON报告和同一Job日志即可；NPZ/PNG保留在报告打印的Store目录，不上传Git。JSON必须为`ok=true/result=pass`、`passed_tasks=1`、三路相机内参各有9次稳定观测，并且所有`reprojection`、`depth_roundtrip`和`float16_roundtrip`检查为true。float16门限是裁剪后PointMap反量化到米制XYZ的最大误差2 mm，不是原始未裁剪XYZ误差。

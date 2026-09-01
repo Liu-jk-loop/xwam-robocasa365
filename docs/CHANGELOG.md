@@ -1,5 +1,15 @@
 # 变更记录
 
+## 2026-09-01 — PointMap P0数值合同与三路相机审计
+
+- 用户确认PointMap分两层实施：先做辅助监督，再做带可选输入和cross-modality forcing的Flex式版本；同时决定直接离线保存float16 PointMap，避免训练时解码depth并生成XYZ。本批只实现P0合同和小样本审计，不修改loader、模型、训练或评测逻辑。
+- 新增`robocasa365_camera_xyz_flexpi_v1`：在原生`256×256` metric depth上以OpenCV内参反投影camera-space XYZ，严格使用`0.01m < Z < 2m`；XYZ裁剪范围为`x/y=[-0.5,0.5]m、z=[0,1.5]m`并映射到`[-1,1]`，最后nearest到`256×320`。合同绑定Flex-π官方commit `20c1b2b71ea35a415d5d47c39b04443cfadad7a1`。
+- 新增NumPy PointMap工具，审计K矩阵、有效/无效值、depth和像素重投影、各轴裁剪比例、normalized范围、目标shape及normalized float16反量化米制误差；未来缓存格式冻结为每episode/相机一个未压缩memory-map `.npy [T,3,256,320]`。
+- 扩展既有逐episode MJCF/state回放器：PointMap模式从robosuite读取三路相机内参，为每个抽查帧保存RGB、重渲染RGB、metric depth、K、metric XYZ、valid mask和float16 PointMap，并汇总跨episode/frame的每相机K漂移。原RGB-D probe默认行为保持不变。
+- 新增CloseFridge 3 episode×首/中/尾帧Clariden入口。作业记录commit和dirty状态但不因dirty退出；真实P0必须看到1任务、3相机、重投影和float16检查全部通过。P0通过前不生成预计约283 GiB的Atomic9全量缓存。
+- 本地增加PointMap公式、严格深度边界、无效sentinel、归一化/反归一化、nearest映射、float16误差、坏内参及三相机稳定性测试；完整199项本地测试通过。真实MuJoCo/EGL/robosuite内参、JSON/NPZ/PNG产物仍为`cluster-pending`。
+- 回滚本次commit只删除P0代码、测试、文档和sbatch，不会删除或改写现有RGB、inverse-depth缓存、checkpoint、评测结果或外部数据。
+
 ## 2026-08-24 — Atomic9 RGB step7500→12000低学习率续训诊断
 
 - 用户确认原Atomic9 ratio0 RGB训练实际停在step7500；为低成本判断RGB增加训练量后能否追近RGB-D 12k，不从公开权重重训。本实验明确标记为续训诊断，不冒充与RGB-D学习率历史完全匹配的depth因果对照。

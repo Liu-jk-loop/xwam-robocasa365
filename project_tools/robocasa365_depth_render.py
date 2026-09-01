@@ -14,6 +14,12 @@ import numpy as np
 
 from data.robocasa365_contract import resolve_lerobot_root
 from data.robocasa365_index import episode_video_path, load_episode_records
+from project_tools.robocasa365_pointmap import (
+    audit_pointmap_frame,
+    pointmap_contract,
+    resize_nearest_hwc,
+    summarize_intrinsics,
+)
 
 
 CAMERA_KEY_TO_NAME = {
@@ -41,7 +47,9 @@ def parse_frame_fractions(value: str) -> tuple[float, ...]:
     """Parse comma-separated [0, 1] frame positions."""
 
     try:
-        fractions = tuple(float(item.strip()) for item in value.split(",") if item.strip())
+        fractions = tuple(
+            float(item.strip()) for item in value.split(",") if item.strip()
+        )
     except ValueError as exc:
         raise ValueError(f"无法解析帧位置 {value!r}") from exc
     if not fractions:
@@ -51,14 +59,20 @@ def parse_frame_fractions(value: str) -> tuple[float, ...]:
     return tuple(dict.fromkeys(fractions))
 
 
-def resolve_frame_indices(frame_count: int, fractions: Iterable[float]) -> tuple[int, ...]:
+def resolve_frame_indices(
+    frame_count: int, fractions: Iterable[float]
+) -> tuple[int, ...]:
     if frame_count <= 0:
         raise ValueError(f"frame_count 必须为正数，实际为 {frame_count}")
     last = frame_count - 1
-    return tuple(dict.fromkeys(int(round(float(fraction) * last)) for fraction in fractions))
+    return tuple(
+        dict.fromkeys(int(round(float(fraction) * last)) for fraction in fractions)
+    )
 
 
-def rgb_alignment_metrics(source: np.ndarray, rendered_bottom_up: np.ndarray) -> dict[str, Any]:
+def rgb_alignment_metrics(
+    source: np.ndarray, rendered_bottom_up: np.ndarray
+) -> dict[str, Any]:
     """Compare a dataset RGB frame with MuJoCo output before/after vertical flip."""
 
     source_array = np.asarray(source)
@@ -91,7 +105,9 @@ def rgb_alignment_metrics(source: np.ndarray, rendered_bottom_up: np.ndarray) ->
     }
 
 
-def metric_depth_statistics(normalized_depth: np.ndarray, metric_depth: np.ndarray) -> dict[str, Any]:
+def metric_depth_statistics(
+    normalized_depth: np.ndarray, metric_depth: np.ndarray
+) -> dict[str, Any]:
     normalized = np.asarray(normalized_depth)
     metric = np.asarray(metric_depth)
     if normalized.shape != metric.shape or normalized.ndim != 2:
@@ -124,7 +140,9 @@ def metric_depth_statistics(normalized_depth: np.ndarray, metric_depth: np.ndarr
     }
 
 
-def diagnostic_inverse_depth_rgb(metric_depth: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
+def diagnostic_inverse_depth_rgb(
+    metric_depth: np.ndarray,
+) -> tuple[np.ndarray, dict[str, Any]]:
     """Make a diagnostic-only inverse-depth preview; never use it as training encoding."""
 
     depth = np.asarray(metric_depth, dtype=np.float64)
@@ -150,17 +168,25 @@ def diagnostic_inverse_depth_rgb(metric_depth: np.ndarray) -> tuple[np.ndarray, 
     }
 
 
-def _read_video_frames(path: Path, frame_indices: tuple[int, ...]) -> dict[int, np.ndarray]:
+def _read_video_frames(
+    path: Path, frame_indices: tuple[int, ...]
+) -> dict[int, np.ndarray]:
     try:
         import imageio.v2 as imageio
 
         reader = imageio.get_reader(path)
         try:
-            return {index: np.asarray(reader.get_data(index)) for index in frame_indices}
+            return {
+                index: np.asarray(reader.get_data(index)) for index in frame_indices
+            }
         finally:
             reader.close()
-    except Exception as exc:  # decoder backends raise several non-portable exception types
-        raise DepthRenderProbeError(f"视频帧解码失败 {path}: {type(exc).__name__}: {exc}") from exc
+    except (
+        Exception
+    ) as exc:  # decoder backends raise several non-portable exception types
+        raise DepthRenderProbeError(
+            f"视频帧解码失败 {path}: {type(exc).__name__}: {exc}"
+        ) from exc
 
 
 def _set_runtime_egl_device_after_import() -> dict[str, str]:
@@ -225,7 +251,9 @@ def load_replay_episode_model(
     elif hasattr(env, "set_ep_meta"):
         env.set_ep_meta(ep_meta)
     else:
-        raise DepthRenderProbeError("RoboCasa env 缺少 set_ep_meta/set_attrs_from_ep_meta")
+        raise DepthRenderProbeError(
+            "RoboCasa env 缺少 set_ep_meta/set_attrs_from_ep_meta"
+        )
 
     env.reset()
     try:
@@ -277,8 +305,13 @@ def _probe_episode(
     width: int,
     max_rgb_mae: float,
     artifacts_dir: Path,
+    pointmap_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from robosuite.utils.camera_utils import get_real_depth_map
+
+    get_camera_intrinsic_matrix = None
+    if pointmap_options is not None:
+        from robosuite.utils.camera_utils import get_camera_intrinsic_matrix
     import imageio.v2 as imageio
 
     episode_dir = root / "extras" / f"episode_{episode_index:06d}"
@@ -315,8 +348,7 @@ def _probe_episode(
             frame_errors: list[str] = []
             if state_roundtrip_max_abs > 1e-9:
                 frame_errors.append(
-                    "state 恢复后回读偏差超过 1e-9："
-                    f"{state_roundtrip_max_abs:.6g}"
+                    f"state 恢复后回读偏差超过 1e-9：{state_roundtrip_max_abs:.6g}"
                 )
             camera_reports: list[dict[str, Any]] = []
             for camera_key, camera_name in CAMERA_KEY_TO_NAME.items():
@@ -336,6 +368,40 @@ def _probe_episode(
                 preview, preview_contract = diagnostic_inverse_depth_rgb(metric_depth)
                 rendered_rgb = np.asarray(rendered_rgb)[::-1]
 
+                pointmap_arrays: dict[str, np.ndarray] = {}
+                pointmap_report: dict[str, Any] | None = None
+                pointmap_preview: np.ndarray | None = None
+                if pointmap_options is not None:
+                    assert get_camera_intrinsic_matrix is not None
+                    intrinsics = np.asarray(
+                        get_camera_intrinsic_matrix(
+                            env.sim,
+                            camera_name,
+                            height,
+                            width,
+                        ),
+                        dtype=np.float64,
+                    )
+                    pointmap_arrays, pointmap_report = audit_pointmap_frame(
+                        metric_depth,
+                        intrinsics,
+                        target_height=int(pointmap_options["target_height"]),
+                        target_width=int(pointmap_options["target_width"]),
+                        max_reprojection_error_px=float(
+                            pointmap_options["max_reprojection_error_px"]
+                        ),
+                        max_float16_roundtrip_error_m=float(
+                            pointmap_options["max_float16_roundtrip_error_m"]
+                        ),
+                    )
+                    normalized_chw = pointmap_arrays["pointmap_normalized_float16"]
+                    normalized_hwc = np.moveaxis(normalized_chw, 0, -1).astype(
+                        np.float32
+                    )
+                    pointmap_preview = np.rint(
+                        np.clip((normalized_hwc + 1.0) * 127.5, 0.0, 255.0)
+                    ).astype(np.uint8)
+
                 camera_errors: list[str] = []
                 if alignment["rgb_mae"] > max_rgb_mae:
                     camera_errors.append(
@@ -347,8 +413,15 @@ def _probe_episode(
                     camera_errors.append("metric depth 包含 NaN/Inf")
                 if depth_stats["metric_positive_fraction"] != 1.0:
                     camera_errors.append("metric depth 包含非正值")
-                if depth_stats["metric_std_m"] is None or depth_stats["metric_std_m"] <= 0.0:
+                if (
+                    depth_stats["metric_std_m"] is None
+                    or depth_stats["metric_std_m"] <= 0.0
+                ):
                     camera_errors.append("metric depth 退化为常量")
+                if pointmap_report is not None and not pointmap_report["ok"]:
+                    camera_errors.extend(
+                        f"PointMap {message}" for message in pointmap_report["errors"]
+                    )
 
                 artifact_base = (
                     artifacts_dir
@@ -358,44 +431,59 @@ def _probe_episode(
                 )
                 artifact_base.parent.mkdir(parents=True, exist_ok=True)
                 arrays_path = artifact_base.with_suffix(".npz")
-                preview_path = artifact_base.with_name(f"{artifact_base.name}_comparison.png")
+                preview_path = artifact_base.with_name(
+                    f"{artifact_base.name}_comparison.png"
+                )
+                saved_arrays = {
+                    "source_rgb": np.asarray(source_rgb, dtype=np.uint8),
+                    "rendered_rgb": np.asarray(rendered_rgb, dtype=np.uint8),
+                    "normalized_depth": np.asarray(normalized_depth, dtype=np.float32),
+                    "metric_depth_m": metric_depth,
+                    **pointmap_arrays,
+                }
                 np.savez_compressed(
                     arrays_path,
-                    source_rgb=np.asarray(source_rgb, dtype=np.uint8),
-                    rendered_rgb=np.asarray(rendered_rgb, dtype=np.uint8),
-                    normalized_depth=np.asarray(normalized_depth, dtype=np.float32),
-                    metric_depth_m=metric_depth,
+                    **saved_arrays,
                 )
+                preview_panels = [
+                    np.asarray(source_rgb, dtype=np.uint8),
+                    np.asarray(rendered_rgb, dtype=np.uint8),
+                    preview,
+                ]
+                if pointmap_preview is not None:
+                    if pointmap_preview.shape[:2] != source_rgb.shape[:2]:
+                        # The first-stage report keeps the comparison strip at
+                        # source resolution; the target-size float16 tensor is
+                        # retained losslessly in the NPZ artifact.
+                        pointmap_preview = resize_nearest_hwc(
+                            pointmap_preview,
+                            source_rgb.shape[0],
+                            source_rgb.shape[1],
+                        )
+                    preview_panels.append(pointmap_preview)
                 imageio.imwrite(
                     preview_path,
-                    np.concatenate(
-                        (
-                            np.asarray(source_rgb, dtype=np.uint8),
-                            np.asarray(rendered_rgb, dtype=np.uint8),
-                            preview,
-                        ),
-                        axis=1,
+                    np.concatenate(preview_panels, axis=1),
+                )
+                camera_report = {
+                    "camera_key": camera_key,
+                    "camera_name": camera_name,
+                    "source_video": str(
+                        episode_video_path(root, info, episode_index, camera_key)
                     ),
-                )
-                camera_reports.append(
-                    {
-                        "camera_key": camera_key,
-                        "camera_name": camera_name,
-                        "source_video": str(
-                            episode_video_path(root, info, episode_index, camera_key)
-                        ),
-                        "alignment": alignment,
-                        "depth": depth_stats,
-                        "inverse_depth_preview": preview_contract,
-                        "arrays": str(arrays_path),
-                        "comparison_png": str(preview_path),
-                        "errors": camera_errors,
-                        "ok": not camera_errors,
-                    }
-                )
+                    "alignment": alignment,
+                    "depth": depth_stats,
+                    "inverse_depth_preview": preview_contract,
+                    "arrays": str(arrays_path),
+                    "comparison_png": str(preview_path),
+                    "errors": camera_errors,
+                    "ok": not camera_errors,
+                }
+                if pointmap_report is not None:
+                    camera_report["pointmap"] = pointmap_report
+                camera_reports.append(camera_report)
                 frame_errors.extend(
-                    f"{camera_name}: {message}"
-                    for message in camera_errors
+                    f"{camera_name}: {message}" for message in camera_errors
                 )
             errors.extend(f"frame {frame_index}: {message}" for message in frame_errors)
             frame_reports.append(
@@ -404,13 +492,16 @@ def _probe_episode(
                     "state_roundtrip_max_abs": state_roundtrip_max_abs,
                     "cameras": camera_reports,
                     "errors": frame_errors,
-                    "ok": not frame_errors and all(item["ok"] for item in camera_reports),
+                    "ok": not frame_errors
+                    and all(item["ok"] for item in camera_reports),
                 }
             )
         except Exception as exc:
             message = f"frame {frame_index}: {type(exc).__name__}: {exc}"
             errors.append(message)
-            frame_reports.append({"frame_index": frame_index, "errors": [message], "ok": False})
+            frame_reports.append(
+                {"frame_index": frame_index, "errors": [message], "ok": False}
+            )
 
     return {
         "episode_index": episode_index,
@@ -434,6 +525,7 @@ def probe_task_depth_replay(
     width: int,
     max_rgb_mae: float,
     artifacts_root: str | Path,
+    pointmap_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Restore each selected episode's own model/state and render aligned RGB-D."""
 
@@ -470,6 +562,7 @@ def probe_task_depth_replay(
                     width=width,
                     max_rgb_mae=max_rgb_mae,
                     artifacts_dir=artifacts_dir,
+                    pointmap_options=pointmap_options,
                 )
             except Exception as exc:
                 report = {
@@ -488,9 +581,41 @@ def probe_task_depth_replay(
         if env is not None:
             env.close()
 
-    return {
+    intrinsics_report: dict[str, Any] | None = None
+    if pointmap_options is not None:
+        matrices_by_camera: dict[str, list[np.ndarray]] = {
+            camera_name: [] for camera_name in CAMERA_KEY_TO_NAME.values()
+        }
+        sampled_frames = 0
+        for episode_report in episode_reports:
+            for frame_report in episode_report.get("frames", []):
+                sampled_frames += 1
+                for camera_report in frame_report.get("cameras", []):
+                    pointmap_report = camera_report.get("pointmap")
+                    matrix = ((pointmap_report or {}).get("intrinsics") or {}).get(
+                        "matrix"
+                    )
+                    camera_name = camera_report.get("camera_name")
+                    if matrix is not None and camera_name in matrices_by_camera:
+                        matrices_by_camera[camera_name].append(
+                            np.asarray(matrix, dtype=np.float64)
+                        )
+        intrinsics_report = summarize_intrinsics(
+            matrices_by_camera,
+            expected_observations=sampled_frames,
+            max_drift=float(pointmap_options["max_intrinsics_drift"]),
+        )
+        errors.extend(
+            f"三路内参合同: {message}" for message in intrinsics_report["errors"]
+        )
+
+    report = {
         "schema_version": 1,
-        "phase": "RGBD-P1-per-episode-render-probe",
+        "phase": (
+            "POINTMAP-P0-numerical-contract"
+            if pointmap_options is not None
+            else "RGBD-P1-per-episode-render-probe"
+        ),
         "task_name": task_name,
         "lerobot_root": str(root),
         "runtime": runtime,
@@ -512,3 +637,49 @@ def probe_task_depth_replay(
         "ok": bool(episode_reports) and not errors,
         "result": "pass" if episode_reports and not errors else "fail",
     }
+    if pointmap_options is not None:
+        report["pointmap_contract"] = pointmap_contract(
+            source_height=height,
+            source_width=width,
+            target_height=int(pointmap_options["target_height"]),
+            target_width=int(pointmap_options["target_width"]),
+        )
+        report["intrinsics_summary"] = intrinsics_report
+    return report
+
+
+def probe_task_pointmap_replay(
+    dataset_path: str | Path,
+    *,
+    task_name: str,
+    episodes_per_task: int,
+    frame_fractions: tuple[float, ...],
+    height: int,
+    width: int,
+    target_height: int,
+    target_width: int,
+    max_rgb_mae: float,
+    max_reprojection_error_px: float,
+    max_float16_roundtrip_error_m: float,
+    max_intrinsics_drift: float,
+    artifacts_root: str | Path,
+) -> dict[str, Any]:
+    """Audit the frozen PointMap contract on restored RoboCasa365 states."""
+
+    return probe_task_depth_replay(
+        dataset_path,
+        task_name=task_name,
+        episodes_per_task=episodes_per_task,
+        frame_fractions=frame_fractions,
+        height=height,
+        width=width,
+        max_rgb_mae=max_rgb_mae,
+        artifacts_root=artifacts_root,
+        pointmap_options={
+            "target_height": int(target_height),
+            "target_width": int(target_width),
+            "max_reprojection_error_px": float(max_reprojection_error_px),
+            "max_float16_roundtrip_error_m": float(max_float16_roundtrip_error_m),
+            "max_intrinsics_drift": float(max_intrinsics_drift),
+        },
+    )

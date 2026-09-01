@@ -1,13 +1,13 @@
 # 项目进度
 
-更新时间：2026-08-24
+更新时间：2026-09-01
 
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：Atomic9 ratio0 RGB step7500→12000低学习率续训诊断
+- 当前阶段：PointMap P0数值合同与三路相机内参审计
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：Atomic9 RGB-D step8500/12000闭环成功率为49.6%/56.9%。现有RGB只训练到step7500且使用8500步cosine，不能与RGB-D 12k直接归因比较；已准备从完整step7500恢复、以`3.53909638412e-7`恒定LR续到12000的独立诊断入口，真实恢复与首步LR连续性为`cluster-pending`。
+- 超算运行状态：用户确认上一轮RGB/RGB-D评测已跑完；当前转入PointMap。P0代码只审计CloseFridge前三个episode的三路相机内参、camera-space XYZ、重投影和float16误差，真实MuJoCo/EGL报告为`cluster-pending`。
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,6 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | P1～P4已完成；进入Atomic9扩展 | CloseFridge loader/depth loss/resume PASS；step1000两组48%，step1500为88%/84% | 生成并审计Atomic9全量depth cache |
+| M5-PM PointMap几何流 | P0本地实现 | 199项本地测试通过；真实三路相机审计为`cluster-pending` | CloseFridge 3 episode P0报告PASS后实现缓存生成器 |
 | M6 Atomic 正式训练与评测 | Atomic9 RGB/RGB-D训练量诊断 | RGB-D 8.5k/12k为49.6%/56.9%；RGB现有轨迹停在7.5k | 通过续训preflight，从精确7.5k八分片恢复到12k并同合同评测 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
@@ -43,6 +44,14 @@
 - 新实验`robocasa365_atomic9_ratio00_rgb_cont7500_12000_seed42_8gpu`使用独立W&B、Capstor experiment、IOPS滚动和Store永久checkpoint目录；恢复后保留模型、AdamW moments、trainer和RNG状态，不覆盖旧RGB产物。
 - 源8500步cosine在step7500的理论LR为`3.53909638412e-7`。续训不重新warmup、不把scheduler直接改写为12000步cosine，而是将7500～12000固定为该LR；首轮要求精确恢复7500，后续重提要求精确恢复planner选中的新实验checkpoint，且每轮optimizer LR均在5%容差内，否则首个更新前退出。
 - 本地已完成LR公式、错误跳变拒绝、精确bootstrap、后续新目录resume、八分片缺失拒绝、sbatch语法与Slurm变量边界测试。CPU preflight、8卡真实恢复及step12000结果均为`cluster-pending`。
+
+## PointMap当前进程
+
+- 已确认两层路线：第一层`X-WAM-PointMap-Aux`只替换inverse-depth辅助目标并保持RGB-only推理；第二层`X-WAM-PointMap-Flex`才增加可选PointMap输入、stream dropout和cross-modality forcing。
+- 用户确认正式缓存直接保存PointMap，不在训练时由depth生成XYZ。合同固定为相机坐标系、原生`256×256`反投影、Flex-π范围裁剪、nearest到`256×320`和normalized float16。
+- P0新增无Torch NumPy合同和逐episode simulator审计：每个抽查帧保存K、metric depth、metric XYZ、valid mask与`[3,256,320]` float16 normalized PointMap，并检查depth/像素重投影及2 mm反量化门限。
+- P0只运行CloseFridge前三个episode的首/中/尾帧，三路相机K必须在9次观测中各自稳定。JSON、NPZ和对比图写Store manifest目录；dirty Git只记录不阻塞。
+- P0本地199项测试、Python编译、ruff、sbatch语法和32个Clariden脚本变量边界检查均已通过；真实Clariden作业为`cluster-pending`。P0通过前禁止生成预计约283 GiB的Atomic9 PointMap缓存。
 
 ## Clariden 部署状态
 

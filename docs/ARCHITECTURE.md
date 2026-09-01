@@ -192,6 +192,14 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - loader按RGB完全相同的episode/frame ID解码三路depth，输出`depths[V,T,3,H,W]`，uint8只执行`pixel/127.5-1`且resize使用nearest；RGB继续使用bilinear。随机空间裁剪由同一个augmentation同时作用于RGB/depth，从而保持像素对齐。
 - P3工程门禁先生成完整CloseFridge缓存，再用4×GH200固定8个clip执行step 0→2保存和step 2→4恢复。审计必须同时看到有效非零depth loss、RGB/action/proprio有限loss、四rank FP32 optimizer state、完整checkpoint和精确resume来源；该门禁不是正式RGB-D训练。
 
+### PointMap几何流合同
+
+- 现有RGB-D路径是inverse-depth未来辅助监督，depth不是policy输入；把缓存键重命名为PointMap不会自动得到Flex-π式输入流。PointMap先以辅助目标接入，之后才单独增加可选输入、stream dropout和cross-modality forcing。
+- PointMap数值合同固定为`robocasa365_camera_xyz_flexpi_v1`：在原生metric depth网格用每路OpenCV内参生成camera-space XYZ；`0.01m < Z < 2m`为有效值，无效XYZ为零，不使用外参。
+- XYZ按`x/y=[-0.5,0.5]m、z=[0,1.5]m`裁剪并映射至`[-1,1]`，再以nearest从`256×256`变为`256×320`。该数值定义绑定Flex-π官方实现commit `20c1b2b71ea35a415d5d47c39b04443cfadad7a1`。
+- 正式PointMap缓存直接保存未压缩normalized float16 `.npy [T,3,256,320]`，以memory-map按clip读取。训练worker不解码depth、不计算XYZ、不读取相机内参；metric depth只保留在P0少量审计产物中。
+- P0必须在逐episode MJCF/state恢复后，从robosuite simulator读取三路相机内参。报告同时审计RGB对齐、内参稳定性、depth/像素重投影、裁剪比例、无效值、目标shape和float16反量化误差；未通过时禁止全量生成约283 GiB的Atomic9缓存。
+
 ## Current external paths
 
 These paths are cluster deployment facts, not portable defaults:
