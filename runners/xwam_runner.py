@@ -30,9 +30,22 @@ class XWAMRunner(L.LightningModule):
     def __init__(self, config, run_depth=None):
         super().__init__()
         self.config = config
-        self.run_depth = (
-            bool(config.use_depth) if run_depth is None else bool(run_depth)
+        self.use_depth = bool(config.get("use_depth", False))
+        self.use_pointmap = bool(config.get("use_pointmap", False))
+        if self.use_depth and self.use_pointmap:
+            raise ValueError("use_depth与use_pointmap互斥")
+        self.auxiliary_enabled = self.use_depth or self.use_pointmap
+        self.auxiliary_key = (
+            "depths" if self.use_depth else "pointmaps" if self.use_pointmap else None
         )
+        self.auxiliary_name = (
+            "depth" if self.use_depth else "pointmap" if self.use_pointmap else None
+        )
+        self.run_depth = (
+            self.auxiliary_enabled if run_depth is None else bool(run_depth)
+        )
+        if self.run_depth and not self.auxiliary_enabled:
+            raise ValueError("run_depth=true但没有启用辅助几何模态")
         self._restored_generator_state = None
         self._allow_missing_frozen_resume_parameters = False
         self._excluded_frozen_resume_report = None
@@ -69,7 +82,7 @@ class XWAMRunner(L.LightningModule):
 
         # TODO: remove hard-coded views and modalities
         self.num_views = 3
-        self.num_modalities = 2 if config.use_depth else 1
+        self.num_modalities = 2 if self.auxiliary_enabled else 1
         self.num_frames_per_latent = config.vae_stride[0]
 
         logging.info(f"Loading Wan2_2_VAE from {config.wan_checkpoint_dir}...")
@@ -710,10 +723,12 @@ class XWAMRunner(L.LightningModule):
         proprio_loss = ((vt_proprios_pred - vt_proprios) * proprio_mask_f).pow(
             2
         ).sum() / (proprio_mask_f.sum() + 1e-8)
-        if self.config.use_depth and self.run_depth:
-            depth_loss = (depth_latents_pred[0] - gt_depth_latents).pow(2).mean()
+        if self.auxiliary_enabled and self.run_depth:
+            auxiliary_loss = (depth_latents_pred[0] - gt_depth_latents).pow(2).mean()
         else:
-            depth_loss = 0.0
+            auxiliary_loss = 0.0
+        depth_loss = auxiliary_loss if self.use_depth else 0.0
+        pointmap_loss = auxiliary_loss if self.use_pointmap else 0.0
 
         # frequency-domain loss for action smoothness
         dct_loss_weight = getattr(self.config, "dct_loss_weight", 0.0)
@@ -741,6 +756,8 @@ class XWAMRunner(L.LightningModule):
             + self.config.action_loss_weight * action_loss
             + self.config.proprio_loss_weight * proprio_loss
             + self.config.depth_loss_weight * depth_loss
+            + float(getattr(self.config, "pointmap_loss_weight", 0.0))
+            * pointmap_loss
             + dct_loss_weight * dct_loss
         )
 
@@ -762,6 +779,9 @@ class XWAMRunner(L.LightningModule):
                 sync_dist=True,
             )
         self.log("train/depth_loss", depth_loss, prog_bar=True, sync_dist=True)
+        self.log(
+            "train/pointmap_loss", pointmap_loss, prog_bar=True, sync_dist=True
+        )
         if dct_loss_weight > 0:
             self.log("train/dct_loss", dct_loss, prog_bar=True, sync_dist=True)
         self.log("train/loss", loss, prog_bar=True, sync_dist=True)
@@ -783,7 +803,11 @@ class XWAMRunner(L.LightningModule):
             left = torch.randint(0, W - crop_w + 1, ()).item()
 
             rgb_crop = batch["video"][..., top : top + crop_h, left : left + crop_w]
-            depth_crop = batch["depths"][..., top : top + crop_h, left : left + crop_w]
+            auxiliary_crop = None
+            if self.auxiliary_enabled and self.run_depth:
+                auxiliary_crop = batch[self.auxiliary_key][
+                    ..., top : top + crop_h, left : left + crop_w
+                ]
 
             ori_shape = rgb_crop.shape[:-3]
             batch["video"] = F.interpolate(
@@ -794,12 +818,20 @@ class XWAMRunner(L.LightningModule):
                 antialias=False,
             ).unflatten(0, ori_shape)
 
-            ori_shape = depth_crop.shape[:-3]
-            batch["depths"] = F.interpolate(
-                depth_crop.flatten(0, -4),
-                size=(H, W),
-                mode="nearest",
-            ).unflatten(0, ori_shape)
+            if auxiliary_crop is not None:
+                ori_shape = auxiliary_crop.shape[:-3]
+                auxiliary_mode = "bilinear" if self.use_pointmap else "nearest"
+                interpolation_options = (
+                    {"align_corners": False, "antialias": False}
+                    if auxiliary_mode == "bilinear"
+                    else {}
+                )
+                batch[self.auxiliary_key] = F.interpolate(
+                    auxiliary_crop.flatten(0, -4),
+                    size=(H, W),
+                    mode=auxiliary_mode,
+                    **interpolation_options,
+                ).unflatten(0, ori_shape)
 
         cfg_list = list(getattr(self.config, "cfg_list", [0, 3, 7]))
 
@@ -811,7 +843,7 @@ class XWAMRunner(L.LightningModule):
             xt_latents, xt_actions, xt_proprios, xt_depth_latents = self.forward(
                 batch, early_stop=False, cfg=cfg_val
             )
-            if self.config.use_depth and self.run_depth:
+            if self.auxiliary_enabled and self.run_depth:
                 xt_latents_mv = torch.cat([xt_latents, xt_depth_latents], dim=3)
             else:
                 xt_latents_mv = xt_latents
@@ -836,19 +868,25 @@ class XWAMRunner(L.LightningModule):
                 rgb_ssim = self._ssim(pred_rgb, gt_rgb)
                 self.log("val/rgb_psnr", rgb_psnr, prog_bar=True, sync_dist=True)
                 self.log("val/rgb_ssim", rgb_ssim, prog_bar=True, sync_dist=True)
-                if self.config.use_depth and self.run_depth:
-                    pred_depth = torch.clamp((pred_all[1] + 1) / 2, 0, 1)
-                    gt_depth = rearrange(
-                        batch["depths"], "b v t c h w -> (b v t) c h w"
+                if self.auxiliary_enabled and self.run_depth:
+                    pred_auxiliary = torch.clamp((pred_all[1] + 1) / 2, 0, 1)
+                    gt_auxiliary = rearrange(
+                        batch[self.auxiliary_key], "b v t c h w -> (b v t) c h w"
                     )
-                    gt_depth = torch.clamp((gt_depth + 1) / 2, 0, 1)
-                    depth_psnr = self._psnr(pred_depth, gt_depth)
-                    depth_ssim = self._ssim(pred_depth, gt_depth)
+                    gt_auxiliary = torch.clamp((gt_auxiliary + 1) / 2, 0, 1)
+                    auxiliary_psnr = self._psnr(pred_auxiliary, gt_auxiliary)
+                    auxiliary_ssim = self._ssim(pred_auxiliary, gt_auxiliary)
                     self.log(
-                        "val/depth_psnr", depth_psnr, prog_bar=True, sync_dist=True
+                        f"val/{self.auxiliary_name}_psnr",
+                        auxiliary_psnr,
+                        prog_bar=True,
+                        sync_dist=True,
                     )
                     self.log(
-                        "val/depth_ssim", depth_ssim, prog_bar=True, sync_dist=True
+                        f"val/{self.auxiliary_name}_ssim",
+                        auxiliary_ssim,
+                        prog_bar=True,
+                        sync_dist=True,
                     )
 
                 gt_actions = batch["actions"].float()
@@ -879,8 +917,10 @@ class XWAMRunner(L.LightningModule):
 
         # Save videos on rank 0 only
         if self.global_rank == 0:
-            if self.config.use_depth and self.run_depth:
-                gt_videos = torch.cat([batch["video"], batch["depths"]], dim=0)
+            if self.auxiliary_enabled and self.run_depth:
+                gt_videos = torch.cat(
+                    [batch["video"], batch[self.auxiliary_key]], dim=0
+                )
             else:
                 gt_videos = batch["video"]
             gt_videos = rearrange(
@@ -1086,7 +1126,9 @@ class XWAMRunner(L.LightningModule):
                 )
 
         xt_depth_latents = (
-            depth_latents_pred[0] if self.config.use_depth and self.run_depth else None
+            depth_latents_pred[0]
+            if self.auxiliary_enabled and self.run_depth
+            else None
         )
         return xt_latents, xt_actions, xt_proprios, xt_depth_latents
 
@@ -1124,7 +1166,7 @@ class XWAMRunner(L.LightningModule):
         if early_stop:
             return None, xt_actions, xt_proprios, None
 
-        if self.config.use_depth and self.run_depth:
+        if self.auxiliary_enabled and self.run_depth:
             xt_latents = torch.cat([xt_latents, xt_depth_latents], dim=3)
         xt_latents = rearrange(
             xt_latents, "b c t (m v) h w -> (b m v) c t h w", v=self.num_views
@@ -1183,20 +1225,28 @@ class XWAMRunner(L.LightningModule):
         with self._cuda_timing_segment("t5"):
             context_embeddings = self._encode_text_embeddings(batch["prompt"])
 
-        # rgbd: [B, C, MV, T, H, W]
+        # RGB plus optional auxiliary geometry: [B, C, MV, T, H, W]
         B = batch["video"].shape[0]
         gt_rgb = rearrange(batch["video"], "b v t c h w -> (b v) c t h w")
-        if self.config.use_depth and self.run_depth:
-            if "depths" not in batch:
-                raise KeyError("use_depth=true但batch缺少depths")
-            if batch["depths"].shape != batch["video"].shape:
-                raise ValueError(
-                    "RGB/depth batch shape必须完全一致："
-                    f"rgb={tuple(batch['video'].shape)}, "
-                    f"depth={tuple(batch['depths'].shape)}"
-                )
-            gt_depth = rearrange(batch["depths"], "b v t c h w -> (b v) c t h w")
-            gt_video = torch.cat([gt_rgb, gt_depth], dim=0)
+        if self.auxiliary_enabled and self.run_depth:
+            if self.use_depth:
+                if "depths" not in batch:
+                    raise KeyError("use_depth=true但batch缺少depths")
+                if batch["depths"].shape != batch["video"].shape:
+                    raise ValueError(
+                        'batch["depths"].shape != batch["video"].shape'
+                    )
+            else:
+                if "pointmaps" not in batch:
+                    raise KeyError("use_pointmap=true但batch缺少pointmaps")
+                if batch["pointmaps"].shape != batch["video"].shape:
+                    raise ValueError(
+                        'batch["pointmaps"].shape != batch["video"].shape'
+                    )
+            gt_auxiliary = rearrange(
+                batch[self.auxiliary_key], "b v t c h w -> (b v) c t h w"
+            )
+            gt_video = torch.cat([gt_rgb, gt_auxiliary], dim=0)
             with self._cuda_timing_segment("vae"):
                 gt_latents = self.vae.encode(gt_video)
             gt_latents = rearrange(

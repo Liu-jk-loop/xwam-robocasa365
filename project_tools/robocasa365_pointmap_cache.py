@@ -280,3 +280,144 @@ def validate_manifest_artifact(
         "errors": errors,
         "ok": not errors,
     }
+
+
+def validate_task_pointmap_cache(
+    *,
+    cache_root: str | Path,
+    manifest_path: str | Path,
+    audit_path: str | Path,
+    task_name: str,
+    episode_lengths: dict[int, int],
+    camera_keys: tuple[str, ...] | list[str],
+    chunks_size: int,
+) -> dict[str, Any]:
+    """Validate the audited cache index without rehashing every large array."""
+
+    root = Path(cache_root).expanduser().resolve()
+    manifest_file = Path(manifest_path).expanduser().resolve()
+    audit_file = Path(audit_path).expanduser().resolve()
+    try:
+        manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+        audit = json.loads(audit_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise PointMapCacheError(f"无法读取PointMap manifest/audit：{exc}") from exc
+    if not isinstance(manifest, dict) or not isinstance(audit, dict):
+        raise PointMapCacheError("PointMap manifest/audit顶层必须为对象")
+    checks = {
+        "manifest_pass": manifest.get("ok") is True
+        and manifest.get("result") == "pass",
+        "audit_pass": audit.get("ok") is True and audit.get("result") == "pass",
+        "atomic_only": manifest.get("scope") == audit.get("scope") == "atomic_only",
+        "task_name": manifest.get("task_name") == audit.get("task_name") == task_name,
+        "cache_root": Path(str(manifest.get("cache_root", ""))).expanduser().resolve()
+        == root
+        and Path(str(audit.get("cache_root", ""))).expanduser().resolve() == root,
+        "manifest_binding": Path(str(audit.get("manifest_path", "")))
+        .expanduser()
+        .resolve()
+        == manifest_file,
+        "contract_digest": isinstance(manifest.get("contract_sha256"), str)
+        and manifest.get("contract_sha256") == audit.get("contract_sha256"),
+        "render_policy": manifest.get("render_policy") == POINTMAP_RENDER_POLICY
+        and audit.get("render_policy") == POINTMAP_RENDER_POLICY,
+        "final_audit_checks": isinstance(audit.get("checks"), dict)
+        and bool(audit["checks"])
+        and all(audit["checks"].values()),
+    }
+    failed = [name for name, passed in checks.items() if not passed]
+    if failed:
+        raise PointMapCacheError(f"PointMap manifest/audit合同失败：{failed}")
+
+    episodes = manifest.get("episodes")
+    if not isinstance(episodes, list):
+        raise PointMapCacheError("PointMap manifest缺少episodes数组")
+    reports = {
+        int(item["episode_index"]): item
+        for item in episodes
+        if isinstance(item, dict) and "episode_index" in item
+    }
+    if set(reports) != set(episode_lengths):
+        raise PointMapCacheError(
+            "PointMap episode集合漂移："
+            f"missing={sorted(set(episode_lengths) - set(reports))[:8]}, "
+            f"extra={sorted(set(reports) - set(episode_lengths))[:8]}"
+        )
+    expected_cameras = tuple(str(item) for item in camera_keys)
+    storage = (manifest.get("contract") or {}).get("storage") or {}
+    frame_shape = storage.get("shape_per_frame")
+    if frame_shape != [3, 256, 320]:
+        raise PointMapCacheError(
+            f"PointMap storage shape合同漂移：{frame_shape} != [3, 256, 320]"
+        )
+    array_paths: dict[tuple[int, str], Path] = {}
+    for episode_index, episode_length in episode_lengths.items():
+        report = reports[episode_index]
+        if int(report.get("episode_length", -1)) != int(episode_length):
+            raise PointMapCacheError(
+                f"episode_{episode_index:06d}长度与PointMap manifest不一致"
+            )
+        camera_reports = {
+            str(item.get("camera_key")): item
+            for item in report.get("cameras", [])
+            if isinstance(item, dict)
+        }
+        if set(camera_reports) != set(expected_cameras):
+            raise PointMapCacheError(
+                f"episode_{episode_index:06d} PointMap相机集合不一致"
+            )
+        for camera_key in expected_cameras:
+            camera = camera_reports[camera_key]
+            expected_path = pointmap_cache_path(
+                root,
+                task_name=task_name,
+                episode_index=episode_index,
+                camera_key=camera_key,
+                chunks_size=chunks_size,
+            )
+            sidecar_path = pointmap_sidecar_path(expected_path)
+            if Path(str(camera.get("array_path", ""))).expanduser().resolve() != expected_path:
+                raise PointMapCacheError(f"PointMap array路径漂移：{expected_path}")
+            if not expected_path.is_file() or not sidecar_path.is_file():
+                raise PointMapCacheError(f"PointMap array/sidecar缺失：{expected_path}")
+            try:
+                sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise PointMapCacheError(f"无法读取PointMap sidecar：{sidecar_path}") from exc
+            if sidecar != camera:
+                raise PointMapCacheError(f"PointMap sidecar与manifest不一致：{sidecar_path}")
+            expected_shape = expected_array_shape(
+                episode_length,
+                target_height=256,
+                target_width=320,
+            )
+            try:
+                array = np.load(expected_path, mmap_mode="r", allow_pickle=False)
+            except (OSError, ValueError) as exc:
+                raise PointMapCacheError(f"无法打开PointMap array：{expected_path}") from exc
+            if tuple(array.shape) != expected_shape or array.dtype != POINTMAP_CACHE_DTYPE:
+                raise PointMapCacheError(
+                    f"PointMap header漂移：{expected_path} shape={array.shape} dtype={array.dtype}"
+                )
+            mmap = getattr(array, "_mmap", None)
+            if mmap is not None:
+                mmap.close()
+            array_paths[(episode_index, camera_key)] = expected_path
+    expected_arrays = len(episode_lengths) * len(expected_cameras)
+    if len(array_paths) != expected_arrays:
+        raise PointMapCacheError(
+            f"PointMap array数量漂移：{len(array_paths)} != {expected_arrays}"
+        )
+    return {
+        "cache_root": str(root),
+        "manifest_path": str(manifest_file),
+        "audit_path": str(audit_file),
+        "contract_name": POINTMAP_CONTRACT_NAME,
+        "contract_sha256": manifest["contract_sha256"],
+        "render_policy": POINTMAP_RENDER_POLICY,
+        "task_name": task_name,
+        "episode_count": len(episode_lengths),
+        "array_count": len(array_paths),
+        "array_paths": array_paths,
+        "startup_validation": "manifest_audit_sidecar_and_npy_header_no_full_rehash",
+    }

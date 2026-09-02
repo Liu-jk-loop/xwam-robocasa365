@@ -129,6 +129,7 @@ def _metrics_audit(
     *,
     expected_steps: list[int],
     expect_depth: bool,
+    expect_pointmap: bool,
 ) -> dict[str, Any]:
     path = Path(log_path).expanduser().resolve()
     records, errors = parse_console_metrics(
@@ -180,6 +181,19 @@ def _metrics_audit(
             )
             for record in records
         ),
+        "pointmap_loss_contract": bool(records)
+        and all(
+            (
+                float(record["metrics"].get("train/pointmap_loss", math.nan))
+                > 0.0
+                if expect_pointmap
+                else abs(
+                    float(record["metrics"].get("train/pointmap_loss", 0.0))
+                )
+                <= 1e-8
+            )
+            for record in records
+        ),
         "all_batches_supervised": bool(ratios)
         and all(abs(value - 1.0) <= 1e-8 for value in ratios),
     }
@@ -204,6 +218,8 @@ def _run_contract(
     expected_metric_steps: list[int],
     expect_resume: bool,
     expect_depth: bool,
+    expect_pointmap: bool,
+    require_clean_git: bool,
 ) -> dict[str, Any]:
     metadata = _load_json(metadata_path)
     result = _load_json(result_path)
@@ -213,6 +229,7 @@ def _run_contract(
         log_path,
         expected_steps=expected_metric_steps,
         expect_depth=expect_depth,
+        expect_pointmap=expect_pointmap,
     )
     topology = metadata.get("topology") or {}
     environment = metadata.get("environment") or {}
@@ -259,9 +276,11 @@ def _run_contract(
         "fixed_four_step_schedule": int(training.get("num_training_steps", -1)) == 4,
         "fixed_atomic_subset": dataset.get("task_name") == "CloseFridge"
         and dataset.get("use_depth") is expect_depth
+        and dataset.get("use_pointmap", False) is expect_pointmap
         and dataset.get("subset_indices") == list(range(8))
         and dataset.get("shuffle") is False,
-        "clean_git": bool(git.get("commit")) and git.get("dirty") is False,
+        "git_policy": bool(git.get("commit"))
+        and (not require_clean_git or git.get("dirty") is False),
         "resume_mode": bool(resume_checkpoint) is expect_resume,
         "checkpoint_complete": expected_global_step in complete_steps,
         "checkpoint_layout": all(checkpoint["checks"].values()),
@@ -296,7 +315,11 @@ def build_clariden_4gpu_resume_report(
     resumed: dict[str, str],
     commit_compatibility: dict[str, Any] | None = None,
     expect_depth: bool = False,
+    expect_pointmap: bool = False,
+    require_clean_git: bool = True,
 ) -> dict[str, Any]:
+    if expect_depth and expect_pointmap:
+        raise ValueError("expect_depth与expect_pointmap互斥")
     errors: list[str] = []
     try:
         initial_report = _run_contract(
@@ -305,6 +328,8 @@ def build_clariden_4gpu_resume_report(
             expected_metric_steps=[0, 1],
             expect_resume=False,
             expect_depth=expect_depth,
+            expect_pointmap=expect_pointmap,
+            require_clean_git=require_clean_git,
         )
         resumed_report = _run_contract(
             **resumed,
@@ -312,6 +337,8 @@ def build_clariden_4gpu_resume_report(
             expected_metric_steps=[2, 3],
             expect_resume=True,
             expect_depth=expect_depth,
+            expect_pointmap=expect_pointmap,
+            require_clean_git=require_clean_git,
         )
         same_commit = bool(initial_report["git_commit"]) and (
             initial_report["git_commit"] == resumed_report["git_commit"]
@@ -357,11 +384,17 @@ def build_clariden_4gpu_resume_report(
     return {
         "schema_version": 1,
         "stage": (
-            "Clariden-GH200-4GPU-RGBD-resume-gate"
-            if expect_depth
-            else "Clariden-GH200-4GPU-resume-gate"
+            "Clariden-GH200-4GPU-PointMap-resume-gate"
+            if expect_pointmap
+            else (
+                "Clariden-GH200-4GPU-RGBD-resume-gate"
+                if expect_depth
+                else "Clariden-GH200-4GPU-resume-gate"
+            )
         ),
         "expect_depth": expect_depth,
+        "expect_pointmap": expect_pointmap,
+        "require_clean_git": require_clean_git,
         "result": "pass" if ok else "fail",
         "ok": ok,
         "initial": initial_report,

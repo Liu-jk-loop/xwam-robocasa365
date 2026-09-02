@@ -283,6 +283,9 @@ def _load_runtime(
     if str(config.dataset.get("format")) != "robocasa365_lerobot_v21":
         raise ValueError(f"M4.2 只允许 RoboCasa365 v2.1 dataset config：{config.dataset.get('format')!r}")
     training_use_depth = bool(config.get("use_depth"))
+    training_use_pointmap = bool(config.get("use_pointmap", False))
+    if training_use_depth and training_use_pointmap:
+        raise ValueError("训练config不能同时启用depth和PointMap")
     if int(config.get("action_dim")) != 12 or int(config.get("proprio_dim")) != 16:
         raise ValueError("M4.2 要求 model action_dim=12、proprio_dim=16")
     frame_skip = int(config.dataset.frame_skip)
@@ -343,6 +346,14 @@ def _load_runtime(
         "denoise_steps": int(config.sample_steps),
         "action_denoise_steps": int(config.action_denoise_steps),
         "training_use_depth": training_use_depth,
+        "training_use_pointmap": training_use_pointmap,
+        "training_auxiliary_geometry": (
+            "depth"
+            if training_use_depth
+            else "pointmap"
+            if training_use_pointmap
+            else "disabled"
+        ),
         "inference_run_depth": False,
         "online_depth_required": False,
         "compile_model": bool(args.compile_model),

@@ -1,5 +1,16 @@
 # 变更记录
 
+## 2026-09-02 — PointMap P2/P3 loader、恢复门禁与单任务训练入口
+
+- 用户回报P1 CloseFridge 106 episode/318个PointMap数组及最终audit全部PASS；缓存根目录冻结为IOPS上的`robocasa365_camera_xyz_flexpi_v1/atomic`。反馈未含Job ID和实际字节数，因此只记录已给证据。
+- 原生RoboCasa365 loader新增严格PointMap缓存合同和read-only mmap LRU，按RGB相同episode/frame读取`[V,T,3,256,320] float32`，训练启动只核对manifest/audit、sidecar和NumPy header，不让8个rank重复哈希约40 GiB缓存。RGB与PointMap共享空间裁剪，连续XYZ使用bilinear，颜色抖动仍只作用RGB。
+- `PointMap-Aux`通过独立`use_pointmap`、`pointmap_loss_weight`和`train/pointmap_loss`接入现有第二生成模态；与inverse-depth互斥，保留既有RGB-D错误合同。policy server仍以`run_depth=false`执行，因此闭环推理只读取RGB/proprio，不把本阶段冒充完整Flex-π输入流。
+- 新增4×GH200一体化门禁：先报告真实batch和读取耗时，再固定8 clip执行step 0→2保存与2→4恢复；审计新增PointMap模式，要求正PointMap loss、四rank FP32 optimizer state、完整checkpoint及精确resume来源。
+- 新增CloseFridge正式配置和2节点8卡入口：公开X-WAM pretrained、batch4×accum4×8=GBS128、ratio0、seed42、ZeRO-1、BF16计算、FP32 optimizer state和1500步。滚动每250步最多5个，Store每500步永久保存；正式入口被P3 PASS审计硬门禁。
+- 正式入口同时比对P3审计记录的Git commit与当前checkout，避免旧版本四步PASS被误用于解锁修改后的正式训练；dirty状态仍只记录，不作为退出条件。
+- 本地Ruff、Python编译、两份sbatch语法、36份Slurm变量边界、变更记录门禁与全仓221项测试均通过；真实PointMap batch、显存、吞吐、正loss、恢复及1500步结果为`cluster-pending`。
+- 回滚本批只删除PointMap loader/辅助loss/config/作业/测试与文档，不删除P1外部缓存、既有RGB/RGB-D checkpoint或评测结果。
+
 ## 2026-09-02 — PointMap P1可恢复CloseFridge全量缓存生成器
 
 - CloseBlenderLid透明专项job `3259701`已PASS：95,378个目标可见像素中88个像素的depth变化超过1 mm且全部变近，正式缓存策略冻结为`use_forced_opaque_depth_for_pointmap_keep_original_rgb`。P1正式入口必须校验该原始JSON的PASS、atomic scope、3 episode、目标可见/变化、结论及SHA256，并把证据摘要写入缓存合同；PointMap使用forced-opaque几何depth，原始LeRobot RGB视频不重渲染、不改写。

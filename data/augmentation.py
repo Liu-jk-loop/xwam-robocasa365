@@ -2,7 +2,7 @@
 Video augmentation for multi-view robot datasets.
 
 Data format convention:
-    video / depths: Tensor[V, T, C, H, W]
+    video / depths / pointmaps: Tensor[V, T, C, H, W]
         V - number of camera views
         T - sequence length (temporal dimension)
         C - channels (3)
@@ -66,23 +66,35 @@ class VideoAugmentation:
         """
         Apply augmentations in-place on a copy of *data*.
 
-        Expects ``data`` to contain ``'video'`` and optionally ``'depths'``.
+        Expects ``data`` to contain ``'video'`` and at most one auxiliary
+        geometry target: ``'depths'`` or ``'pointmaps'``.
 
         Returns a new dict with augmented ``'video'`` and, when supplied,
-        augmented ``'depths'``.
+        augmented geometry target.
         """
         video = data["video"]  # [V, T, C, H, W]
         depths = data.get("depths")  # optional [V, T, C, H, W]
+        pointmaps = data.get("pointmaps")  # optional [V, T, C, H, W]
+        if depths is not None and pointmaps is not None:
+            raise ValueError("depths与pointmaps互斥")
+        auxiliary_key = "depths" if depths is not None else "pointmaps"
+        auxiliary = depths if depths is not None else pointmaps
 
         H, W = video.shape[-2], video.shape[-1]
 
-        video, depths = self._apply_random_crop(video, depths, H, W)
+        video, auxiliary = self._apply_random_crop(
+            video,
+            auxiliary,
+            H,
+            W,
+            auxiliary_mode="bilinear" if pointmaps is not None else "nearest",
+        )
         video = self._apply_color_jitter(video)
 
         out = dict(data)
         out["video"] = video
-        if depths is not None:
-            out["depths"] = depths
+        if auxiliary is not None:
+            out[auxiliary_key] = auxiliary
         return out
 
     # ------------------------------------------------------------------
@@ -92,24 +104,26 @@ class VideoAugmentation:
     def _apply_random_crop(
         self,
         video: torch.Tensor,
-        depths: torch.Tensor | None,
+        auxiliary: torch.Tensor | None,
         H: int,
         W: int,
+        *,
+        auxiliary_mode: str,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """
         For each view independently, sample one crop region and apply it to
         all T frames of that view (both RGB and depth).
 
         The crop is a rectangle of size (crop_h × crop_w) that is bilinearly
-        resized back to (H × W) for RGB and nearest-neighbour resized for depth
-        to avoid blending depth discontinuities.
+        resized back to (H × W). Depth uses nearest-neighbour to avoid blending
+        discontinuities; continuous XYZ PointMaps use bilinear interpolation.
         """
         V, T = video.shape[:2]
         crop_h = max(1, int(H * self.crop_ratio))
         crop_w = max(1, int(W * self.crop_ratio))
 
         if crop_h == H and crop_w == W:
-            return video, depths
+            return video, auxiliary
 
         aug_video = []
         aug_depths = []
@@ -128,16 +142,24 @@ class VideoAugmentation:
                 antialias=False,
             )
             aug_video.append(rgb_crop)  # [T, C, H, W]
-            if depths is not None:
-                depth_crop = depths[v, :, :, top : top + crop_h, left : left + crop_w]
-                depth_crop = F.interpolate(
-                    depth_crop,
-                    size=(H, W),
-                    mode="nearest",
+            if auxiliary is not None:
+                auxiliary_crop = auxiliary[
+                    v, :, :, top : top + crop_h, left : left + crop_w
+                ]
+                interpolation_options = (
+                    {"align_corners": False, "antialias": False}
+                    if auxiliary_mode == "bilinear"
+                    else {}
                 )
-                aug_depths.append(depth_crop)
+                auxiliary_crop = F.interpolate(
+                    auxiliary_crop,
+                    size=(H, W),
+                    mode=auxiliary_mode,
+                    **interpolation_options,
+                )
+                aug_depths.append(auxiliary_crop)
 
-        stacked_depths = torch.stack(aug_depths) if depths is not None else None
+        stacked_depths = torch.stack(aug_depths) if auxiliary is not None else None
         return torch.stack(aug_video), stacked_depths  # [V, T, C, H, W]
 
     def _apply_color_jitter(self, video: torch.Tensor) -> torch.Tensor:

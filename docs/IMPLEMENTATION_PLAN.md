@@ -242,6 +242,7 @@ RoboCasa365 原生数据
 - 全量缓存开始前，P0 JSON必须为`ok=true/result=pass`；预计约283 GiB的Atomic9缓存不得提前生成。
 - PointMap正式训练loader不渲染depth、不解码depth、不在线生成XYZ。
 - `PointMap-Aux`不得描述为完整Flex-π；只有真正实现可选PointMap输入和cross-modality forcing后才进入第二层实验。
+- CloseFridge P1已由用户反馈全量PASS。P2/P3实现冻结为read-only mmap、RGB/PointMap同步crop、独立PointMap loss及4×GH200 step 2→4恢复门禁；正式单任务固定2节点8卡、GBS128、ratio0和1500步，必须从公开X-WAM pretrained新建实验。
 
 ### M6：Atomic-only 正式训练与评测
 

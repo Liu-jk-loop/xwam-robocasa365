@@ -5,9 +5,9 @@
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：PointMap P1 CloseFridge全量缓存生成门禁
+- 当前阶段：PointMap P2/P3 loader与单任务训练恢复门禁
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：CloseFridge P0作业`3254392`与CloseBlenderLid P0.1作业`3259701`均已PASS；P0.1确认正式PointMap必须使用forced-opaque depth且原始RGB保持不变。P1生成器已完成本地实现，106 episode/318数组真实生成与审计为`cluster-pending`。
+- 超算运行状态：P0 job `3254392`、P0.1 job `3259701`和P1 CloseFridge 106 episode/318数组均已PASS；P1反馈未含Job ID。P2/P3代码和作业已就绪，4×GH200真实batch/更新/resume为`cluster-pending`。
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | P1～P4已完成；进入Atomic9扩展 | CloseFridge loader/depth loss/resume PASS；step1000两组48%，step1500为88%/84% | 生成并审计Atomic9全量depth cache |
-| M5-PM PointMap几何流 | P0/P0.1通过；P1本地实现 | jobs 3254392/3259701 PASS；全量缓存`cluster-pending` | 生成并审计CloseFridge 106 episode/318个PointMap数组 |
+| M5-PM PointMap几何流 | P1通过；P2/P3实现完成 | P0/P0.1及CloseFridge全量缓存PASS | 4×GH200 batch、正PointMap loss、step 2→4恢复门禁 |
 | M6 Atomic 正式训练与评测 | Atomic9 RGB/RGB-D训练量诊断 | RGB-D 8.5k/12k为49.6%/56.9%；RGB现有轨迹停在7.5k | 通过续训preflight，从精确7.5k八分片恢复到12k并同合同评测 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
@@ -56,7 +56,11 @@
 - P0.1真实作业`3259701`通过：目标像素中88个像素的depth变化超过1 mm且全部变近，结论为`forced_opaque_required`。正式PointMap固定临时提升可见半透明geom/material alpha后渲染depth，原始RGB视频只作为对齐身份且绝不重写。
 - P1新增CloseFridge可恢复生成器：正式入口先核验job `3259701`原始JSON及其SHA256和`forced_opaque_required`结论；随后逐episode加载自己的`model.xml.gz`、`states.npz`和`ep_meta.json`，每相机原子发布未压缩`[T,3,256,320] float16` `.npy`。sidecar绑定源MJCF/state/meta/RGB摘要、数值合同、相机、shape、数组摘要和Git provenance。
 - 重提P1作业会memory-map并重新哈希现有`.npy`：完整一致则跳过，缺失、损坏或合同/源摘要漂移则只重建对应episode/相机。最终manifest必须覆盖106 episode/318数组，独立audit逐帧检查有限性、`[-1,1]`范围、shape/dtype、sidecar和摘要。
-- P1本地纯NumPy单测、Python编译和sbatch语法已通过；真实MuJoCo/EGL生成量、耗时、约40 GiB的CloseFridge实际占用和最终JSON为`cluster-pending`。P1通过前不实现loader，也不扩大到预计约283 GiB的Atomic9缓存。
+- P1用户反馈manifest/audit均为`ok=true/result=pass`并输出最终PASS；缓存根目录为`/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-pointmap-cache/robocasa365_camera_xyz_flexpi_v1/atomic`。反馈未含Job ID与实际字节数，因此不推断。
+- P2 loader已接入严格manifest/audit/sidecar/header合同；启动不重新哈希全部数组，worker以read-only mmap按clip读取float16 XYZ并转float32。RGB/PointMap共享crop，PointMap使用bilinear，颜色抖动只作用RGB。
+- P3 `PointMap-Aux`复用第二生成模态但使用独立`use_pointmap`、`pointmap_loss_weight`和`train/pointmap_loss`合同；与inverse-depth互斥，policy server加载此类checkpoint时仍显式`run_depth=false`，在线推理只需RGB/proprio。
+- 新4卡门禁先输出真实batch与startup/sample/batch耗时，再固定8 clip完成step 0→2保存和step 2→4恢复；联合审计要求正PointMap loss、四rank FP32 optimizer state及完整checkpoint。正式入口只有读到该门禁PASS才启动。
+- CloseFridge正式配置固定公开X-WAM pretrained、ratio0、seed42、2节点×4 GH200、batch4×accum4×8=GBS128、ZeRO-1、BF16计算、FP32 optimizer state和1500步；500/1000/1500写Store永久checkpoint。真实门禁与正式训练均为`cluster-pending`。
 
 ## Clariden 部署状态
 

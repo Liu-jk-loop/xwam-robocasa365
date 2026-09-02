@@ -7,6 +7,7 @@ import argparse
 import json
 import subprocess
 import sys
+import time
 import traceback
 from pathlib import Path
 from typing import Any
@@ -89,6 +90,9 @@ def main() -> int:
     parser.add_argument("--depth-cache-root")
     parser.add_argument("--depth-encoding-path")
     parser.add_argument("--depth-cache-manifest")
+    parser.add_argument("--pointmap-cache-root")
+    parser.add_argument("--pointmap-cache-manifest")
+    parser.add_argument("--pointmap-cache-audit")
     parser.add_argument("--num-workers", type=int, default=0, help="DataLoader worker 数；首次验收建议为 0。")
     parser.add_argument("--output", "--log-file", default=str(DEFAULT_OUTPUT))
     args = parser.parse_args()
@@ -103,6 +107,19 @@ def main() -> int:
             "--depth-cache-manifest"
         )
     use_depth = all(depth_values)
+    pointmap_values = (
+        args.pointmap_cache_root,
+        args.pointmap_cache_manifest,
+        args.pointmap_cache_audit,
+    )
+    if any(pointmap_values) and not all(pointmap_values):
+        parser.error(
+            "PointMap模式必须同时提供--pointmap-cache-root、"
+            "--pointmap-cache-manifest和--pointmap-cache-audit"
+        )
+    use_pointmap = all(pointmap_values)
+    if use_depth and use_pointmap:
+        parser.error("RGB-D与PointMap模式互斥")
 
     output_path = Path(args.output).expanduser().resolve()
     report: dict[str, Any] = {
@@ -135,6 +152,7 @@ def main() -> int:
             "video_size": [args.video_height, args.video_width],
             "augment": False,
             "use_depth": use_depth,
+            "use_pointmap": use_pointmap,
             "normalization": "none",
         }
         if use_depth:
@@ -145,9 +163,23 @@ def main() -> int:
                     "depth_cache_manifest": args.depth_cache_manifest,
                 }
             )
+        if use_pointmap:
+            config.update(
+                {
+                    "pointmap_cache_root": args.pointmap_cache_root,
+                    "pointmap_cache_manifest": args.pointmap_cache_manifest,
+                    "pointmap_cache_audit": args.pointmap_cache_audit,
+                }
+            )
+        dataset_started = time.perf_counter()
         dataset = RoboCasa365Dataset(**config)
+        dataset_startup_seconds = time.perf_counter() - dataset_started
+        sample_started = time.perf_counter()
         first = dataset[args.index]
+        first_sample_seconds = time.perf_counter() - sample_started
+        repeat_started = time.perf_counter()
         second = dataset[args.index]
+        repeated_sample_seconds = time.perf_counter() - repeat_started
         clip = dataset.clip_spec(args.index)
 
         loader = DataLoader(
@@ -158,7 +190,13 @@ def main() -> int:
             pin_memory=False,
             multiprocessing_context="forkserver" if args.num_workers > 0 else None,
         )
-        batch = next(iter(loader)) if args.index == 0 else next(iter(DataLoader([first], batch_size=1)))
+        batch_started = time.perf_counter()
+        batch = (
+            next(iter(loader))
+            if args.index == 0
+            else next(iter(DataLoader([first], batch_size=1)))
+        )
+        first_batch_seconds = time.perf_counter() - batch_started
 
         checks = {
             "dataset_nonempty": len(dataset) > 0,
@@ -181,6 +219,16 @@ def main() -> int:
             )
             if use_depth
             else "depths" not in first,
+            "pointmap_contract": (
+                "pointmaps" in first
+                and list(first["pointmaps"].shape)
+                == [3, args.sequence_length, 3, args.video_height, args.video_width]
+                and first["pointmaps"].dtype == torch.float32
+                and float(first["pointmaps"].min()) >= -1.00001
+                and float(first["pointmaps"].max()) <= 1.00001
+            )
+            if use_pointmap
+            else "pointmaps" not in first,
             "finite_tensors": all(
                 bool(torch.isfinite(first[key]).all().item())
                 for key in (
@@ -188,6 +236,7 @@ def main() -> int:
                     "proprios",
                     "actions",
                     *(("depths",) if use_depth else ()),
+                    *(("pointmaps",) if use_pointmap else ()),
                 )
             ),
             "deterministic_without_augmentation": _same_sample(first, second),
@@ -196,6 +245,11 @@ def main() -> int:
                 list(batch["depths"].shape[:2]) == [1, 3]
                 if use_depth
                 else "depths" not in batch
+            ),
+            "pointmap_batch_dimension": (
+                list(batch["pointmaps"].shape[:2]) == [1, 3]
+                if use_pointmap
+                else "pointmaps" not in batch
             ),
         }
 
@@ -222,9 +276,15 @@ def main() -> int:
                 "paths": dataset.sample_paths(args.index),
                 "sample": {key: _tensor_summary(value) for key, value in first.items()},
                 "batch": {key: _tensor_summary(value) for key, value in batch.items()},
+                "timing_seconds": {
+                    "dataset_startup": dataset_startup_seconds,
+                    "first_sample": first_sample_seconds,
+                    "repeated_sample": repeated_sample_seconds,
+                    "first_batch": first_batch_seconds,
+                },
                 "checks": checks,
                 "normalization_status": (
-                    "batch审计使用raw state/action；depth保持冻结uint8映射后的[-1,1]"
+                    "batch审计使用raw state/action；辅助几何保持冻结缓存的[-1,1]"
                 ),
                 "ok": all(checks.values()),
             }

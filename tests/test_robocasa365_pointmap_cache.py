@@ -15,6 +15,7 @@ from project_tools.robocasa365_pointmap_cache import (
     frozen_pointmap_cache_contract,
     pointmap_cache_path,
     pointmap_sidecar_path,
+    validate_task_pointmap_cache,
     validate_manifest_artifact,
     validate_resume_pair,
     validate_transparent_policy_evidence,
@@ -171,6 +172,79 @@ class RoboCasa365PointMapCacheTests(unittest.TestCase):
                 expected_contract_sha256=contract["contract_sha256"],
             )
             self.assertTrue(result["ok"], result["errors"])
+
+    def test_training_validator_binds_manifest_audit_sidecar_and_npy_header(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "cache"
+            camera_key = "observation.images.robot0_agentview_left"
+            array_path = pointmap_cache_path(
+                root,
+                task_name="CloseFridge",
+                episode_index=0,
+                camera_key=camera_key,
+                chunks_size=1000,
+            )
+            array_path.parent.mkdir(parents=True)
+            np.save(
+                array_path,
+                np.zeros((1, 3, 256, 320), dtype=np.float16),
+            )
+            record = {
+                "camera_key": camera_key,
+                "array_path": str(array_path.resolve()),
+                "shape": [1, 3, 256, 320],
+            }
+            pointmap_sidecar_path(array_path).write_text(
+                json.dumps(record), encoding="utf-8"
+            )
+            manifest_path = Path(temporary) / "manifest.json"
+            audit_path = Path(temporary) / "audit.json"
+            contract_sha256 = "1" * 64
+            manifest = {
+                "ok": True,
+                "result": "pass",
+                "scope": "atomic_only",
+                "task_name": "CloseFridge",
+                "cache_root": str(root.resolve()),
+                "contract_sha256": contract_sha256,
+                "render_policy": POINTMAP_RENDER_POLICY,
+                "contract": {"storage": {"shape_per_frame": [3, 256, 320]}},
+                "episodes": [
+                    {
+                        "episode_index": 0,
+                        "episode_length": 1,
+                        "cameras": [record],
+                    }
+                ],
+            }
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            audit = {
+                "ok": True,
+                "result": "pass",
+                "scope": "atomic_only",
+                "task_name": "CloseFridge",
+                "cache_root": str(root.resolve()),
+                "manifest_path": str(manifest_path.resolve()),
+                "contract_sha256": contract_sha256,
+                "render_policy": POINTMAP_RENDER_POLICY,
+                "checks": {"all_artifacts": True},
+            }
+            audit_path.write_text(json.dumps(audit), encoding="utf-8")
+            result = validate_task_pointmap_cache(
+                cache_root=root,
+                manifest_path=manifest_path,
+                audit_path=audit_path,
+                task_name="CloseFridge",
+                episode_lengths={0: 1},
+                camera_keys=(camera_key,),
+                chunks_size=1000,
+            )
+            self.assertEqual(result["episode_count"], 1)
+            self.assertEqual(result["array_count"], 1)
+            self.assertEqual(
+                result["startup_validation"],
+                "manifest_audit_sidecar_and_npy_header_no_full_rehash",
+            )
 
 
 if __name__ == "__main__":

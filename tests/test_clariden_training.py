@@ -15,7 +15,8 @@ METRICS = (
     "train/video_loss: 1.0, train/action_loss: 0.5, "
     "train/proprio_loss: 0.25, "
     "train/action_proprio_supervision_ratio: 1.0, "
-    "train/task_index: 0.0, train/depth_loss: 0.0, train/loss: 1.75"
+    "train/task_index: 0.0, train/depth_loss: 0.0, "
+    "train/pointmap_loss: 0.0, train/loss: 1.75"
 )
 
 
@@ -29,6 +30,8 @@ def _write_run(
     commit: str,
     optimizer_shard_prefix: str = "",
     use_depth: bool = False,
+    use_pointmap: bool = False,
+    dirty: bool = False,
 ) -> dict[str, str]:
     run_root = root / name
     checkpoint = run_root / f"step={global_step}.ckpt"
@@ -44,13 +47,14 @@ def _write_run(
 
     metadata = {
         "run_id": name,
-        "git": {"commit": commit, "dirty": False, "status": []},
+        "git": {"commit": commit, "dirty": dirty, "status": []},
         "dataset": {
             "path": "/data/CloseFridge/lerobot",
             "task_name": "CloseFridge",
             "subset_indices": list(range(8)),
             "shuffle": False,
             "use_depth": use_depth,
+            "use_pointmap": use_pointmap,
         },
         "environment": {"gpu_names": ["NVIDIA GH200 96GB"] * 4},
         "training": {"num_training_steps": 4, "trainer_max_steps": global_step},
@@ -121,6 +125,14 @@ def _write_run(
     metrics = METRICS.replace(
         "train/depth_loss: 0.0",
         "train/depth_loss: 0.75" if use_depth else "train/depth_loss: 0.0",
+    )
+    metrics = metrics.replace(
+        "train/pointmap_loss: 0.0",
+        (
+            "train/pointmap_loss: 0.75"
+            if use_pointmap
+            else "train/pointmap_loss: 0.0"
+        ),
     )
     log_path.write_text(
         "".join(f"[METRICS] Step: {step} - {metrics}\n" for step in metric_steps),
@@ -314,6 +326,45 @@ class ClaridenTrainingAuditTest(unittest.TestCase):
             )
             self.assertFalse(report["ok"])
             self.assertFalse(report["checks"]["resume_uses_initial_checkpoint"])
+
+    def test_pointmap_step_two_to_four_requires_positive_loss(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            commit = "9" * 40
+            initial = _write_run(
+                root,
+                name="initial",
+                global_step=2,
+                metric_steps=[0, 1],
+                resume_checkpoint=None,
+                commit=commit,
+                use_pointmap=True,
+                dirty=True,
+            )
+            resumed = _write_run(
+                root,
+                name="resumed",
+                global_step=4,
+                metric_steps=[2, 3],
+                resume_checkpoint=initial["checkpoint"],
+                commit=commit,
+                use_pointmap=True,
+                dirty=True,
+            )
+            initial.pop("checkpoint")
+            resumed.pop("checkpoint")
+            report = build_clariden_4gpu_resume_report(
+                initial=initial,
+                resumed=resumed,
+                expect_pointmap=True,
+                require_clean_git=False,
+            )
+            self.assertTrue(report["ok"], report)
+            self.assertTrue(
+                report["initial"]["metrics"]["checks"][
+                    "pointmap_loss_contract"
+                ]
+            )
 
     def test_orchestration_only_commit_delta_can_reuse_initial(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

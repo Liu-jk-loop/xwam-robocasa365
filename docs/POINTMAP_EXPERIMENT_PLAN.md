@@ -23,9 +23,9 @@
 
 - [x] P0：CloseFridge 前3个episode、首/中/尾帧，审计三路相机内参、RGB对齐、depth↔XYZ重投影、范围和float16误差；Clariden job `3254392`通过。
 - [x] P0.1：CloseBlenderLid 3个episode首/中/尾帧完成同状态对照；job `3259701`确认`forced_opaque_required`，原始RGB保持不变。
-- [ ] P1：可恢复的完整CloseFridge PointMap `.npy`生成器和manifest/sidecar已实现；等待106 episode/318数组Clariden生成与最终审计。
-- [ ] P2：实现memory-map loader、同步augmentation、真实batch和吞吐审计。
-- [ ] P3：实现 `PointMap-Aux`，完成单batch、optimizer update和resume门禁。
+- [x] P1：用户回报CloseFridge 106 episode/318数组生成与最终审计全部PASS；Job ID未提供，不补造。
+- [ ] P2：memory-map loader、RGB/PointMap同步augmentation及真实batch耗时报告已实现；等待Clariden门禁证据。
+- [ ] P3：`PointMap-Aux`损失、单batch、optimizer update和step 2→4恢复门禁已实现；等待4×GH200运行。
 - [ ] P4：以相同初始化、ratio0、GBS和评测seed完成CloseFridge inverse-depth/PointMap对照。
 - [ ] P5：生成Atomic9全量PointMap缓存并正式训练、评测。
 - [ ] P6：增加 `PointMap-Flex` 真输入流、stream dropout和cross-modality forcing。
@@ -52,3 +52,12 @@
 - 每个episode/相机原子发布一个未压缩`.npy [T,3,256,320] float16`。`.npy`和sidecar均完整且源摘要、合同摘要、shape、dtype和数组SHA256一致时才允许断点跳过。
 - 缺失或不一致的缓存只重建对应episode/相机；中断生成的`.partial.npy`不视为有效产物。重提同一作业必须复用已通过的完整文件。
 - 最终manifest严格覆盖CloseFridge 106 episode、318数组；独立audit以memory-map重新打开每个文件，检查有限值、`[-1,1]`、帧覆盖、三相机覆盖、sidecar一致性及SHA256。
+
+## P2/P3单任务训练门禁
+
+- Dataset启动只验证PASS manifest/audit、sidecar和全部`.npy` header，不对约40 GiB缓存重复做全量SHA256；worker按9帧clip使用read-only mmap读取并转float32。
+- RGB和PointMap共用逐相机、跨时间一致的crop参数；RGB和连续XYZ使用bilinear，颜色抖动只作用于RGB。
+- PointMap复用X-WAM第二生成模态作为辅助目标，独立记录`train/pointmap_loss`；`use_depth`与`use_pointmap`互斥，PointMap不是policy在线输入。
+- 4×GH200门禁固定8个clip，必须完成step 0→2保存和step 2→4严格恢复，并验证正PointMap loss、四rank FP32 optimizer实态和完整checkpoint。
+- 门禁通过后从公开X-WAM pretrained重新初始化正式实验：2节点×4 GH200、单卡batch4、累积4、GBS128、ratio0、1500 optimizer steps；滚动每250步最多5个，Store永久保存500/1000/1500步。
+- 正式入口还要求P3审计中的训练commit与当前checkout完全一致，旧commit的PASS报告不能解锁新代码训练。

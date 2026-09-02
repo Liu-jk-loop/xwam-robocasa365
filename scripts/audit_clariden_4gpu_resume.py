@@ -89,7 +89,19 @@ def main() -> int:
         action="store_true",
         help="要求dataset.use_depth=true且每个记录step的depth loss有限并大于0。",
     )
+    parser.add_argument(
+        "--expect-pointmap",
+        action="store_true",
+        help="要求dataset.use_pointmap=true且每个记录step的pointmap loss有限并大于0。",
+    )
+    parser.add_argument(
+        "--allow-dirty-git",
+        action="store_true",
+        help="只要求metadata记录有效commit；dirty状态保留为provenance但不阻塞。",
+    )
     args = parser.parse_args()
+    if args.expect_depth and args.expect_pointmap:
+        parser.error("--expect-depth与--expect-pointmap互斥")
     commit_compatibility = None
     if args.allow_orchestration_only_commit_delta:
         commit_compatibility = _orchestration_only_commit_compatibility(
@@ -113,6 +125,8 @@ def main() -> int:
         },
         commit_compatibility=commit_compatibility,
         expect_depth=args.expect_depth,
+        expect_pointmap=args.expect_pointmap,
+        require_clean_git=not args.allow_dirty_git,
     )
     output = write_json_atomic(args.output, report)
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))

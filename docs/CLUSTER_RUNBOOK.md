@@ -1761,3 +1761,30 @@ pointmap_cache_audit=.../close_fridge_pointmap_p1_audit.json
 ```
 
 反馈主日志、manifest和audit。两份JSON必须为`ok=true/result=pass`，任务必须为`CloseFridge/atomic_only`，episode/array数量必须为106/318，`render_policy`必须为`use_forced_opaque_depth_for_pointmap_keep_original_rgb`，`transparent_policy_evidence`必须绑定job `3259701`报告的SHA256与`forced_opaque_required`结论，并且audit中的全部checks为true。P1通过前不运行loader，也不生成Atomic9全量缓存。
+
+## PointMap P2/P3：CloseFridge batch、更新与恢复门禁
+
+P1已经由用户反馈PASS。先拉取本提交，再提交4卡门禁；脚本不会删除P1缓存或训练产物，dirty Git只记录和警告，不阻塞allocation。
+
+```bash
+cd /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365
+git fetch origin dev/atomic-robocasa365
+git switch dev/atomic-robocasa365
+git merge --ff-only FETCH_HEAD
+
+sbatch deployment/clariden/smoke_close_fridge_pointmap_train_resume_xwam.sbatch
+```
+
+成功日志必须以`[PASS] CloseFridge PointMap-Aux loader, PointMap loss, optimizer update and resume gate`结束，并打印`batch_report`与`resume_audit`。batch报告需为PASS且包含`pointmaps=[1,3,9,3,256,320] float32`和四项耗时；resume audit需为PASS，两个阶段的PointMap loss均有限且大于0，四rank optimizer与checkpoint shard完整。
+
+## PointMap P4：CloseFridge单任务1500步正式训练
+
+只在上一节门禁PASS后提交。正式实验从公开X-WAM pretrained重新初始化，不从4步门禁checkpoint继续；固定2节点8×GH200、`8×batch4×accum4=GBS128`、ratio0、seed42和1500步。W&B key必须在提交环境中存在。
+
+```bash
+cd /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365
+export WANDB_API_KEY='你的key'
+sbatch deployment/clariden/train_close_fridge_pointmap_xwam.sbatch
+```
+
+IOPS滚动checkpoint每250步保存、最多5个；Store永久checkpoint每500步保存，因此1000与1500步都保留。12小时中断后重提同一脚本，planner只从model state与8份optimizer shard完整的最新checkpoint恢复。最终必须输出PointMap loss为正、8-rank optimizer/checkpoint完整的formal audit PASS。

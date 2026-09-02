@@ -31,6 +31,7 @@ from data.robocasa365_index import (
 )
 from data.robocasa365_schema import PandaOmronTensorCodec
 from project_tools.robocasa365_depth_encoding import validate_task_depth_cache
+from project_tools.robocasa365_pointmap_cache import validate_task_pointmap_cache
 
 
 SUPPORTED_NORMALIZATION = {"none", "panda_omron_v1"}
@@ -58,15 +59,22 @@ class RoboCasa365Dataset(Dataset):
         saturation: float = 0.2,
         hue: float = 0.05,
         use_depth: bool = False,
+        use_pointmap: bool = False,
         depth_cache_root: str | None = None,
         depth_encoding_path: str | None = None,
         depth_cache_manifest: str | None = None,
+        pointmap_cache_root: str | None = None,
+        pointmap_cache_manifest: str | None = None,
+        pointmap_cache_audit: str | None = None,
         normalization: str = "none",
         schema_path: str | None = None,
         statistics_path: str | None = None,
         parquet_cache_size: int = 8,
         video_cache_size: int = 12,
+        pointmap_cache_size: int = 12,
     ):
+        if use_depth and use_pointmap:
+            raise ValueError("use_depth与use_pointmap互斥，只允许一种辅助几何目标")
         if use_depth and not all(
             (depth_cache_root, depth_encoding_path, depth_cache_manifest)
         ):
@@ -78,6 +86,17 @@ class RoboCasa365Dataset(Dataset):
             (depth_cache_root, depth_encoding_path, depth_cache_manifest)
         ):
             raise ValueError("use_depth=false时禁止配置depth cache路径")
+        if use_pointmap and not all(
+            (pointmap_cache_root, pointmap_cache_manifest, pointmap_cache_audit)
+        ):
+            raise ValueError(
+                "use_pointmap=true时必须同时提供pointmap_cache_root、"
+                "pointmap_cache_manifest和pointmap_cache_audit"
+            )
+        if not use_pointmap and any(
+            (pointmap_cache_root, pointmap_cache_manifest, pointmap_cache_audit)
+        ):
+            raise ValueError("use_pointmap=false时禁止配置PointMap cache路径")
         if normalization not in SUPPORTED_NORMALIZATION:
             raise ValueError(
                 f"normalization 只允许 {sorted(SUPPORTED_NORMALIZATION)}，实际为 {normalization!r}"
@@ -124,6 +143,7 @@ class RoboCasa365Dataset(Dataset):
         self.action_dim = EXPECTED_ACTION_DIM
         self.normalization = normalization
         self.use_depth = bool(use_depth)
+        self.use_pointmap = bool(use_pointmap)
         self.statistics_path = (
             str(Path(statistics_path).expanduser().resolve())
             if statistics_path is not None
@@ -139,12 +159,16 @@ class RoboCasa365Dataset(Dataset):
         )
         self.parquet_cache_size = max(0, int(parquet_cache_size))
         self.video_cache_size = max(0, int(video_cache_size))
+        self.pointmap_cache_size = max(0, int(pointmap_cache_size))
         self._parquet_cache: OrderedDict[int, tuple[np.ndarray, np.ndarray]] = (
             OrderedDict()
         )
         self._video_cache: OrderedDict[tuple[str, int, str], VideoReader] = (
             OrderedDict()
         )
+        self._pointmap_cache: OrderedDict[
+            tuple[int, str], np.ndarray
+        ] = OrderedDict()
 
         manifest = load_task_manifest(task_manifest)
         summary = inspect_dataset(
@@ -165,6 +189,8 @@ class RoboCasa365Dataset(Dataset):
         self.dataset_root, self.info, self.episodes = load_episode_records(dataset_path)
         self.depth_cache_contract: dict[str, Any] | None = None
         self.depth_video_paths: dict[tuple[int, str], Path] = {}
+        self.pointmap_cache_contract: dict[str, Any] | None = None
+        self.pointmap_array_paths: dict[tuple[int, str], Path] = {}
         if self.use_depth:
             self.depth_cache_contract = validate_task_depth_cache(
                 cache_root=str(depth_cache_root),
@@ -181,6 +207,21 @@ class RoboCasa365Dataset(Dataset):
                 self.depth_cache_contract.pop("video_paths")
             )
             self.depth_cache_contract.pop("sidecar_paths")
+        if self.use_pointmap:
+            self.pointmap_cache_contract = validate_task_pointmap_cache(
+                cache_root=str(pointmap_cache_root),
+                manifest_path=str(pointmap_cache_manifest),
+                audit_path=str(pointmap_cache_audit),
+                task_name=task_name,
+                episode_lengths={
+                    episode.episode_index: episode.length for episode in self.episodes
+                },
+                camera_keys=self.camera_keys,
+                chunks_size=int(self.info.get("chunks_size", 1000)),
+            )
+            self.pointmap_array_paths = dict(
+                self.pointmap_cache_contract.pop("array_paths")
+            )
         self.tensor_codec = (
             PandaOmronTensorCodec.from_dataset(
                 dataset_path,
@@ -218,6 +259,7 @@ class RoboCasa365Dataset(Dataset):
         state = dict(self.__dict__)
         state["_parquet_cache"] = OrderedDict()
         state["_video_cache"] = OrderedDict()
+        state["_pointmap_cache"] = OrderedDict()
         return state
 
     def __len__(self) -> int:
@@ -253,6 +295,21 @@ class RoboCasa365Dataset(Dataset):
             if self.use_depth
             else None
         )
+        pointmaps = (
+            torch.stack(
+                [
+                    self._read_pointmap_frames(
+                        clip.episode_index,
+                        camera_key,
+                        frame_ids,
+                    )
+                    for camera_key in self.camera_keys
+                ],
+                dim=0,
+            )
+            if self.use_pointmap
+            else None
+        )
         selected_states = states[frame_ids].copy()
         selected_actions = actions[action_ids].copy()
         if self.tensor_codec is not None:
@@ -283,6 +340,8 @@ class RoboCasa365Dataset(Dataset):
         }
         if depths is not None:
             data["depths"] = depths
+        if pointmaps is not None:
+            data["pointmaps"] = pointmaps
         return self.augmentation(data) if self.augment else data
 
     def clip_spec(self, index: int) -> ClipSpec:
@@ -317,6 +376,13 @@ class RoboCasa365Dataset(Dataset):
                 )
                 for camera_key in self.camera_keys
             }
+        if self.use_pointmap:
+            paths["pointmaps"] = {
+                camera_key: str(
+                    self.pointmap_array_paths[(clip.episode_index, camera_key)]
+                )
+                for camera_key in self.camera_keys
+            }
         return paths
 
     def provenance(self) -> dict[str, Any]:
@@ -326,6 +392,8 @@ class RoboCasa365Dataset(Dataset):
             "dataset_root": str(self.dataset_root),
             "use_depth": self.use_depth,
             "depth_cache": self.depth_cache_contract,
+            "use_pointmap": self.use_pointmap,
+            "pointmap_cache": self.pointmap_cache_contract,
         }
 
     @staticmethod
@@ -508,3 +576,48 @@ class RoboCasa365Dataset(Dataset):
                     mode="nearest",
                 )
         return tensor
+
+    def _pointmap_array(self, episode_index: int, camera_key: str) -> np.ndarray:
+        cache_key = (episode_index, camera_key)
+        cached = self._pointmap_cache.get(cache_key)
+        if cached is not None:
+            self._pointmap_cache.move_to_end(cache_key)
+            return cached
+        path = self.pointmap_array_paths[cache_key]
+        try:
+            array = np.load(path, mmap_mode="r", allow_pickle=False)
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"打开PointMap mmap失败：{path}: {exc}") from exc
+        if self.pointmap_cache_size > 0:
+            self._pointmap_cache[cache_key] = array
+            self._pointmap_cache.move_to_end(cache_key)
+            while len(self._pointmap_cache) > self.pointmap_cache_size:
+                _, evicted = self._pointmap_cache.popitem(last=False)
+                mmap = getattr(evicted, "_mmap", None)
+                if mmap is not None:
+                    mmap.close()
+        return array
+
+    def _read_pointmap_frames(
+        self,
+        episode_index: int,
+        camera_key: str,
+        frame_ids: np.ndarray,
+    ) -> torch.Tensor:
+        array = self._pointmap_array(episode_index, camera_key)
+        path = self.pointmap_array_paths[(episode_index, camera_key)]
+        if int(frame_ids[-1]) >= int(array.shape[0]):
+            raise ValueError(
+                f"请求帧{int(frame_ids[-1])}超出PointMap长度{array.shape[0]}：{path}"
+            )
+        frames = np.asarray(array[frame_ids.tolist()])
+        expected = (len(frame_ids), 3, *self.video_size)
+        if frames.shape != expected:
+            raise ValueError(f"PointMap clip shape={frames.shape}，expected={expected}：{path}")
+        if not np.isfinite(frames).all():
+            raise ValueError(f"PointMap clip包含NaN/Inf：{path}")
+        if float(frames.min()) < -1.0 or float(frames.max()) > 1.0:
+            raise ValueError(f"PointMap clip超出[-1,1]：{path}")
+        return torch.from_numpy(
+            np.ascontiguousarray(frames, dtype=np.float32)
+        )

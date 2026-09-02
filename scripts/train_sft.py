@@ -593,7 +593,15 @@ def main():
         )
     logging.getLogger("lightning.pytorch").setLevel(logging.INFO)
 
-    base_train_dataset = build_dataset(config.dataset, use_depth=config.use_depth)
+    use_depth = bool(config.get("use_depth", False))
+    use_pointmap = bool(config.get("use_pointmap", False))
+    if use_depth and use_pointmap:
+        raise ValueError("use_depth与use_pointmap互斥")
+    base_train_dataset = build_dataset(
+        config.dataset,
+        use_depth=use_depth,
+        use_pointmap=use_pointmap,
+    )
     dataset_provenance = (
         base_train_dataset.provenance()
         if callable(getattr(base_train_dataset, "provenance", None))
@@ -669,7 +677,10 @@ def main():
     val_dataloader = None
     if float(config.limit_val_batches) > 0:
         val_dataset = build_dataset(
-            config.dataset, use_depth=config.use_depth, augment=False
+            config.dataset,
+            use_depth=use_depth,
+            use_pointmap=use_pointmap,
+            augment=False,
         )
         val_dataloader = DataLoader(
             val_dataset,
@@ -709,6 +720,10 @@ def main():
                     "task_manifest": config.dataset.get("task_manifest"),
                     "schema_path": config.dataset.get("schema_path"),
                     "use_depth": bool(config.use_depth),
+                    "use_pointmap": use_pointmap,
+                    "auxiliary_geometry": (
+                        "depth" if use_depth else "pointmap" if use_pointmap else "disabled"
+                    ),
                     "adapter_provenance": dataset_provenance,
                     "sampler_provenance": sampler_provenance,
                 },
@@ -754,7 +769,7 @@ def main():
         )
         print(f"Run metadata: {run_metadata_path}")
 
-    model = XWAMRunner(config, run_depth=bool(config.use_depth))
+    model = XWAMRunner(config, run_depth=use_depth or use_pointmap)
     if allow_missing_frozen_resume_parameters:
         model.enable_excluded_frozen_resume_loading()
     initialization_report = config.get("checkpoint_initialization_report")

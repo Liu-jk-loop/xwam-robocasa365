@@ -19,7 +19,13 @@ def _as_dict(config: Any) -> dict[str, Any]:
     return payload
 
 
-def build_dataset(config: Any, *, use_depth: bool, augment: bool | None = None):
+def build_dataset(
+    config: Any,
+    *,
+    use_depth: bool,
+    use_pointmap: bool = False,
+    augment: bool | None = None,
+):
     payload = _as_dict(config)
     dataset_format = payload.pop("format", "legacy_json_video")
     training_ready = bool(payload.pop("training_ready", True))
@@ -27,6 +33,8 @@ def build_dataset(config: Any, *, use_depth: bool, augment: bool | None = None):
     payload["augment"] = configured_augment if augment is None else bool(augment)
 
     if dataset_format == "legacy_json_video":
+        if use_pointmap:
+            raise ValueError("legacy_json_video不支持PointMap缓存")
         payload["use_depth"] = bool(use_depth)
         return RobotDataset(**payload)
 
@@ -43,6 +51,7 @@ def build_dataset(config: Any, *, use_depth: bool, augment: bool | None = None):
         )
 
         payload["use_depth"] = bool(use_depth)
+        payload["use_pointmap"] = bool(use_pointmap)
         multitask_manifest_path = payload.pop("multitask_manifest", None)
         expected_task_count = payload.pop("expected_task_count", None)
         expected_sampling = payload.pop("expected_sampling", None)
