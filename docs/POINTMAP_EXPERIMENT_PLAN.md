@@ -21,7 +21,8 @@
 
 ## 待办流程
 
-- [ ] P0：CloseFridge 前3个episode、首/中/尾帧，审计三路相机内参、RGB对齐、depth↔XYZ重投影、范围和float16误差。
+- [x] P0：CloseFridge 前3个episode、首/中/尾帧，审计三路相机内参、RGB对齐、depth↔XYZ重投影、范围和float16误差；Clariden job `3254392`通过。
+- [ ] P0.1：CloseBlenderLid 3个episode首/中/尾帧，完成原始/forced-opaque depth与PointMap同状态对照，冻结透明表面正式缓存策略。
 - [ ] P1：实现可恢复的完整CloseFridge PointMap `.npy` 生成器和manifest/sidecar。
 - [ ] P2：实现memory-map loader、同步augmentation、真实batch和吞吐审计。
 - [ ] P3：实现 `PointMap-Aux`，完成单batch、optimizer update和resume门禁。
@@ -37,3 +38,10 @@
 - PointMap含有效像素、无NaN/Inf，depth和像素重投影误差在阈值内。
 - normalized float16 PointMap shape为`[3,256,320]`，范围在`[-1,1]`，反量化米制误差不超过2 mm。
 - 输出JSON、每帧NPZ和RGB/重渲染RGB/inverse-depth/PointMap对比图；本地只能做静态测试，真实MuJoCo/EGL证据为`cluster-pending`。
+
+## P0.1透明表面验收
+
+- 只在诊断期间把`0 < alpha < 1`的可见geom/material临时提升为1；alpha为0的隐藏/碰撞geom保持隐藏，诊断结束必须恢复模型。
+- 优先通过`base_env.blender.blender_lid`实体解析目标geom，仅在实体不可用时使用严格blender-lid名称正则兜底，并要求目标像素在forced-opaque segmentation中真实可见。
+- 原始与forced-opaque两路PointMap数值合同都必须PASS；比较仅统计目标像素中超过1 mm的新增有效、变近或变远depth。
+- `forced_opaque_required`表示正式PointMap应使用forced-opaque depth而RGB保持原始；`original_depth_matches_forced_opaque`表示原始depth可直接使用。其他状态均为证据不足，不进入P1。

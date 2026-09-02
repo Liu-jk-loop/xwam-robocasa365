@@ -1,5 +1,14 @@
 # 变更记录
 
+## 2026-09-02 — CloseBlenderLid透明表面PointMap专项门禁
+
+- CloseFridge P0真实作业`3254392`已通过三路相机PointMap数值合同；该结果只证明depth→XYZ链路正确，不能证明透明搅拌机盖已被原始depth捕获，因此在生成正式缓存前增加CloseBlenderLid专项对照。
+- 新增同recorded state双渲染诊断：A保留原始材质，B仅在诊断期间把非零半透明geom/material alpha临时提升为1，退出上下文后无条件恢复；两路分别生成metric depth和`[3,256,320] float16` PointMap，正式缓存和训练数据均不在本批修改。
+- 优先从`base_env.blender.blender_lid`实体解析目标geom，仅在实体不可用时才使用同时包含blender与lid的严格名称正则兜底；只统计forced-opaque segmentation中的目标像素，记录新增有效、变近、变远像素及目标深度差，并保存原始/forced-opaque depth、PointMap、mask和六联对比图。
+- 诊断只接受两种充分结论：`forced_opaque_required`或`original_depth_matches_forced_opaque`。未匹配到目标geom、目标geom/material无半透明alpha或抽样帧目标不可见均返回fail/inconclusive，禁止用普通PointMap数值PASS掩盖透明表面证据缺失。
+- 新增CloseBlenderLid 3 episode×首/中/尾帧Clariden入口；dirty Git仍只记录不阻塞。新增纯NumPy alpha恢复、目标geom匹配、目标像素深度差与结论状态单测。
+- 回滚本批只删除透明专项工具、测试、sbatch和相关文档，不会修改或删除P0产物、正式cache、checkpoint或评测结果。
+
 ## 2026-09-01 — PointMap P0数值合同与三路相机审计
 
 - 用户确认PointMap分两层实施：先做辅助监督，再做带可选输入和cross-modality forcing的Flex式版本；同时决定直接离线保存float16 PointMap，避免训练时解码depth并生成XYZ。本批只实现P0合同和小样本审计，不修改loader、模型、训练或评测逻辑。

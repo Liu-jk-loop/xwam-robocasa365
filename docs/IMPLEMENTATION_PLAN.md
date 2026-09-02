@@ -231,7 +231,7 @@ RoboCasa365 原生数据
 
 阶段执行过程：
 
-1. 先在CloseFridge前三个episode的首/中/尾帧冻结三路相机内参和camera-space XYZ数值合同；只生成小型审计产物，不写全量缓存。
+1. 先在CloseFridge前三个episode的首/中/尾帧冻结三路相机内参和camera-space XYZ数值合同；只生成小型审计产物，不写全量缓存。普通合同通过后，再用CloseBlenderLid同状态原始/forced-opaque对照决定透明表面的depth来源，不能用公式PASS替代这一门禁。
 2. 合同通过后，逐episode恢复MJCF/state并直接生成`[T,3,256,320] float16` normalized PointMap `.npy`，通过sidecar和manifest支持中断恢复。
 3. loader使用memory-map读取PointMap；先完成`PointMap-Aux`辅助监督的batch、更新和resume门禁，再运行单任务与Atomic9实验。
 4. 辅助监督结果明确后，另行增加`PointMap-Flex`真输入流、stream dropout和cross-modality forcing；RGB-only与RGB+PointMap推理分别报告。

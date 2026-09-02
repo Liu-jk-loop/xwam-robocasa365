@@ -1709,3 +1709,26 @@ pointmap_p0_artifacts=...
 ```
 
 反馈时提供JSON报告和同一Job日志即可；NPZ/PNG保留在报告打印的Store目录，不上传Git。JSON必须为`ok=true/result=pass`、`passed_tasks=1`、三路相机内参各有9次稳定观测，并且所有`reprojection`、`depth_roundtrip`和`float16_roundtrip`检查为true。float16门限是裁剪后PointMap反量化到米制XYZ的最大误差2 mm，不是原始未裁剪XYZ误差。
+
+## PointMap P0.1：CloseBlenderLid透明表面同状态对照
+
+CloseFridge P0只能验证depth→PointMap公式。透明表面专项在相同recorded state分别渲染原始材质和临时forced-opaque材质，并只在`blender/lid`目标geom像素判断depth与PointMap是否变化；不会写正式cache。
+
+```bash
+cd /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365
+git fetch origin dev/atomic-robocasa365
+git switch dev/atomic-robocasa365
+git merge --ff-only origin/dev/atomic-robocasa365
+sbatch deployment/clariden/audit_close_blender_lid_transparent_pointmap_xwam.sbatch
+```
+
+成功日志必须同时打印：
+
+```text
+transparent_pointmap_conclusion=forced_opaque_required
+# 或 transparent_pointmap_conclusion=original_depth_matches_forced_opaque
+formal_cache_policy=...
+[PASS] CloseBlenderLid transparent-surface PointMap diagnostic
+```
+
+任何`inconclusive_*`都会使作业失败，不能进入缓存生成。反馈时提供`transparent_pointmap_report` JSON、Job日志，并下载至少一张目标变化明显的`*_transparent_comparison.png`；六联图依次为原始RGB、原始inverse-depth、forced-opaque inverse-depth、变化overlay、原始PointMap、forced-opaque PointMap。overlay蓝色表示新增有效、洋红表示变近、红色表示变远。
