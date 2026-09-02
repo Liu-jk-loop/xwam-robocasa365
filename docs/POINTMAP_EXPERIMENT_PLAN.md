@@ -22,8 +22,8 @@
 ## 待办流程
 
 - [x] P0：CloseFridge 前3个episode、首/中/尾帧，审计三路相机内参、RGB对齐、depth↔XYZ重投影、范围和float16误差；Clariden job `3254392`通过。
-- [ ] P0.1：CloseBlenderLid 3个episode首/中/尾帧，完成原始/forced-opaque depth与PointMap同状态对照，冻结透明表面正式缓存策略。
-- [ ] P1：实现可恢复的完整CloseFridge PointMap `.npy` 生成器和manifest/sidecar。
+- [x] P0.1：CloseBlenderLid 3个episode首/中/尾帧完成同状态对照；job `3259701`确认`forced_opaque_required`，原始RGB保持不变。
+- [ ] P1：可恢复的完整CloseFridge PointMap `.npy`生成器和manifest/sidecar已实现；等待106 episode/318数组Clariden生成与最终审计。
 - [ ] P2：实现memory-map loader、同步augmentation、真实batch和吞吐审计。
 - [ ] P3：实现 `PointMap-Aux`，完成单batch、optimizer update和resume门禁。
 - [ ] P4：以相同初始化、ratio0、GBS和评测seed完成CloseFridge inverse-depth/PointMap对照。
@@ -45,3 +45,10 @@
 - 优先通过`base_env.blender.blender_lid`实体解析目标geom，仅在实体不可用时使用严格blender-lid名称正则兜底，并要求目标像素在forced-opaque segmentation中真实可见。
 - 原始与forced-opaque两路PointMap数值合同都必须PASS；比较仅统计目标像素中超过1 mm的新增有效、变近或变远depth。
 - `forced_opaque_required`表示正式PointMap应使用forced-opaque depth而RGB保持原始；`original_depth_matches_forced_opaque`表示原始depth可直接使用。其他状态均为证据不足，不进入P1。
+
+## P1完整缓存验收
+
+- 正式生成必须先读取并校验P0.1 PASS JSON及SHA256，且结论必须为`forced_opaque_required`、策略必须为`use_forced_opaque_depth_for_pointmap_keep_original_rgb`。随后每个episode加载自己的MJCF、state和metadata；每帧只恢复一次state，再为三路相机渲染forced-opaque metric depth。原始RGB文件不得改写。
+- 每个episode/相机原子发布一个未压缩`.npy [T,3,256,320] float16`。`.npy`和sidecar均完整且源摘要、合同摘要、shape、dtype和数组SHA256一致时才允许断点跳过。
+- 缺失或不一致的缓存只重建对应episode/相机；中断生成的`.partial.npy`不视为有效产物。重提同一作业必须复用已通过的完整文件。
+- 最终manifest严格覆盖CloseFridge 106 episode、318数组；独立audit以memory-map重新打开每个文件，检查有限值、`[-1,1]`、帧覆盖、三相机覆盖、sidecar一致性及SHA256。

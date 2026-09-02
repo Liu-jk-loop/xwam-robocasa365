@@ -1732,3 +1732,32 @@ formal_cache_policy=...
 ```
 
 任何`inconclusive_*`都会使作业失败，不能进入缓存生成。反馈时提供`transparent_pointmap_report` JSON、Job日志，并下载至少一张目标变化明显的`*_transparent_comparison.png`；六联图依次为原始RGB、原始inverse-depth、forced-opaque inverse-depth、变化overlay、原始PointMap、forced-opaque PointMap。overlay蓝色表示新增有效、洋红表示变近、红色表示变远。
+
+## PointMap P1：CloseFridge全量可恢复缓存
+
+P0.1 job `3259701`已把正式策略冻结为forced-opaque depth、原始RGB不变。本作业生成CloseFridge全部106 episode×3 camera；GPU只负责MuJoCo EGL渲染，XYZ转换、float16写入、SHA256和最终审计使用CPU。缓存写IOPS scratch，manifest/audit写Store。
+
+```bash
+cd /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365
+git fetch origin dev/atomic-robocasa365
+git switch dev/atomic-robocasa365
+git merge --ff-only origin/dev/atomic-robocasa365
+
+sbatch deployment/clariden/build_close_fridge_pointmap_p1_xwam.sbatch
+```
+
+12小时内未完成时直接重提同一脚本。每个已有`.npy + .pointmap.json`都会重新核对源摘要、合同、shape/dtype、数组SHA256和逐帧范围；完整一致则跳过，坏文件只重建对应episode/相机，`.partial.npy`不会被接纳。不要手动删除已经通过的缓存。
+
+成功日志必须包含：
+
+```text
+resumed_camera_count=...
+regenerated_camera_count=...
+total_cache_bytes=...
+pointmap_cache=/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-pointmap-cache/robocasa365_camera_xyz_flexpi_v1/atomic
+pointmap_cache_manifest=.../close_fridge_pointmap_p1_manifest.json
+pointmap_cache_audit=.../close_fridge_pointmap_p1_audit.json
+[PASS] CloseFridge resumable forced-opaque PointMap P1 cache
+```
+
+反馈主日志、manifest和audit。两份JSON必须为`ok=true/result=pass`，任务必须为`CloseFridge/atomic_only`，episode/array数量必须为106/318，`render_policy`必须为`use_forced_opaque_depth_for_pointmap_keep_original_rgb`，`transparent_policy_evidence`必须绑定job `3259701`报告的SHA256与`forced_opaque_required`结论，并且audit中的全部checks为true。P1通过前不运行loader，也不生成Atomic9全量缓存。

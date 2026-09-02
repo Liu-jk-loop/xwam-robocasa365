@@ -198,8 +198,9 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - PointMap数值合同固定为`robocasa365_camera_xyz_flexpi_v1`：在原生metric depth网格用每路OpenCV内参生成camera-space XYZ；`0.01m < Z < 2m`为有效值，无效XYZ为零，不使用外参。
 - XYZ按`x/y=[-0.5,0.5]m、z=[0,1.5]m`裁剪并映射至`[-1,1]`，再以nearest从`256×256`变为`256×320`。该数值定义绑定Flex-π官方实现commit `20c1b2b71ea35a415d5d47c39b04443cfadad7a1`。
 - 正式PointMap缓存直接保存未压缩normalized float16 `.npy [T,3,256,320]`，以memory-map按clip读取。训练worker不解码depth、不计算XYZ、不读取相机内参；metric depth只保留在P0少量审计产物中。
-- 透明物体的depth来源不能由普通depth→XYZ重投影检查决定。CloseBlenderLid P0.1对同一state比较原始与临时forced-opaque渲染：若目标geom像素depth发生超过1 mm的变化，正式PointMap使用forced-opaque depth但RGB仍使用原始帧；若目标可见且两路一致，才允许直接使用原始depth。该策略在P0.1真实报告前保持未决。
+- 透明物体的depth来源不能由普通depth→XYZ重投影检查决定。CloseBlenderLid P0.1作业`3259701`在目标像素检测到超过1 mm的depth变化，因此正式策略冻结为`use_forced_opaque_depth_for_pointmap_keep_original_rgb`：只在几何渲染上下文临时把可见半透明geom/material alpha提升为1，退出时恢复；LeRobot RGB不重渲染、不重写。P1入口必须校验该P0.1 JSON的PASS状态、结论和SHA256，并把证据写入缓存合同。
 - P0必须在逐episode MJCF/state恢复后，从robosuite simulator读取三路相机内参。报告同时审计RGB对齐、内参稳定性、depth/像素重投影、裁剪比例、无效值、目标shape和float16反量化误差；未通过时禁止全量生成约283 GiB的Atomic9缓存。
+- P1缓存以episode/相机为恢复粒度。只有`.npy`和sidecar同时存在，且源MJCF/state/meta/RGB SHA256、PointMap合同摘要、shape/dtype、数组SHA256及逐帧数值审计完全一致时才跳过；其他情况只重建该对。最终manifest与独立audit再次枚举全部episode/相机，训练loader不得把`.partial.npy`或未审计文件视为数据。
 
 ## Current external paths
 

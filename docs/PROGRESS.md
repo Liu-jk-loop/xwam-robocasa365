@@ -5,9 +5,9 @@
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：PointMap P0.1 CloseBlenderLid透明表面专项审计
+- 当前阶段：PointMap P1 CloseFridge全量缓存生成门禁
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：CloseFridge P0真实作业`3254392`已PASS。由于普通数值合同无法发现透明搅拌机盖是否从depth中缺失，正式缓存前先运行CloseBlenderLid原始/forced-opaque同状态PointMap专项对照。
+- 超算运行状态：CloseFridge P0作业`3254392`与CloseBlenderLid P0.1作业`3259701`均已PASS；P0.1确认正式PointMap必须使用forced-opaque depth且原始RGB保持不变。P1生成器已完成本地实现，106 episode/318数组真实生成与审计为`cluster-pending`。
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | P1～P4已完成；进入Atomic9扩展 | CloseFridge loader/depth loss/resume PASS；step1000两组48%，step1500为88%/84% | 生成并审计Atomic9全量depth cache |
-| M5-PM PointMap几何流 | P0通过；P0.1本地实现 | CloseFridge job 3254392 PASS；透明表面真实结论`cluster-pending` | CloseBlenderLid专项结论充分后实现缓存生成器 |
+| M5-PM PointMap几何流 | P0/P0.1通过；P1本地实现 | jobs 3254392/3259701 PASS；全量缓存`cluster-pending` | 生成并审计CloseFridge 106 episode/318个PointMap数组 |
 | M6 Atomic 正式训练与评测 | Atomic9 RGB/RGB-D训练量诊断 | RGB-D 8.5k/12k为49.6%/56.9%；RGB现有轨迹停在7.5k | 通过续训preflight，从精确7.5k八分片恢复到12k并同合同评测 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
@@ -53,8 +53,10 @@
 - P0只运行CloseFridge前三个episode的首/中/尾帧，三路相机K必须在9次观测中各自稳定。JSON、NPZ和对比图写Store manifest目录；dirty Git只记录不阻塞。
 - P0本地199项测试通过，CloseFridge真实作业`3254392`输出`[PASS] CloseFridge three-camera PointMap numerical contract`，三路相机合同已关闭。
 - P0.1新增CloseBlenderLid同recorded state双渲染：原始材质与临时forced-opaque分别生成depth/PointMap，仅在opaque segmentation命中的`blender/lid`目标geom像素统计差异。
-- P0.1只有`forced_opaque_required`或`original_depth_matches_forced_opaque`两种结论算充分；无目标geom、目标无半透明alpha或目标未进入抽样视野都会fail。包含透明专项测试在内的本地208项测试已通过，真实Clariden报告为`cluster-pending`。
-- 在P0.1确定正式depth来源前，禁止生成预计约283 GiB的Atomic9 PointMap缓存。
+- P0.1真实作业`3259701`通过：目标像素中88个像素的depth变化超过1 mm且全部变近，结论为`forced_opaque_required`。正式PointMap固定临时提升可见半透明geom/material alpha后渲染depth，原始RGB视频只作为对齐身份且绝不重写。
+- P1新增CloseFridge可恢复生成器：正式入口先核验job `3259701`原始JSON及其SHA256和`forced_opaque_required`结论；随后逐episode加载自己的`model.xml.gz`、`states.npz`和`ep_meta.json`，每相机原子发布未压缩`[T,3,256,320] float16` `.npy`。sidecar绑定源MJCF/state/meta/RGB摘要、数值合同、相机、shape、数组摘要和Git provenance。
+- 重提P1作业会memory-map并重新哈希现有`.npy`：完整一致则跳过，缺失、损坏或合同/源摘要漂移则只重建对应episode/相机。最终manifest必须覆盖106 episode/318数组，独立audit逐帧检查有限性、`[-1,1]`范围、shape/dtype、sidecar和摘要。
+- P1本地纯NumPy单测、Python编译和sbatch语法已通过；真实MuJoCo/EGL生成量、耗时、约40 GiB的CloseFridge实际占用和最终JSON为`cluster-pending`。P1通过前不实现loader，也不扩大到预计约283 GiB的Atomic9缓存。
 
 ## Clariden 部署状态
 

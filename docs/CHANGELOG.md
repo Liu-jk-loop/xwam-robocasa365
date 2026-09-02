@@ -1,5 +1,14 @@
 # 变更记录
 
+## 2026-09-02 — PointMap P1可恢复CloseFridge全量缓存生成器
+
+- CloseBlenderLid透明专项job `3259701`已PASS：95,378个目标可见像素中88个像素的depth变化超过1 mm且全部变近，正式缓存策略冻结为`use_forced_opaque_depth_for_pointmap_keep_original_rgb`。P1正式入口必须校验该原始JSON的PASS、atomic scope、3 episode、目标可见/变化、结论及SHA256，并把证据摘要写入缓存合同；PointMap使用forced-opaque几何depth，原始LeRobot RGB视频不重渲染、不改写。
+- 新增P1生成器：逐episode加载自己的`model.xml.gz`、`states.npz`和`ep_meta.json`，在一个forced-opaque上下文中逐帧恢复state并生成三路相机PointMap；按episode/相机使用NumPy open-memmap写未压缩`[T,3,256,320] float16`，完整后才原子替换正式`.npy`。
+- sidecar绑定task/episode/camera、源MJCF/state/meta/RGB文件路径/大小/SHA256、冻结合同摘要、相机内参、forced-opaque记录、shape/dtype/layout、数组SHA256、数值审计和Git provenance。重提时完整pair重新memory-map并哈希；一致则跳过，缺失、损坏或漂移则只重建对应episode/相机。
+- 新增独立最终审计：严格枚举CloseFridge 106 episode/318数组，逐帧检查有限值与`[-1,1]`范围，并核对帧/相机覆盖、float16 TCHW、sidecar、manifest和SHA256。Clariden入口使用1 GPU完成MuJoCo EGL渲染、24 CPU执行NumPy转换/哈希并把约40 GiB缓存写IOPS scratch；dirty Git只记录不阻塞。
+- 本地新增6项无Torch缓存合同测试，覆盖P0.1证据门禁、路径、forced-opaque合同、mmap数值审计、摘要损坏重建及manifest复查；Ruff、Python编译、sbatch语法、34份Slurm变量边界审计、变更记录门禁和全仓214项测试均通过。106 episode真实生成、性能和最终JSON为`cluster-pending`。
+- 回滚本批代码只删除P1生成器、缓存合同、测试、sbatch和文档；不会删除已在集群生成的外部PointMap缓存，外部数据清理必须由用户另行确认。
+
 ## 2026-09-02 — CloseBlenderLid透明表面PointMap专项门禁
 
 - CloseFridge P0真实作业`3254392`已通过三路相机PointMap数值合同；该结果只证明depth→XYZ链路正确，不能证明透明搅拌机盖已被原始depth捕获，因此在生成正式缓存前增加CloseBlenderLid专项对照。
