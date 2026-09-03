@@ -7,7 +7,7 @@
 - 当前分支：`dev/atomic-robocasa365`
 - 当前阶段：PointMap单任务500/1000/1500 checkpoint闭环评测
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：P0、P0.1、P1缓存、P2/P3训练恢复门禁和1500步正式训练均已由用户反馈完成；新增500/1000/1500三档、每档seed42/7的六路评测，真实闭环为`cluster-pending`。
+- 超算运行状态：P0、P0.1、P1缓存、P2/P3训练恢复门禁和1500步正式训练均已由用户反馈完成；新增500/1000/1500三档同seed42的三路评测，真实闭环为`cluster-pending`。
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -61,9 +61,9 @@
 - P3 `PointMap-Aux`复用第二生成模态但使用独立`use_pointmap`、`pointmap_loss_weight`和`train/pointmap_loss`合同；与inverse-depth互斥，policy server加载此类checkpoint时仍显式`run_depth=false`，在线推理只需RGB/proprio。
 - 新4卡门禁先输出真实batch与startup/sample/batch耗时，再固定8 clip完成step 0→2保存和step 2→4恢复；联合审计要求正PointMap loss、四rank FP32 optimizer state及完整checkpoint。正式入口只有读到该门禁PASS才启动。
 - CloseFridge正式配置固定公开X-WAM pretrained、ratio0、seed42、2节点×4 GH200、batch4×accum4×8=GBS128、ZeRO-1、BF16计算、FP32 optimizer state和1500步；500/1000/1500写Store永久checkpoint。用户已反馈训练完成，但本轮未提供最终Job ID与formal audit路径，因此只记录完成反馈，不补造机器provenance。
-- 用户已反馈CloseFridge PointMap-Aux正式训练完成。新增单节点4×GH200六路评测：step500/1000/1500各自运行seed42～91与seed7～56两组50 episodes，模型seed固定42；GPU映射为`0,1,2,3,0,1`，每卡最多两个server，与已验证拓扑容量一致。
-- 评测从Capstor experiment目录读取训练时resolved `config.yaml`，从IOPS滚动与Store永久目录中只选择八rank完整checkpoint且同step优先final/Store副本。六个模型串行完成加载以避免主机内存与Store I/O峰值，rollout并行执行。
-- PointMap-Aux在线推理仍只发送三路RGB与16D proprio，明确不读取P1 PointMap cache、不在线渲染depth或生成XYZ。六路结果及三档双seed均值写入独立`comparison.json`；真实policy加载、300 episodes与汇总为`cluster-pending`。
+- 用户已反馈CloseFridge PointMap-Aux正式训练完成。新增单节点4×GH200三路评测：step500/1000/1500均只运行seed42～91的50 episodes，模型seed固定42；三个server/client分别使用GPU 0/1/2，GPU 3不启动额外评测。
+- 评测从Capstor experiment目录读取训练时resolved `config.yaml`，从IOPS滚动与Store永久目录中只选择八rank完整checkpoint且同step优先final/Store副本。三个模型串行完成加载以避免主机内存与Store I/O峰值，rollout并行执行。
+- PointMap-Aux在线推理仍只发送三路RGB与16D proprio，明确不读取P1 PointMap cache、不在线渲染depth或生成XYZ。三路结果写入独立`comparison.json`；真实policy加载、150 episodes与汇总为`cluster-pending`。
 
 ## Clariden 部署状态
 

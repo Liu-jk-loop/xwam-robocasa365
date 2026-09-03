@@ -168,11 +168,9 @@ class RoboCasa365PointMapTrainingContractTests(unittest.TestCase):
             "--group-step step1500=1500",
             "--expected-world-size 8",
             "RUN_NAMES=(",
-            "step500_seed42 step500_seed7",
-            "step1000_seed42 step1000_seed7",
-            "step1500_seed42 step1500_seed7",
-            "RUN_SEEDS=(42 7 42 7 42 7)",
-            "RUN_GPUS=(0 1 2 3 0 1)",
+            "step500_seed42 step1000_seed42 step1500_seed42",
+            "RUN_SEEDS=(42 42 42)",
+            "RUN_GPUS=(0 1 2)",
             'EVAL_ROOT="$DEPLOY_IOPS/x-wam-eval/close-fridge-pointmap/$EVAL_ID"',
             '"training_use_pointmap": true',
             '"training_auxiliary_geometry": "pointmap"',
@@ -183,9 +181,11 @@ class RoboCasa365PointMapTrainingContractTests(unittest.TestCase):
             self.assertIn(expected, job)
         self.assertEqual(job.count("--server-id 5"), 1)
         self.assertEqual(job.count("--client-id 5"), 1)
-        self.assertIn("TOPOLOGY_5=", job)
-        self.assertIn("CHECKPOINT_5=", job)
-        self.assertIn("GPU_5=", job)
+        self.assertIn("TOPOLOGY_2=", job)
+        self.assertIn("CHECKPOINT_2=", job)
+        self.assertIn("GPU_2=", job)
+        self.assertNotIn("TOPOLOGY_3=", job)
+        self.assertNotIn("step500_seed7", job)
         self.assertNotIn("POINTMAP_CACHE_ROOT", job)
         self.assertNotIn("trainer_max_steps", job)
 

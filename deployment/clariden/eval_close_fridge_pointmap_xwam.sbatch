@@ -31,7 +31,7 @@ EXP_NAME=close_fridge_pointmap_aux_ratio00_seed42_8gpu
 EXPERIMENT_DIR="${XWAM_POINTMAP_EVAL_EXPERIMENT_DIR:-$DEPLOY_CAPSCR/experiments/xwam/$EXP_NAME}"
 HOT_CHECKPOINT_ROOT="${XWAM_POINTMAP_EVAL_HOT_CHECKPOINT_ROOT:-$DEPLOY_IOPS/xwam_run/$EXP_NAME/checkpoints}"
 DURABLE_CHECKPOINT_ROOT="${XWAM_POINTMAP_EVAL_DURABLE_CHECKPOINT_ROOT:-$DEPLOY_STORE/checkpoints/xwam/$EXP_NAME/checkpoints}"
-EVAL_ID="${XWAM_POINTMAP_EVAL_ID:-step500-1000-1500_seed42-7_target_50ep}"
+EVAL_ID="${XWAM_POINTMAP_EVAL_ID:-step500-1000-1500_seed42_target_50ep}"
 EPISODES="${XWAM_POINTMAP_EVAL_EPISODES:-50}"
 
 if [[ -z "$EVAL_ID" || ! "$EVAL_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
@@ -108,17 +108,13 @@ CHECKPOINT_1000="$XWAM_EVAL_CHECKPOINT_STEP1000"
 CHECKPOINT_1500="$XWAM_EVAL_CHECKPOINT_STEP1500"
 
 RUN_NAMES=(
-  step500_seed42 step500_seed7
-  step1000_seed42 step1000_seed7
-  step1500_seed42 step1500_seed7
+  step500_seed42 step1000_seed42 step1500_seed42
 )
-RUN_SEEDS=(42 7 42 7 42 7)
-RUN_GPUS=(0 1 2 3 0 1)
-RUN_STEPS=(500 500 1000 1000 1500 1500)
+RUN_SEEDS=(42 42 42)
+RUN_GPUS=(0 1 2)
+RUN_STEPS=(500 1000 1500)
 RUN_CHECKPOINTS=(
-  "$CHECKPOINT_500" "$CHECKPOINT_500"
-  "$CHECKPOINT_1000" "$CHECKPOINT_1000"
-  "$CHECKPOINT_1500" "$CHECKPOINT_1500"
+  "$CHECKPOINT_500" "$CHECKPOINT_1000" "$CHECKPOINT_1500"
 )
 RUN_COUNT=${#RUN_NAMES[@]}
 
@@ -133,10 +129,10 @@ EXPECTED_CONTRACT="$CONTROL_ROOT/evaluation_contract.expected.txt"
   printf 'checkpoint_500=%s\n' "$(realpath "$CHECKPOINT_500")"
   printf 'checkpoint_1000=%s\n' "$(realpath "$CHECKPOINT_1000")"
   printf 'checkpoint_1500=%s\n' "$(realpath "$CHECKPOINT_1500")"
-  printf 'matrix=step500_seed42,step500_seed7,step1000_seed42,step1000_seed7,step1500_seed42,step1500_seed7\n'
-  printf 'gpu_map=0,1,2,3,0,1\n'
+  printf 'matrix=step500_seed42,step1000_seed42,step1500_seed42\n'
+  printf 'gpu_map=0,1,2\n'
   printf 'episodes_per_run=%s\n' "$EPISODES"
-  printf 'model_seed=42\nseed_starts=42,7\nreplan_steps=20\naction_denoise_steps=10\nmax_steps=1000\n'
+  printf 'model_seed=42\nseed_start=42\nreplan_steps=20\naction_denoise_steps=10\nmax_steps=1000\n'
   printf 'repo_commit=%s\n' "$(git rev-parse HEAD)"
   printf 'experiment_config_sha256=%s\n' "$(sha256sum "$EXPERIMENT_DIR/config.yaml" | awk '{print $1}')"
   printf 'base_topology_sha256=%s\n' "$(sha256sum "$BASE_TOPOLOGY" | awk '{print $1}')"
@@ -160,7 +156,7 @@ echo "experiment_dir=$EXPERIMENT_DIR"
 echo "checkpoint_500=$CHECKPOINT_500"
 echo "checkpoint_1000=$CHECKPOINT_1000"
 echo "checkpoint_1500=$CHECKPOINT_1500"
-echo "matrix=500/1000/1500 x seed42/seed7; gpu_map=0,1,2,3,0,1"
+echo "matrix=500/1000/1500 x seed42; gpu_map=0,1,2"
 echo "episodes_per_run=$EPISODES model_seed=42"
 echo "online_modalities=rgb,proprio (PointMap is training-only auxiliary supervision)"
 echo "result_root=$EVAL_ROOT"
@@ -197,14 +193,11 @@ source = Path(os.environ["BASE_TOPOLOGY"])
 root = Path(os.environ["CONTROL_ROOT"])
 port_base = int(os.environ["PORT_BASE"])
 episodes = int(os.environ["EPISODES"])
-seeds = [42, 7, 42, 7, 42, 7]
+seeds = [42, 42, 42]
 names = [
     "step500_seed42",
-    "step500_seed7",
     "step1000_seed42",
-    "step1000_seed7",
     "step1500_seed42",
-    "step1500_seed7",
 ]
 
 for run_index, (name, seed) in enumerate(zip(names, seeds, strict=True)):
@@ -224,7 +217,7 @@ for run_index, (name, seed) in enumerate(zip(names, seeds, strict=True)):
     )
 PY
 
-for run_index in 0 1 2 3 4 5; do
+for run_index in 0 1 2; do
   run_root="$EVAL_ROOT/${RUN_NAMES[$run_index]}"
   mkdir -p \
     "$run_root/results" \
@@ -235,7 +228,7 @@ done
 
 POLICY_STEP_PID=""
 cleanup_policy() {
-  for run_index in 0 1 2 3 4 5; do
+  for run_index in 0 1 2; do
     touch "$CONTROL_ROOT/run_$run_index/stop-policy" 2>/dev/null || true
   done
   if [[ -n "$POLICY_STEP_PID" ]] && kill -0 "$POLICY_STEP_PID" 2>/dev/null; then
@@ -250,17 +243,13 @@ srun --overlap --exact --nodes=1 --ntasks=1 --gpus-per-node=4 --cpus-per-task=32
   env REPO="$REPO" RUNTIME_OVERLAY="$RUNTIME_OVERLAY" WAN_DIR="$WAN_DIR" \
     EXPERIMENT_DIR="$EXPERIMENT_DIR" CONTROL_ROOT="$CONTROL_ROOT" \
     TOPOLOGY_0="$CONTROL_ROOT/topology_0.json" TOPOLOGY_1="$CONTROL_ROOT/topology_1.json" \
-    TOPOLOGY_2="$CONTROL_ROOT/topology_2.json" TOPOLOGY_3="$CONTROL_ROOT/topology_3.json" \
-    TOPOLOGY_4="$CONTROL_ROOT/topology_4.json" TOPOLOGY_5="$CONTROL_ROOT/topology_5.json" \
+    TOPOLOGY_2="$CONTROL_ROOT/topology_2.json" \
     CHECKPOINT_0="${RUN_CHECKPOINTS[0]}" CHECKPOINT_1="${RUN_CHECKPOINTS[1]}" \
-    CHECKPOINT_2="${RUN_CHECKPOINTS[2]}" CHECKPOINT_3="${RUN_CHECKPOINTS[3]}" \
-    CHECKPOINT_4="${RUN_CHECKPOINTS[4]}" CHECKPOINT_5="${RUN_CHECKPOINTS[5]}" \
+    CHECKPOINT_2="${RUN_CHECKPOINTS[2]}" \
     RUN_ROOT_0="$EVAL_ROOT/${RUN_NAMES[0]}" RUN_ROOT_1="$EVAL_ROOT/${RUN_NAMES[1]}" \
-    RUN_ROOT_2="$EVAL_ROOT/${RUN_NAMES[2]}" RUN_ROOT_3="$EVAL_ROOT/${RUN_NAMES[3]}" \
-    RUN_ROOT_4="$EVAL_ROOT/${RUN_NAMES[4]}" RUN_ROOT_5="$EVAL_ROOT/${RUN_NAMES[5]}" \
+    RUN_ROOT_2="$EVAL_ROOT/${RUN_NAMES[2]}" \
     GPU_0="${RUN_GPUS[0]}" GPU_1="${RUN_GPUS[1]}" \
-    GPU_2="${RUN_GPUS[2]}" GPU_3="${RUN_GPUS[3]}" \
-    GPU_4="${RUN_GPUS[4]}" GPU_5="${RUN_GPUS[5]}" \
+    GPU_2="${RUN_GPUS[2]}" \
   bash -lc '
 set -Eeuo pipefail
 cd "$REPO"
@@ -270,7 +259,7 @@ export PYTHONPATH="$RUNTIME_OVERLAY${PYTHONPATH:+:$PYTHONPATH}"
 
 pids=()
 stop_started_policies() {
-  for run_index in 0 1 2 3 4 5; do
+  for run_index in 0 1 2; do
     touch "$CONTROL_ROOT/run_$run_index/stop-policy" 2>/dev/null || true
   done
   for pid in "${pids[@]:-}"; do
@@ -279,8 +268,8 @@ stop_started_policies() {
 }
 trap stop_started_policies EXIT INT TERM
 
-# 六个checkpoint进程逐个完成模型加载，避免同时mmap/load造成主机内存与Store I/O尖峰。
-for run_index in 0 1 2 3 4 5; do
+# 三个checkpoint进程逐个完成模型加载，避免同时mmap/load造成主机内存与Store I/O尖峰。
+for run_index in 0 1 2; do
   topology_var="TOPOLOGY_$run_index"
   checkpoint_var="CHECKPOINT_$run_index"
   run_root_var="RUN_ROOT_$run_index"
@@ -338,7 +327,7 @@ POLICY_STEP_PID=$!
 export XWAM_PHASE=close_fridge_pointmap_eval_policy_ready
 for _ in $(seq 1 5400); do
   ready_count=0
-  for run_index in 0 1 2 3 4 5; do
+  for run_index in 0 1 2; do
     ready_file="$CONTROL_ROOT/run_$run_index/policy-ready.json"
     if [[ -s "$ready_file" ]] && grep -q '"result": "ready"' "$ready_file"; then
       ready_count=$((ready_count + 1))
@@ -349,11 +338,11 @@ for _ in $(seq 1 5400); do
   fi
   if ! kill -0 "$POLICY_STEP_PID" 2>/dev/null; then
     wait "$POLICY_STEP_PID" || true
-    xwam_fail "One or more PointMap policy servers exited before all six were READY"
+    xwam_fail "One or more PointMap policy servers exited before all three were READY"
   fi
   sleep 2
 done
-for run_index in 0 1 2 3 4 5; do
+for run_index in 0 1 2; do
   ready_file="$CONTROL_ROOT/run_$run_index/policy-ready.json"
   status_file="$EVAL_ROOT/${RUN_NAMES[$run_index]}/logs/servers/server_5_status.json"
   test -s "$ready_file"
@@ -371,14 +360,11 @@ if srun --overlap --exact --nodes=1 --ntasks=1 --gpus-per-node=4 --cpus-per-task
   --environment="$ROBOCASA_EDF" \
   env REPO="$REPO" ROBOCASA_ROOT="$ROBOCASA_ROOT" ROBOSUITE_ROOT="$ROBOSUITE_ROOT" \
     TOPOLOGY_0="$CONTROL_ROOT/topology_0.json" TOPOLOGY_1="$CONTROL_ROOT/topology_1.json" \
-    TOPOLOGY_2="$CONTROL_ROOT/topology_2.json" TOPOLOGY_3="$CONTROL_ROOT/topology_3.json" \
-    TOPOLOGY_4="$CONTROL_ROOT/topology_4.json" TOPOLOGY_5="$CONTROL_ROOT/topology_5.json" \
+    TOPOLOGY_2="$CONTROL_ROOT/topology_2.json" \
     RUN_ROOT_0="$EVAL_ROOT/${RUN_NAMES[0]}" RUN_ROOT_1="$EVAL_ROOT/${RUN_NAMES[1]}" \
-    RUN_ROOT_2="$EVAL_ROOT/${RUN_NAMES[2]}" RUN_ROOT_3="$EVAL_ROOT/${RUN_NAMES[3]}" \
-    RUN_ROOT_4="$EVAL_ROOT/${RUN_NAMES[4]}" RUN_ROOT_5="$EVAL_ROOT/${RUN_NAMES[5]}" \
+    RUN_ROOT_2="$EVAL_ROOT/${RUN_NAMES[2]}" \
     GPU_0="${RUN_GPUS[0]}" GPU_1="${RUN_GPUS[1]}" \
-    GPU_2="${RUN_GPUS[2]}" GPU_3="${RUN_GPUS[3]}" \
-    GPU_4="${RUN_GPUS[4]}" GPU_5="${RUN_GPUS[5]}" \
+    GPU_2="${RUN_GPUS[2]}" \
     EPISODES="$EPISODES" \
   bash -lc '
 set -Eeuo pipefail
@@ -389,7 +375,7 @@ export MKL_NUM_THREADS=1
 export PYTHONPATH="$ROBOCASA_ROOT:$ROBOSUITE_ROOT:$REPO${PYTHONPATH:+:$PYTHONPATH}"
 
 pids=()
-for run_index in 0 1 2 3 4 5; do
+for run_index in 0 1 2; do
   topology_var="TOPOLOGY_$run_index"
   run_root_var="RUN_ROOT_$run_index"
   gpu_var="GPU_$run_index"
@@ -421,7 +407,7 @@ else
   CLIENT_RC=$?
 fi
 
-for run_index in 0 1 2 3 4 5; do
+for run_index in 0 1 2; do
   touch "$CONTROL_ROOT/run_$run_index/stop-policy"
 done
 export XWAM_PHASE=close_fridge_pointmap_eval_policy_shutdown
@@ -459,11 +445,8 @@ root = Path(os.environ["EVAL_ROOT"])
 episodes_expected = int(os.environ["EPISODES"])
 runs = [
     ("step500_seed42", 500, 42, os.environ["CHECKPOINT_500"]),
-    ("step500_seed7", 500, 7, os.environ["CHECKPOINT_500"]),
     ("step1000_seed42", 1000, 42, os.environ["CHECKPOINT_1000"]),
-    ("step1000_seed7", 1000, 7, os.environ["CHECKPOINT_1000"]),
     ("step1500_seed42", 1500, 42, os.environ["CHECKPOINT_1500"]),
-    ("step1500_seed7", 1500, 7, os.environ["CHECKPOINT_1500"]),
 ]
 rows = []
 errors = []
@@ -525,18 +508,14 @@ for name, step, seed_start, checkpoint in runs:
 checkpoint_summary = []
 for step in (500, 1000, 1500):
     step_rows = by_step[step]
-    if len(step_rows) != 2:
-        errors.append(f"step{step}: expected two seed runs, found {len(step_rows)}")
+    if len(step_rows) != 1:
+        errors.append(f"step{step}: expected one seed42 run, found {len(step_rows)}")
         continue
     checkpoint_summary.append(
         {
             "checkpoint_step": step,
-            "seed_starts": [row["seed_start"] for row in step_rows],
-            "success_percents": [row["success_percent"] for row in step_rows],
-            "mean_success_percent_across_seed_runs": sum(
-                row["success_percent"] for row in step_rows
-            )
-            / len(step_rows),
+            "seed_start": step_rows[0]["seed_start"],
+            "success_percent": step_rows[0]["success_percent"],
         }
     )
 
@@ -564,11 +543,11 @@ raise SystemExit(0 if payload["ok"] else 1)
 PY
 
 grep -q '"ok": true' "$COMPARISON_JSON"
-for run_index in 0 1 2 3 4 5; do
+for run_index in 0 1 2; do
   rm -f \
     "$CONTROL_ROOT/run_$run_index/stop-policy" \
     "$CONTROL_ROOT/run_$run_index/policy-ready.json"
 done
 rm -f "$EXPECTED_CONTRACT" "$CHECKPOINT_ENV"
 trap - EXIT INT TERM
-echo "[PASS] CloseFridge PointMap 6-way checkpoint/seed evaluation completed: $COMPARISON_JSON"
+echo "[PASS] CloseFridge PointMap 3-way matched-seed checkpoint evaluation completed: $COMPARISON_JSON"

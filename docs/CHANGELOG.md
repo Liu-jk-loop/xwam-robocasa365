@@ -1,14 +1,14 @@
 # 变更记录
 
-## 2026-09-03 — CloseFridge PointMap三checkpoint六路评测
+## 2026-09-03 — CloseFridge PointMap三checkpoint同seed评测
 
 - 用户反馈PointMap-Aux单任务1500步正式训练完成；本轮不修改训练配置、checkpoint或PointMap缓存。
 - 新增精确checkpoint解析器，同时扫描IOPS滚动与Store永久目录，只接受model state和rank0～7 optimizer shard完整的step500、1000、1500目录；同step优先final checkpoint，其次优先Store根。
-- 新增单节点4×GH200评测入口。每个checkpoint分别运行seed42～91与seed7～56的50 episodes，模型seed固定42，合计6个server和6个client；GPU映射`0,1,2,3,0,1`，每卡最多两个server。
-- 六个policy按顺序加载checkpoint，避免六份5B模型同时mmap/load造成主机内存与共享存储I/O尖峰；全部READY后并行运行RoboCasa客户端。
+- 新增单节点4×GH200评测入口。step500、1000、1500均只运行seed42～91的50 episodes，模型seed固定42，合计3个server和3个client，分别绑定GPU 0/1/2；GPU 3不启动额外评测。
+- 三个policy按顺序加载checkpoint，避免三份5B模型同时mmap/load造成主机内存与共享存储I/O尖峰；全部READY后并行运行RoboCasa客户端。
 - 启动门禁要求训练config为`use_pointmap=true/use_depth=false`。PointMap只作为训练辅助监督，闭环评测仍固定RGB+proprio输入，不读取PointMap cache，也不在线生成XYZ。
-- 每路生成独立result/summary，最终`comparison.json`同时保存六路成功率和500/1000/1500三档的双seed描述性均值；结果目录、端口、控制文件和不可变评测合同相互隔离。
-- 本地通过脚本语法、Python编译、7项PointMap聚焦测试及37份Slurm环境变量边界审计。本地无Torch/GH200/RoboCasa，六模型加载与300 episodes闭环为`cluster-pending`。
+- 每路生成独立result/summary，最终`comparison.json`保存同一seed集合下500/1000/1500三档成功率；结果目录、端口、控制文件和不可变评测合同相互隔离。
+- 本地通过脚本语法、Python编译、7项PointMap聚焦测试及37份Slurm环境变量边界审计。本地无Torch/GH200/RoboCasa，三模型加载与150 episodes闭环为`cluster-pending`。
 - 回滚本提交即可移除新评测入口和通用checkpoint解析器，不会删除训练checkpoint、评测结果或外部缓存。
 
 ## 2026-09-02 — PointMap P2/P3 loader、恢复门禁与单任务训练入口
