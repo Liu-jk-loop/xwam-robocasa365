@@ -1801,10 +1801,12 @@ cd "$EVAL_REPO"
 git fetch origin dev/atomic-robocasa365
 git switch dev/atomic-robocasa365
 git merge --ff-only origin/dev/atomic-robocasa365
-test -z "$(git status --porcelain)"
+git status --short
 
 sbatch deployment/clariden/eval_close_fridge_pointmap_xwam.sbatch
 ```
+
+评测仓库存在本地修改时脚本只警告，并将状态与tracked diff摘要写入不可变评测合同，不再退出。为保证结果可解释，仍建议在提交前查看`git status --short`，但不需要为了启动评测删除服务器上的已有修改。
 
 默认单节点4×GH200启动3个server和3个CloseFridge client，三档只使用相同的seed42～91：
 

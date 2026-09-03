@@ -11,6 +11,13 @@
 - 本地通过脚本语法、Python编译、7项PointMap聚焦测试及37份Slurm环境变量边界审计。本地无Torch/GH200/RoboCasa，三模型加载与150 episodes闭环为`cluster-pending`。
 - 回滚本提交即可移除新评测入口和通用checkpoint解析器，不会删除训练checkpoint、评测结果或外部缓存。
 
+### Git dirty门禁修正
+
+- 首次集群提交在模型加载前被复制自旧评测脚本的Git clean检查阻塞；这与项目已冻结的“dirty只记录、不阻止正式运行”策略不一致。
+- PointMap评测现仅输出warning和`git status --short`，并在不可变评测合同中记录commit、porcelain状态SHA256及tracked diff SHA256；不再因本地脚本调整或其他dirty状态退出。
+- 本次失败未进入checkpoint解析、policy server或RoboCasa client，使用同一默认EVAL_ID重提不会混入episode结果。
+- failure report改为按Job ID独立命名，重提同一EVAL_ID时不会被上一次已有`failure.txt`遮蔽新根因。
+
 ## 2026-09-02 — PointMap P2/P3 loader、恢复门禁与单任务训练入口
 
 - 用户回报P1 CloseFridge 106 episode/318个PointMap数组及最终audit全部PASS；缓存根目录冻结为IOPS上的`robocasa365_camera_xyz_flexpi_v1/atomic`。反馈未含Job ID和实际字节数，因此只记录已给证据。

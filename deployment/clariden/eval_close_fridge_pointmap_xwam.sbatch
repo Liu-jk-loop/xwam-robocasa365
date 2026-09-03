@@ -56,7 +56,7 @@ if [[ ! -s "$REPO/deployment/clariden/error_trap.sh" ]]; then
   echo "[FAIL] Independent evaluation repo is missing or incomplete: $REPO" >&2
   exit 2
 fi
-export XWAM_FAILURE_REPORT="$LOG_ROOT/failure.txt"
+export XWAM_FAILURE_REPORT="$LOG_ROOT/failure-${SLURM_JOB_ID}.txt"
 export XWAM_MAIN_LOG="$LOG_ROOT/job.log"
 export XWAM_TRAIN_LOG=not-applicable
 export XWAM_PHASE=close_fridge_pointmap_eval_preflight
@@ -73,7 +73,10 @@ test -d "$HOT_CHECKPOINT_ROOT" || test -d "$DURABLE_CHECKPOINT_ROOT"
 test -s "$WAN_DIR/config.json"
 test -s "$BASE_TOPOLOGY"
 test -s "$ROBOCASA_ROOT/robocasa/models/assets/fixtures/sinks/Sink025/model.xml"
-test -z "$(git status --porcelain)" || xwam_fail "Independent evaluation repo must be clean"
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "[WARN] Evaluation Git worktree is dirty; status and diff digests are recorded in the immutable contract" >&2
+  git status --short >&2
+fi
 
 mkdir -p "$DEPLOY_IOPS/x-wam-eval/.locks"
 exec 9>"$DEPLOY_IOPS/x-wam-eval/.locks/close-fridge-pointmap-$EVAL_ID.lock"
@@ -134,6 +137,8 @@ EXPECTED_CONTRACT="$CONTROL_ROOT/evaluation_contract.expected.txt"
   printf 'episodes_per_run=%s\n' "$EPISODES"
   printf 'model_seed=42\nseed_start=42\nreplan_steps=20\naction_denoise_steps=10\nmax_steps=1000\n'
   printf 'repo_commit=%s\n' "$(git rev-parse HEAD)"
+  printf 'repo_status_sha256=%s\n' "$(git status --porcelain | sha256sum | awk '{print $1}')"
+  printf 'repo_tracked_diff_sha256=%s\n' "$(git diff --binary HEAD | sha256sum | awk '{print $1}')"
   printf 'experiment_config_sha256=%s\n' "$(sha256sum "$EXPERIMENT_DIR/config.yaml" | awk '{print $1}')"
   printf 'base_topology_sha256=%s\n' "$(sha256sum "$BASE_TOPOLOGY" | awk '{print $1}')"
   printf 'checkpoint_resolution_sha256=%s\n' "$(sha256sum "$CHECKPOINT_REPORT" | awk '{print $1}')"

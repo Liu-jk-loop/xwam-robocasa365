@@ -64,6 +64,7 @@
 - 用户已反馈CloseFridge PointMap-Aux正式训练完成。新增单节点4×GH200三路评测：step500/1000/1500均只运行seed42～91的50 episodes，模型seed固定42；三个server/client分别使用GPU 0/1/2，GPU 3不启动额外评测。
 - 评测从Capstor experiment目录读取训练时resolved `config.yaml`，从IOPS滚动与Store永久目录中只选择八rank完整checkpoint且同step优先final/Store副本。三个模型串行完成加载以避免主机内存与Store I/O峰值，rollout并行执行。
 - PointMap-Aux在线推理仍只发送三路RGB与16D proprio，明确不读取P1 PointMap cache、不在线渲染depth或生成XYZ。三路结果写入独立`comparison.json`；真实policy加载、150 episodes与汇总为`cluster-pending`。
+- 首次提交在评测preflight因旧的Git clean硬门禁退出，未加载checkpoint或启动server。该门禁已改为warning，并把commit、porcelain状态摘要和tracked diff摘要写入不可变评测合同；dirty状态不再决定能否运行。
 
 ## Clariden 部署状态
 

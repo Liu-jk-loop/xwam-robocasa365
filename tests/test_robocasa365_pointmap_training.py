@@ -177,6 +177,9 @@ class RoboCasa365PointMapTrainingContractTests(unittest.TestCase):
             '"training_modality": "pointmap_aux"',
             '"online_inference_modalities": ["rgb", "proprio"]',
             '"online_pointmap_required": False',
+            "repo_status_sha256",
+            "repo_tracked_diff_sha256",
+            "Evaluation Git worktree is dirty",
         ):
             self.assertIn(expected, job)
         self.assertEqual(job.count("--server-id 5"), 1)
@@ -188,6 +191,7 @@ class RoboCasa365PointMapTrainingContractTests(unittest.TestCase):
         self.assertNotIn("step500_seed7", job)
         self.assertNotIn("POINTMAP_CACHE_ROOT", job)
         self.assertNotIn("trainer_max_steps", job)
+        self.assertNotIn("Independent evaluation repo must be clean", job)
 
 
 if __name__ == "__main__":
