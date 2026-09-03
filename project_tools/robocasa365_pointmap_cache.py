@@ -304,6 +304,90 @@ def validate_task_pointmap_cache(
         raise PointMapCacheError(f"无法读取PointMap manifest/audit：{exc}") from exc
     if not isinstance(manifest, dict) or not isinstance(audit, dict):
         raise PointMapCacheError("PointMap manifest/audit顶层必须为对象")
+    if "tasks" in manifest or "tasks" in audit:
+        manifest_tasks = manifest.get("tasks")
+        audit_tasks = audit.get("tasks")
+        index_checks = {
+            "manifest_pass": manifest.get("ok") is True
+            and manifest.get("result") == "pass",
+            "audit_pass": audit.get("ok") is True
+            and audit.get("result") == "pass",
+            "atomic_only": manifest.get("scope")
+            == audit.get("scope")
+            == "atomic_only",
+            "cache_root": Path(str(manifest.get("cache_root", "")))
+            .expanduser()
+            .resolve()
+            == root
+            and Path(str(audit.get("cache_root", ""))).expanduser().resolve()
+            == root,
+            "manifest_binding": Path(str(audit.get("manifest_path", "")))
+            .expanduser()
+            .resolve()
+            == manifest_file
+            and audit.get("manifest_sha256") == file_sha256(manifest_file),
+            "task_count": isinstance(manifest_tasks, list)
+            and isinstance(audit_tasks, list)
+            and int(manifest.get("task_count", -1)) == len(manifest_tasks)
+            and int(audit.get("task_count", -1)) == len(audit_tasks)
+            and manifest.get("task_names") == audit.get("task_names"),
+            "contract_digest": isinstance(manifest.get("contract_sha256"), str)
+            and manifest.get("contract_sha256") == audit.get("contract_sha256"),
+            "render_policy": manifest.get("render_policy")
+            == audit.get("render_policy")
+            == POINTMAP_RENDER_POLICY,
+            "final_audit_checks": isinstance(audit.get("checks"), dict)
+            and bool(audit["checks"])
+            and all(audit["checks"].values()),
+        }
+        failed = [name for name, passed in index_checks.items() if not passed]
+        if failed:
+            raise PointMapCacheError(f"PointMap多任务索引合同失败：{failed}")
+        manifest_by_task = {
+            str(item.get("task_name")): item
+            for item in manifest_tasks
+            if isinstance(item, dict)
+        }
+        audit_by_task = {
+            str(item.get("task_name")): item
+            for item in audit_tasks
+            if isinstance(item, dict)
+        }
+        if set(manifest_by_task) != set(audit_by_task):
+            raise PointMapCacheError("PointMap多任务manifest/audit任务集合不一致")
+        if task_name not in manifest_by_task:
+            raise PointMapCacheError(f"PointMap多任务索引缺少任务：{task_name}")
+        selected_manifest = manifest_by_task[task_name]
+        selected_audit = audit_by_task[task_name]
+        child_manifest = Path(str(selected_manifest.get("manifest_path", "")))
+        child_audit = Path(str(selected_manifest.get("audit_path", "")))
+        if child_manifest.expanduser().resolve() != Path(
+            str(selected_audit.get("manifest_path", ""))
+        ).expanduser().resolve() or child_audit.expanduser().resolve() != Path(
+            str(selected_audit.get("audit_path", ""))
+        ).expanduser().resolve():
+            raise PointMapCacheError("PointMap多任务索引的子任务路径绑定不一致")
+        if not child_manifest.is_file() or not child_audit.is_file():
+            raise PointMapCacheError("PointMap多任务索引指向的子任务证据不存在")
+        if file_sha256(child_manifest) != selected_manifest.get("manifest_sha256"):
+            raise PointMapCacheError("PointMap子任务manifest摘要漂移")
+        if file_sha256(child_audit) != selected_manifest.get("audit_sha256"):
+            raise PointMapCacheError("PointMap子任务audit摘要漂移")
+        result = validate_task_pointmap_cache(
+            cache_root=root,
+            manifest_path=child_manifest,
+            audit_path=child_audit,
+            task_name=task_name,
+            episode_lengths=episode_lengths,
+            camera_keys=camera_keys,
+            chunks_size=chunks_size,
+        )
+        result["multitask_index"] = {
+            "manifest_path": str(manifest_file),
+            "audit_path": str(audit_file),
+            "task_count": len(manifest_tasks),
+        }
+        return result
     checks = {
         "manifest_pass": manifest.get("ok") is True
         and manifest.get("result") == "pass",

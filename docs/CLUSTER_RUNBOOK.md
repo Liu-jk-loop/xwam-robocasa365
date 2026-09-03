@@ -1826,3 +1826,40 @@ sbatch deployment/clariden/eval_close_fridge_pointmap_xwam.sbatch
 ```
 
 其中包含三个运行子目录、`logs/checkpoint_resolution.json`和总表`comparison.json`。成功日志以`[PASS] CloseFridge PointMap 3-way matched-seed checkpoint evaluation completed`结束。
+
+## PointMap P5：Atomic9全量缓存与14k正式训练
+
+本阶段不再追加CloseFridge单任务训练。Atomic9 PointMap-Aux除几何目标外与Atomic9 RGB-D严格对齐：同9任务、自然采样、seed42、ratio0、LR `1e-5`、warmup200、公开X-WAM pretrained、2节点8×GH200、单卡batch4、累积4、GBS128、BF16、ZeRO-1、FP32 optimizer state和14,000 optimizer steps。
+
+先生成Atomic9其余8任务的PointMap缓存（已完成的CloseFridge会通过sidecar/SHA256验证后跳过）：
+
+```bash
+cd /capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/src/xwam-robocasa365
+git fetch origin dev/atomic-robocasa365
+git switch dev/atomic-robocasa365
+git merge --ff-only FETCH_HEAD
+
+sbatch deployment/clariden/build_atomic9_pointmap_cache_xwam.sbatch
+```
+
+该作业用4个GPU并行处理4个任务分片。12小时未完成时直接重提同一脚本；完整缓存不会重生成。只有日志以下列结束才进入训练：
+
+```text
+[PASS] Full Atomic9 PointMap cache ready; resubmit after timeout to resume four shards
+```
+
+然后生成14k计划合同：
+
+```bash
+sbatch deployment/clariden/prepare_atomic9_pointmap_14000step_preflight_xwam.sbatch
+```
+
+日志必须包含`[PASS] X-WAM Clariden Atomic9 PointMap fixed 14000-step schedule with epoch-5 milestone`，并输出`total_steps=14000`与真实第5 epoch里程碑步数。最后在提交shell中提供W&B key并启动2节点8卡训练：
+
+```bash
+read -s WANDB_API_KEY
+export WANDB_API_KEY
+sbatch deployment/clariden/train_atomic9_ratio00_pointmap_xwam_8gpu.sbatch
+```
+
+作业会先审计PointMap全局manifest/audit、CloseFridge恢复门禁和两节点变量传递，再加载模型。滚动checkpoint每500步保存、最多5个；Store每3000步保存；第5 epoch的step6855另存milestone；step14000保存final。12小时中断后重提同一训练脚本，planner只会选择model state与rank0～7 optimizer shards完整的最新checkpoint。

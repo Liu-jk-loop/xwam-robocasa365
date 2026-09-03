@@ -204,6 +204,8 @@ Absolute cluster paths are allowed in cluster-local overrides but not as Python 
 - P2训练loader在进程启动时验证P1 manifest/audit绑定、全部sidecar和`.npy` header，但不重复全量数组SHA256；每个worker用read-only mmap和有限LRU按9帧clip读取，避免8个rank各自把完整缓存装入内存。RGB与PointMap使用同一个逐相机时空一致crop；连续XYZ和RGB均bilinear resize，颜色增强只作用RGB。
 - `PointMap-Aux`沿用X-WAM已有第二生成模态的VAE/DiT路径，但通过`use_pointmap`和独立loss键与inverse-depth隔离；二者配置互斥。该阶段PointMap只是训练目标，policy server始终以`run_depth=false`加载，闭环推理不读取PointMap缓存、不启动MuJoCo渲染。
 - P3先在4×GH200固定8 clip执行step 0→2保存及2→4恢复；只有正`train/pointmap_loss`、有限RGB/action/proprio loss、四rank FP32 optimizer state和完整checkpoint同时PASS，2节点8卡正式入口才被授权。
+- Atomic9缓存将四个GPU作为独立任务分片，每个任务仍以episode/camera为恢复单元；任务全部PASS后才原子发布全局manifest/audit索引。Dataset先校验全局索引、任务集和SHA256，再选择当前子任务并执行原有单任务完整合同。
+- Atomic9 PointMap-Aux与Atomic9 RGB-D共用相同任务manifest/global stats、自然采样、seed42、优化器、LR/warmup、2节点8卡GBS128和14,000步停止/保存合同。唯一实验变量是辅助目标：RGB-D使用inverse-depth，PointMap-Aux使用forced-opaque camera-space XYZ。
 
 ## Current external paths
 

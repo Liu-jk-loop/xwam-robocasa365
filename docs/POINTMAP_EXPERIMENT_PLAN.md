@@ -24,10 +24,10 @@
 - [x] P0：CloseFridge 前3个episode、首/中/尾帧，审计三路相机内参、RGB对齐、depth↔XYZ重投影、范围和float16误差；Clariden job `3254392`通过。
 - [x] P0.1：CloseBlenderLid 3个episode首/中/尾帧完成同状态对照；job `3259701`确认`forced_opaque_required`，原始RGB保持不变。
 - [x] P1：用户回报CloseFridge 106 episode/318数组生成与最终审计全部PASS；Job ID未提供，不补造。
-- [ ] P2：memory-map loader、RGB/PointMap同步augmentation及真实batch耗时报告已实现；等待Clariden门禁证据。
-- [ ] P3：`PointMap-Aux`损失、单batch、optimizer update和step 2→4恢复门禁已实现；等待4×GH200运行。
-- [ ] P4：以相同初始化、ratio0、GBS和评测seed完成CloseFridge inverse-depth/PointMap对照。
-- [ ] P5：生成Atomic9全量PointMap缓存并正式训练、评测。
+- [x] P2：memory-map loader、RGB/PointMap同步augmentation及真实batch耗时门禁通过。
+- [x] P3：`PointMap-Aux`损失、单batch、optimizer update和step 2→4恢复门禁通过。
+- [x] P4：CloseFridge 500/1000/1500训练与同seed评测完成；阶段性结果不支持继续单任务追训。
+- [ ] P5：Atomic9四卡分片缓存、全局索引和对齐RGB-D的2节点8卡14k训练代码就绪；等待Clariden生成、预检、训练与评测。
 - [ ] P6：增加 `PointMap-Flex` 真输入流、stream dropout和cross-modality forcing。
 
 ## P0 验收证据

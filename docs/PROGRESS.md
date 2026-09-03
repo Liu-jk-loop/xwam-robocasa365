@@ -5,9 +5,9 @@
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：PointMap单任务500/1000/1500 checkpoint闭环评测
+- 当前阶段：Atomic9 PointMap-Aux全量缓存与14k正式训练
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：P0、P0.1、P1缓存、P2/P3训练恢复门禁和1500步正式训练均已由用户反馈完成；新增500/1000/1500三档同seed42的三路评测，真实闭环为`cluster-pending`。
+- 超算运行状态：P0、P0.1、P1、P2/P3门禁、CloseFridge 1500步训练及三checkpoint评测均已完成；Atomic9缓存与8卡14k训练待Clariden验证。
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | P1～P4已完成；进入Atomic9扩展 | CloseFridge loader/depth loss/resume PASS；step1000两组48%，step1500为88%/84% | 生成并审计Atomic9全量depth cache |
-| M5-PM PointMap几何流 | 单任务训练完成；进入checkpoint评测 | P0/P0.1、CloseFridge缓存、训练门禁及1500步训练由用户反馈完成 | 同合同评测step500/1000/1500 |
+| M5-PM PointMap几何流 | 单任务链路已关闭；进入Atomic9 | CloseFridge训练/评测已完成；Atomic9代码就绪 | 生成并审计Atomic9全量PointMap缓存 |
 | M6 Atomic 正式训练与评测 | Atomic9 RGB/RGB-D训练量诊断 | RGB-D 8.5k/12k为49.6%/56.9%；RGB现有轨迹停在7.5k | 通过续训preflight，从精确7.5k八分片恢复到12k并同合同评测 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
@@ -67,6 +67,9 @@
 - 首次提交在评测preflight因旧的Git clean硬门禁退出，未加载checkpoint或启动server。该门禁已改为warning，并把commit、porcelain状态摘要和tracked diff摘要写入不可变评测合同；dirty状态不再决定能否运行。
 - 后续Job `3272695`通过dirty warning和模拟器probe，但policy子shell因嵌套单引号被截断，在任何server启动前以`unexpected end of file`退出。READY匹配已改用转义双引号，新增内层payload禁止裸单引号并独立`bash -n`的回归门禁；按用户确认将评测默认时限固定为6小时。
 - 为保留Job `3272695`已经写入的旧不可变合同，修正版默认EVAL_ID/结果目录增加`_v2`；不要求删除旧日志或合同。
+- 单任务评测的阶段性结论是：step1000略高于同步RGB-D，step1500相对step1000只小幅增长，没有重现RGB-D step1500的88%跃升。由于旧RGB-D单任务实验的scheduler horizon为3000步、PointMap为1500步，该对比不是严格的模态因果对照。
+- 用户决定不再补单任务训练，直接训练Atomic9 PointMap-Aux。配置与Atomic9 RGB-D对齐：同9任务/自然采样/全局统计、seed42、ratio0、LR `1e-5`、warmup200、公开X-WAM pretrained、2节点8卡、GBS128、BF16+ZeRO-1+FP32 optimizer state和固定14,000步。
+- Atomic9 PointMap缓存使用4卡分片可恢复生成，以训练manifest的精确日期路径为准，最后发布9任务manifest/audit索引。训练保存逻辑与RGB-D相同：滚动每500步最多5个、Store每3000步、真实第5 epoch step6855里程碑和最终checkpoint。真实缓存、preflight、8卡训练与恢复均为`cluster-pending`。
 
 ## Clariden 部署状态
 

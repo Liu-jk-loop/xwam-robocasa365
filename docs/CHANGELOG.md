@@ -1,5 +1,15 @@
 # 变更记录
 
+## 2026-09-03 — Atomic9 PointMap-Aux全量缓存与14k正式训练入口
+
+- 根据单任务PointMap评测的阶段性结果，不再追加CloseFridge单任务训练，直接进入Atomic9 PointMap-Aux实验。任务集、自然比例采样、16D/12D全局统计、seed42、LR `1e-5`、warmup 200、ratio0和初始权重均与Atomic9 RGB-D一致。
+- 新增Atomic9四卡分片缓存生成入口：每个任务使用训练manifest冻结的精确日期目录，逐episode恢复MJCF/state并生成三相机forced-opaque XYZ PointMap。每卡处理一个任务分片，已完成的`.npy + sidecar`会严格校验后跳过；最后发布9任务全局manifest/audit索引。
+- Dataset缓存合同已支持从Atomic9全局索引选择当前任务，并递归验证子任务manifest/audit、SHA256、episode/frame/camera和PointMap数值合同。
+- 新增PointMap正式配置和2节点8×GH200训练入口，与RGB-D同为单卡batch4、累积4、GBS128、BF16、ZeRO-1、FP32 optimizer state和固定14,000步。滚动checkpoint每500步最多5个，Store每3000步持久化，另保留真实第5 epoch的step6855里程碑和最终checkpoint。
+- 通用M6正式训练合同新增`pointmap_aux`模态，强制`use_pointmap=true/use_depth=false`且PointMap loss为有限正值；缓存根、全局manifest和audit均通过`srun env`显式传入两个节点。
+- 本地完成Python编译、Ruff、sbatch语法、Slurm跨shell变量合同、PointMap聚焦测试及全仓测试。真实Atomic9缓存、预检、两节点8卡训练与恢复为`cluster-pending`。
+- 回滚本提交不会删除已生成的PointMap缓存、checkpoint、W&B run或评测结果；外部产物仅能在用户明确确认后处理。
+
 ## 2026-09-03 — CloseFridge PointMap三checkpoint同seed评测
 
 - 用户反馈PointMap-Aux单任务1500步正式训练完成；本轮不修改训练配置、checkpoint或PointMap缓存。

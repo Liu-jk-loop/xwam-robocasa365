@@ -38,6 +38,10 @@ DEPTH_CACHE_ROOT="${XWAM_M6_DEPTH_CACHE_ROOT:-}"
 DEPTH_ENCODING="${XWAM_M6_DEPTH_ENCODING:-}"
 DEPTH_MANIFEST="${XWAM_M6_DEPTH_MANIFEST:-}"
 DEPTH_AUDIT="${XWAM_M6_DEPTH_AUDIT:-}"
+EXPECT_POINTMAP="${XWAM_M6_EXPECT_POINTMAP:-false}"
+POINTMAP_CACHE_ROOT="${XWAM_M6_POINTMAP_CACHE_ROOT:-}"
+POINTMAP_MANIFEST="${XWAM_M6_POINTMAP_MANIFEST:-}"
+POINTMAP_AUDIT="${XWAM_M6_POINTMAP_AUDIT:-}"
 LOG_STEM="${XWAM_M6_LOG_STEM:-m6-formal}"
 MILESTONE_STEP="${XWAM_M6_MILESTONE_STEP:-}"
 BOOTSTRAP_HOT_CHECKPOINT_ROOT="${XWAM_M6_BOOTSTRAP_HOT_CHECKPOINT_ROOT:-}"
@@ -97,6 +101,12 @@ cd "$REPO"
 [[ "$EXPECT_DEPTH" == true || "$EXPECT_DEPTH" == false ]] || {
   xwam_fail "XWAM_M6_EXPECT_DEPTH must be true or false"
 }
+[[ "$EXPECT_POINTMAP" == true || "$EXPECT_POINTMAP" == false ]] || {
+  xwam_fail "XWAM_M6_EXPECT_POINTMAP must be true or false"
+}
+if [[ "$EXPECT_DEPTH" == true && "$EXPECT_POINTMAP" == true ]]; then
+  xwam_fail "depth and PointMap auxiliary modes are mutually exclusive"
+fi
 if [[ -n "$MILESTONE_STEP" ]]; then
   [[ "$MILESTONE_STEP" =~ ^[1-9][0-9]*$ ]] || {
     xwam_fail "XWAM_M6_MILESTONE_STEP must be a positive integer"
@@ -155,6 +165,16 @@ if [[ "$EXPECT_DEPTH" == true ]]; then
   grep -q '"ok": true' "$DEPTH_AUDIT"
   grep -q '"result": "pass"' "$DEPTH_AUDIT"
 fi
+if [[ "$EXPECT_POINTMAP" == true ]]; then
+  test -d "$POINTMAP_CACHE_ROOT"
+  test -s "$POINTMAP_MANIFEST"
+  test -s "$POINTMAP_AUDIT"
+  for artifact in "$POINTMAP_MANIFEST" "$POINTMAP_AUDIT"; do
+    grep -q '"task_count": 9' "$artifact"
+    grep -q '"ok": true' "$artifact"
+    grep -q '"result": "pass"' "$artifact"
+  done
+fi
 git rev-parse HEAD
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "[WARN] Git worktree changes are recorded but do not block M6 formal training" >&2
@@ -203,6 +223,7 @@ echo "bootstrap_step=$BOOTSTRAP_STEP"
 echo "bootstrap_hot_checkpoints=$BOOTSTRAP_HOT_CHECKPOINT_ROOT"
 echo "bootstrap_durable_checkpoints=$BOOTSTRAP_DURABLE_CHECKPOINT_ROOT"
 echo "expect_depth=$EXPECT_DEPTH depth_cache_root=$DEPTH_CACHE_ROOT"
+echo "expect_pointmap=$EXPECT_POINTMAP pointmap_cache_root=$POINTMAP_CACHE_ROOT"
 echo "rolling_checkpoints=$HOT_CHECKPOINT_ROOT (every 500 steps, max 5)"
 echo "durable_checkpoints=$DURABLE_CHECKPOINT_ROOT (every 3000 steps, unlimited)"
 if [[ -n "$MILESTONE_STEP" ]]; then
@@ -338,6 +359,10 @@ srun --nodes="$FORMAL_NUM_NODES" \
     DEPTH_CACHE_ROOT="$DEPTH_CACHE_ROOT" \
     DEPTH_ENCODING="$DEPTH_ENCODING" \
     DEPTH_MANIFEST="$DEPTH_MANIFEST" \
+    EXPECT_POINTMAP="$EXPECT_POINTMAP" \
+    POINTMAP_CACHE_ROOT="$POINTMAP_CACHE_ROOT" \
+    POINTMAP_MANIFEST="$POINTMAP_MANIFEST" \
+    POINTMAP_AUDIT="$POINTMAP_AUDIT" \
     MASTER_ADDR="$MASTER_ADDR" \
     MASTER_PORT="$MASTER_PORT" \
     XWAM_FAILURE_REPORT="$FAILURE_REPORT" \
@@ -421,6 +446,13 @@ if [[ "$EXPECT_DEPTH" == true ]]; then
     "dataset.depth_cache_root=$DEPTH_CACHE_ROOT"
     "dataset.depth_encoding_path=$DEPTH_ENCODING"
     "dataset.depth_cache_manifest=$DEPTH_MANIFEST"
+  )
+fi
+if [[ "$EXPECT_POINTMAP" == true ]]; then
+  TRAIN_ARGS+=(
+    "dataset.pointmap_cache_root=$POINTMAP_CACHE_ROOT"
+    "dataset.pointmap_cache_manifest=$POINTMAP_MANIFEST"
+    "dataset.pointmap_cache_audit=$POINTMAP_AUDIT"
   )
 fi
 if [[ -n "$MILESTONE_STEP" ]]; then

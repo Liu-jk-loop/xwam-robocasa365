@@ -456,7 +456,8 @@ def _final_audit(
     }
     checks = {
         "atomic_only": manifest.get("scope") == "atomic_only",
-        "task_close_fridge": manifest.get("task_name") == "CloseFridge",
+        "task_name_present": isinstance(manifest.get("task_name"), str)
+        and bool(manifest.get("task_name")),
         "episode_count": len(episodes) == expected_episode_count,
         "episode_indices": episode_indices == expected_indices,
         "array_count": len(records) == expected_array_count,
@@ -499,6 +500,10 @@ def _final_audit(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-root", required=True)
+    parser.add_argument(
+        "--dataset-path",
+        help="可选的精确任务日期目录；多任务生成时用于绑定训练manifest。",
+    )
     parser.add_argument("--task-manifest", required=True)
     parser.add_argument("--task-name", default="CloseFridge")
     parser.add_argument("--transparent-audit", required=True)
@@ -524,13 +529,19 @@ def main() -> None:
         raise ValueError("--episodes-per-task不能为负数")
     manifest_path = Path(args.task_manifest).expanduser().resolve()
     task_manifest = load_task_manifest(manifest_path)
-    if tuple(task_manifest.tasks) != (args.task_name,):
+    if args.task_name not in task_manifest.tasks:
         raise ValueError(
-            f"P1 task manifest必须且只能包含{args.task_name}：{task_manifest.tasks}"
+            f"PointMap任务{args.task_name}不在atomic清单中：{task_manifest.tasks}"
         )
-    if args.task_name != "CloseFridge":
-        raise ValueError("P1当前只允许CloseFridge atomic任务")
-    dataset_path = resolve_task_dataset_directory(args.dataset_root, args.task_name)
+    dataset_path = (
+        Path(args.dataset_path).expanduser().resolve()
+        if args.dataset_path
+        else resolve_task_dataset_directory(args.dataset_root, args.task_name)
+    )
+    if args.task_name not in dataset_path.parts:
+        raise ValueError(
+            f"精确dataset path必须包含任务名{args.task_name}：{dataset_path}"
+        )
     root, info, all_episodes = load_episode_records(dataset_path)
     episodes = (
         all_episodes
@@ -540,7 +551,8 @@ def main() -> None:
     formal_full = args.episodes_per_task == 0
     if formal_full and len(episodes) != args.expected_episode_count:
         raise ValueError(
-            f"CloseFridge episode数量漂移：{len(episodes)} != {args.expected_episode_count}"
+            f"{args.task_name} episode数量漂移："
+            f"{len(episodes)} != {args.expected_episode_count}"
         )
     expected_array_count = (
         args.expected_array_count
@@ -661,7 +673,7 @@ def main() -> None:
     print(f"pointmap_cache_audit={audit_output}")
     if not audit["ok"]:
         raise RuntimeError(f"PointMap P1最终审计失败：{audit['errors']}")
-    print("[PASS] CloseFridge resumable forced-opaque PointMap cache")
+    print(f"[PASS] {args.task_name} resumable forced-opaque PointMap cache")
 
 
 if __name__ == "__main__":

@@ -212,12 +212,14 @@ def validate_m6_formal_training_contract(
         and int(get("num_training_steps")) == fixed_training_steps
     )
     formal_modality = str(get("formal_modality", "rgb_only")).lower()
-    if formal_modality not in {"rgb_only", "rgbd"}:
+    if formal_modality not in {"rgb_only", "rgbd", "pointmap_aux"}:
         raise ValueError(
             f"M6正式训练不支持 formal_modality={formal_modality!r}"
         )
     use_depth = bool(get("use_depth"))
+    use_pointmap = bool(get("use_pointmap", False))
     depth_loss_weight = float(get("depth_loss_weight"))
+    pointmap_loss_weight = float(get("pointmap_loss_weight", 0.0))
     checks = {
         "configured_world_size": int(world_size) == expected_world_size,
         "configured_topology": expected_world_size
@@ -253,9 +255,26 @@ def validate_m6_formal_training_contract(
         ),
     }
     if formal_modality == "rgb_only":
-        checks["rgb_only"] = not use_depth and depth_loss_weight == 0.0
+        checks["rgb_only"] = (
+            not use_depth
+            and not use_pointmap
+            and depth_loss_weight == 0.0
+            and pointmap_loss_weight == 0.0
+        )
+    elif formal_modality == "rgbd":
+        checks["rgbd_auxiliary_depth"] = (
+            use_depth
+            and not use_pointmap
+            and depth_loss_weight > 0.0
+            and pointmap_loss_weight == 0.0
+        )
     else:
-        checks["rgbd_auxiliary_depth"] = use_depth and depth_loss_weight > 0.0
+        checks["pointmap_auxiliary_geometry"] = (
+            not use_depth
+            and use_pointmap
+            and depth_loss_weight == 0.0
+            and pointmap_loss_weight > 0.0
+        )
     failed = [name for name, passed in checks.items() if not passed]
     if failed:
         raise ValueError(f"M6正式训练配置合同失败：{failed}")
@@ -639,8 +658,13 @@ def _optimizer_audit(
 
 
 def _metrics_audit(
-    log_path: str | Path, *, expect_depth: bool = False
+    log_path: str | Path,
+    *,
+    expect_depth: bool = False,
+    expect_pointmap: bool = False,
 ) -> dict[str, Any]:
+    if expect_depth and expect_pointmap:
+        raise ValueError("expect_depth与expect_pointmap互斥")
     path = Path(log_path).expanduser().resolve()
     records, errors = parse_console_metrics(
         path.read_text(encoding="utf-8", errors="replace")
@@ -678,6 +702,10 @@ def _metrics_audit(
         float(record["metrics"].get("train/depth_loss", math.inf))
         for record in records
     ]
+    pointmap_losses = [
+        float(record["metrics"].get("train/pointmap_loss", math.inf))
+        for record in records
+    ]
     checks = {
         "metrics_present": bool(records) and not missing,
         "metrics_finite": bool(records) and not non_finite and not errors,
@@ -688,6 +716,13 @@ def _metrics_audit(
     if expect_depth:
         checks["depth_loss_positive"] = bool(depth_losses) and all(
             math.isfinite(value) and value > 0.0 for value in depth_losses
+        )
+    elif expect_pointmap:
+        checks["depth_loss_zero"] = bool(depth_losses) and all(
+            abs(value) <= 1e-8 for value in depth_losses
+        )
+        checks["pointmap_loss_positive"] = bool(pointmap_losses) and all(
+            math.isfinite(value) and value > 0.0 for value in pointmap_losses
         )
     else:
         checks["depth_loss_zero"] = bool(depth_losses) and all(
@@ -720,7 +755,14 @@ def _run_contract(
     events = _load_events(events_path)
     optimizer = _optimizer_audit(optimizer_dir, expected_world_size=expected_world_size)
     expect_depth = bool((metadata.get("dataset") or {}).get("use_depth", False))
-    metrics = _metrics_audit(log_path, expect_depth=expect_depth)
+    expect_pointmap = bool(
+        (metadata.get("dataset") or {}).get("use_pointmap", False)
+    )
+    metrics = _metrics_audit(
+        log_path,
+        expect_depth=expect_depth,
+        expect_pointmap=expect_pointmap,
+    )
     training = metadata.get("training") or {}
     runtime = metadata.get("formal_runtime") or metadata.get("h100_runtime") or {}
     formal_contract = (
