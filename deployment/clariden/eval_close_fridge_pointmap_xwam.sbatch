@@ -6,7 +6,7 @@
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=64
 #SBATCH --mem=450G
-#SBATCH --time=12:00:00
+#SBATCH --time=06:00:00
 #SBATCH --job-name=xwam_cf_pm_eval
 #SBATCH --output=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/close-fridge-pointmap-eval-%j.log
 #SBATCH --error=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/close-fridge-pointmap-eval-%j.err
@@ -301,7 +301,7 @@ for run_index in 0 1 2; do
   ready_file="$CONTROL_ROOT/run_$run_index/policy-ready.json"
   ready=0
   for _ in $(seq 1 900); do
-    if [[ -s "$ready_file" ]] && grep -q '"result": "ready"' "$ready_file"; then
+    if [[ -s "$ready_file" ]] && grep -q "\"result\": \"ready\"" "$ready_file"; then
       ready=1
       break
     fi

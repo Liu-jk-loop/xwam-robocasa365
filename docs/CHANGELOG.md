@@ -18,6 +18,12 @@
 - 本次失败未进入checkpoint解析、policy server或RoboCasa client，使用同一默认EVAL_ID重提不会混入episode结果。
 - failure report改为按Job ID独立命名，重提同一EVAL_ID时不会被上一次已有`failure.txt`遮蔽新根因。
 
+### Policy子shell引号修正
+
+- Job `3272695`在模拟器probe后、任何policy server启动前失败；`policy_step.log`明确为内层`bash -lc`第48行`unexpected end of file`，因此不存在checkpoint加载、显存或模型结构问题。
+- 根因是单引号包裹的`bash -lc` payload内部再次使用了裸单引号匹配READY JSON；外层`bash -n`只能验证payload是一个字符串，无法验证节点最终收到的字符串内容。
+- READY匹配改为转义双引号，并新增针对该payload的两层门禁：禁止内部裸单引号，并把提取后的payload单独交给`bash -n`解析。评测默认时限按用户确认由12小时改为6小时。
+
 ## 2026-09-02 — PointMap P2/P3 loader、恢复门禁与单任务训练入口
 
 - 用户回报P1 CloseFridge 106 episode/318个PointMap数组及最终audit全部PASS；缓存根目录冻结为IOPS上的`robocasa365_camera_xyz_flexpi_v1/atomic`。反馈未含Job ID和实际字节数，因此只记录已给证据。

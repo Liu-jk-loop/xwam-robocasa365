@@ -1817,6 +1817,7 @@ sbatch deployment/clariden/eval_close_fridge_pointmap_xwam.sbatch
 | `step1500_seed42` | 1500 | 42～91 | 2 |
 
 模型seed固定42，target split、最大1000环境步、replan20和action denoise10与既有CloseFridge评测一致。三个模型逐个加载，全部READY后并行执行；PointMap只用于训练辅助loss，评测client只发送RGB和16D proprio，不读取PointMap缓存。
+作业默认时限为6小时。Job `3272695`暴露的policy子shell嵌套引号问题已纳入内层payload独立语法门禁；更新后的脚本才允许重提。
 
 结果根目录为：
 

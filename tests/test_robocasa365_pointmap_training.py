@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -162,6 +163,7 @@ class RoboCasa365PointMapTrainingContractTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         for expected in (
             "#SBATCH --gpus-per-node=4",
+            "#SBATCH --time=06:00:00",
             "close_fridge_pointmap_aux_ratio00_seed42_8gpu",
             "--group-step step500=500",
             "--group-step step1000=1000",
@@ -192,6 +194,30 @@ class RoboCasa365PointMapTrainingContractTests(unittest.TestCase):
         self.assertNotIn("POINTMAP_CACHE_ROOT", job)
         self.assertNotIn("trainer_max_steps", job)
         self.assertNotIn("Independent evaluation repo must be clean", job)
+
+        policy_phase = job.index(
+            "export XWAM_PHASE=close_fridge_pointmap_eval_policy_start"
+        )
+        payload_start = job.index("  bash -lc '\n", policy_phase) + len(
+            "  bash -lc '\n"
+        )
+        payload_end = job.index(
+            "\n' >\"$LOG_ROOT/policy_step.log\"", payload_start
+        )
+        policy_payload = job[payload_start:payload_end]
+        self.assertNotIn(
+            "'",
+            policy_payload,
+            "单引号包裹的bash -lc payload内部不能再出现裸单引号",
+        )
+        syntax = subprocess.run(
+            ["bash", "-n"],
+            input=policy_payload,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(syntax.returncode, 0, syntax.stderr)
 
 
 if __name__ == "__main__":
