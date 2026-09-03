@@ -66,6 +66,7 @@
 - PointMap-Aux在线推理仍只发送三路RGB与16D proprio，明确不读取P1 PointMap cache、不在线渲染depth或生成XYZ。三路结果写入独立`comparison.json`；真实policy加载、150 episodes与汇总为`cluster-pending`。
 - 首次提交在评测preflight因旧的Git clean硬门禁退出，未加载checkpoint或启动server。该门禁已改为warning，并把commit、porcelain状态摘要和tracked diff摘要写入不可变评测合同；dirty状态不再决定能否运行。
 - 后续Job `3272695`通过dirty warning和模拟器probe，但policy子shell因嵌套单引号被截断，在任何server启动前以`unexpected end of file`退出。READY匹配已改用转义双引号，新增内层payload禁止裸单引号并独立`bash -n`的回归门禁；按用户确认将评测默认时限固定为6小时。
+- 为保留Job `3272695`已经写入的旧不可变合同，修正版默认EVAL_ID/结果目录增加`_v2`；不要求删除旧日志或合同。
 
 ## Clariden 部署状态
 

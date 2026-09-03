@@ -23,6 +23,7 @@
 - Job `3272695`在模拟器probe后、任何policy server启动前失败；`policy_step.log`明确为内层`bash -lc`第48行`unexpected end of file`，因此不存在checkpoint加载、显存或模型结构问题。
 - 根因是单引号包裹的`bash -lc` payload内部再次使用了裸单引号匹配READY JSON；外层`bash -n`只能验证payload是一个字符串，无法验证节点最终收到的字符串内容。
 - READY匹配改为转义双引号，并新增针对该payload的两层门禁：禁止内部裸单引号，并把提取后的payload单独交给`bash -n`解析。评测默认时限按用户确认由12小时改为6小时。
+- Job `3272695`已在旧默认目录写入绑定旧commit/脚本摘要的不可变合同；修正版默认EVAL_ID增加`_v2`，无需删除或覆盖旧失败证据即可重提。
 
 ## 2026-09-02 — PointMap P2/P3 loader、恢复门禁与单任务训练入口
 

@@ -164,6 +164,7 @@ class RoboCasa365PointMapTrainingContractTests(unittest.TestCase):
         for expected in (
             "#SBATCH --gpus-per-node=4",
             "#SBATCH --time=06:00:00",
+            "step500-1000-1500_seed42_target_50ep_v2",
             "close_fridge_pointmap_aux_ratio00_seed42_8gpu",
             "--group-step step500=500",
             "--group-step step1000=1000",

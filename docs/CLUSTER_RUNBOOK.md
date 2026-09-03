@@ -1822,7 +1822,7 @@ sbatch deployment/clariden/eval_close_fridge_pointmap_xwam.sbatch
 结果根目录为：
 
 ```text
-/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/close-fridge-pointmap/step500-1000-1500_seed42_target_50ep/
+/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/close-fridge-pointmap/step500-1000-1500_seed42_target_50ep_v2/
 ```
 
 其中包含三个运行子目录、`logs/checkpoint_resolution.json`和总表`comparison.json`。成功日志以`[PASS] CloseFridge PointMap 3-way matched-seed checkpoint evaluation completed`结束。
