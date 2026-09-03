@@ -1788,3 +1788,41 @@ sbatch deployment/clariden/train_close_fridge_pointmap_xwam.sbatch
 ```
 
 IOPS滚动checkpoint每250步保存、最多5个；Store永久checkpoint每500步保存，因此1000与1500步都保留。12小时中断后重提同一脚本，planner只从model state与8份optimizer shard完整的最新checkpoint恢复。最终必须输出PointMap loss为正、8-rank optimizer/checkpoint完整的formal audit PASS。
+
+## PointMap P5：CloseFridge 500/1000/1500评测
+
+训练完成后，在独立评测clone中拉取同一开发分支。评测脚本会同时扫描IOPS滚动和Store永久checkpoint目录，并在启动模型前确认step500、1000、1500均包含model state与rank0～7八份optimizer shard；不需要手工填写epoch编号。
+
+```bash
+DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
+EVAL_REPO="$DEPLOY_STORE/src/xwam-robocasa365-eval"
+
+cd "$EVAL_REPO"
+git fetch origin dev/atomic-robocasa365
+git switch dev/atomic-robocasa365
+git merge --ff-only origin/dev/atomic-robocasa365
+test -z "$(git status --porcelain)"
+
+sbatch deployment/clariden/eval_close_fridge_pointmap_xwam.sbatch
+```
+
+默认单节点4×GH200启动6个server和6个CloseFridge client：
+
+| 运行 | checkpoint | RoboCasa seed范围 | GPU |
+| --- | ---: | --- | ---: |
+| `step500_seed42` | 500 | 42～91 | 0 |
+| `step500_seed7` | 500 | 7～56 | 1 |
+| `step1000_seed42` | 1000 | 42～91 | 2 |
+| `step1000_seed7` | 1000 | 7～56 | 3 |
+| `step1500_seed42` | 1500 | 42～91 | 0 |
+| `step1500_seed7` | 1500 | 7～56 | 1 |
+
+模型seed固定42，target split、最大1000环境步、replan20和action denoise10与既有CloseFridge评测一致。六个模型逐个加载，全部READY后并行执行；PointMap只用于训练辅助loss，评测client只发送RGB和16D proprio，不读取PointMap缓存。
+
+结果根目录为：
+
+```text
+/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/close-fridge-pointmap/step500-1000-1500_seed42-7_target_50ep/
+```
+
+其中包含六个运行子目录、`logs/checkpoint_resolution.json`和总表`comparison.json`。成功日志以`[PASS] CloseFridge PointMap 6-way checkpoint/seed evaluation completed`结束。

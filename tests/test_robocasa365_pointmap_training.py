@@ -1,10 +1,27 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 
+from scripts.resolve_robocasa365_eval_checkpoints import (
+    resolve_exact_checkpoints,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _make_checkpoint(root: Path, step: int, *, ranks: int = 8) -> Path:
+    checkpoint = root / f"epoch=0-step={step}.ckpt" / "checkpoint"
+    checkpoint.mkdir(parents=True)
+    (checkpoint / "mp_rank_00_model_states.pt").write_bytes(b"model")
+    for rank in range(ranks):
+        (
+            checkpoint
+            / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt"
+        ).write_bytes(b"optimizer")
+    return checkpoint.parent
 
 
 class RoboCasa365PointMapTrainingContractTests(unittest.TestCase):
@@ -105,6 +122,72 @@ class RoboCasa365PointMapTrainingContractTests(unittest.TestCase):
         self.assertIn("training_use_pointmap", policy)
         self.assertIn("runner = XWAMRunner(config=config, run_depth=False)", policy)
         self.assertIn('"online_depth_required": False', policy)
+
+    def test_pointmap_evaluation_resolves_three_complete_checkpoints(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            expected = {
+                f"step{step}": _make_checkpoint(root, step)
+                for step in (500, 1000, 1500)
+            }
+            _make_checkpoint(root, 1250, ranks=7)
+            report = resolve_exact_checkpoints(
+                [root],
+                {"step500": 500, "step1000": 1000, "step1500": 1500},
+                expected_world_size=8,
+            )
+            self.assertTrue(report["ok"], report["errors"])
+            self.assertEqual(
+                {
+                    group: record["path"]
+                    for group, record in report["groups"].items()
+                },
+                {
+                    group: str(checkpoint.resolve())
+                    for group, checkpoint in expected.items()
+                },
+            )
+            incomplete = resolve_exact_checkpoints(
+                [root],
+                {"step1250": 1250},
+                expected_world_size=8,
+            )
+            self.assertFalse(incomplete["ok"])
+            self.assertIn("完整step 1250", incomplete["errors"][0])
+
+    def test_pointmap_evaluation_runs_three_steps_with_matched_seeds(self) -> None:
+        job = (
+            REPO_ROOT
+            / "deployment/clariden/eval_close_fridge_pointmap_xwam.sbatch"
+        ).read_text(encoding="utf-8")
+        for expected in (
+            "#SBATCH --gpus-per-node=4",
+            "close_fridge_pointmap_aux_ratio00_seed42_8gpu",
+            "--group-step step500=500",
+            "--group-step step1000=1000",
+            "--group-step step1500=1500",
+            "--expected-world-size 8",
+            "RUN_NAMES=(",
+            "step500_seed42 step500_seed7",
+            "step1000_seed42 step1000_seed7",
+            "step1500_seed42 step1500_seed7",
+            "RUN_SEEDS=(42 7 42 7 42 7)",
+            "RUN_GPUS=(0 1 2 3 0 1)",
+            'EVAL_ROOT="$DEPLOY_IOPS/x-wam-eval/close-fridge-pointmap/$EVAL_ID"',
+            '"training_use_pointmap": true',
+            '"training_auxiliary_geometry": "pointmap"',
+            '"training_modality": "pointmap_aux"',
+            '"online_inference_modalities": ["rgb", "proprio"]',
+            '"online_pointmap_required": False',
+        ):
+            self.assertIn(expected, job)
+        self.assertEqual(job.count("--server-id 5"), 1)
+        self.assertEqual(job.count("--client-id 5"), 1)
+        self.assertIn("TOPOLOGY_5=", job)
+        self.assertIn("CHECKPOINT_5=", job)
+        self.assertIn("GPU_5=", job)
+        self.assertNotIn("POINTMAP_CACHE_ROOT", job)
+        self.assertNotIn("trainer_max_steps", job)
 
 
 if __name__ == "__main__":

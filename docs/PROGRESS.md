@@ -1,13 +1,13 @@
 # 项目进度
 
-更新时间：2026-09-02
+更新时间：2026-09-03
 
 ## 当前状态
 
 - 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：PointMap P2/P3 loader与单任务训练恢复门禁
+- 当前阶段：PointMap单任务500/1000/1500 checkpoint闭环评测
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：P0 job `3254392`、P0.1 job `3259701`和P1 CloseFridge 106 episode/318数组均已PASS；P1反馈未含Job ID。P2/P3代码和作业已就绪，4×GH200真实batch/更新/resume为`cluster-pending`。
+- 超算运行状态：P0、P0.1、P1缓存、P2/P3训练恢复门禁和1500步正式训练均已由用户反馈完成；新增500/1000/1500三档、每档seed42/7的六路评测，真实闭环为`cluster-pending`。
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | P1～P4已完成；进入Atomic9扩展 | CloseFridge loader/depth loss/resume PASS；step1000两组48%，step1500为88%/84% | 生成并审计Atomic9全量depth cache |
-| M5-PM PointMap几何流 | P1通过；P2/P3实现完成 | P0/P0.1及CloseFridge全量缓存PASS | 4×GH200 batch、正PointMap loss、step 2→4恢复门禁 |
+| M5-PM PointMap几何流 | 单任务训练完成；进入checkpoint评测 | P0/P0.1、CloseFridge缓存、训练门禁及1500步训练由用户反馈完成 | 同合同评测step500/1000/1500 |
 | M6 Atomic 正式训练与评测 | Atomic9 RGB/RGB-D训练量诊断 | RGB-D 8.5k/12k为49.6%/56.9%；RGB现有轨迹停在7.5k | 通过续训preflight，从精确7.5k八分片恢复到12k并同合同评测 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
@@ -60,7 +60,10 @@
 - P2 loader已接入严格manifest/audit/sidecar/header合同；启动不重新哈希全部数组，worker以read-only mmap按clip读取float16 XYZ并转float32。RGB/PointMap共享crop，PointMap使用bilinear，颜色抖动只作用RGB。
 - P3 `PointMap-Aux`复用第二生成模态但使用独立`use_pointmap`、`pointmap_loss_weight`和`train/pointmap_loss`合同；与inverse-depth互斥，policy server加载此类checkpoint时仍显式`run_depth=false`，在线推理只需RGB/proprio。
 - 新4卡门禁先输出真实batch与startup/sample/batch耗时，再固定8 clip完成step 0→2保存和step 2→4恢复；联合审计要求正PointMap loss、四rank FP32 optimizer state及完整checkpoint。正式入口只有读到该门禁PASS才启动。
-- CloseFridge正式配置固定公开X-WAM pretrained、ratio0、seed42、2节点×4 GH200、batch4×accum4×8=GBS128、ZeRO-1、BF16计算、FP32 optimizer state和1500步；500/1000/1500写Store永久checkpoint。真实门禁与正式训练均为`cluster-pending`。
+- CloseFridge正式配置固定公开X-WAM pretrained、ratio0、seed42、2节点×4 GH200、batch4×accum4×8=GBS128、ZeRO-1、BF16计算、FP32 optimizer state和1500步；500/1000/1500写Store永久checkpoint。用户已反馈训练完成，但本轮未提供最终Job ID与formal audit路径，因此只记录完成反馈，不补造机器provenance。
+- 用户已反馈CloseFridge PointMap-Aux正式训练完成。新增单节点4×GH200六路评测：step500/1000/1500各自运行seed42～91与seed7～56两组50 episodes，模型seed固定42；GPU映射为`0,1,2,3,0,1`，每卡最多两个server，与已验证拓扑容量一致。
+- 评测从Capstor experiment目录读取训练时resolved `config.yaml`，从IOPS滚动与Store永久目录中只选择八rank完整checkpoint且同step优先final/Store副本。六个模型串行完成加载以避免主机内存与Store I/O峰值，rollout并行执行。
+- PointMap-Aux在线推理仍只发送三路RGB与16D proprio，明确不读取P1 PointMap cache、不在线渲染depth或生成XYZ。六路结果及三档双seed均值写入独立`comparison.json`；真实policy加载、300 episodes与汇总为`cluster-pending`。
 
 ## Clariden 部署状态
 
