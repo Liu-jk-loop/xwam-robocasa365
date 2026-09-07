@@ -230,6 +230,7 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "eval_close_fridge_rgbd_xwam.sbatch",
             "eval_fastwam_atomic9_xwam_b_shared4.sbatch",
             "eval_m6_atomic18_xwam.sbatch",
+            "eval_atomic9_pointmap_step8500_xwam.sbatch",
         ):
             result = subprocess.run(
                 ["bash", "-n", str(DEPLOY_ROOT / script)],
@@ -251,7 +252,8 @@ class ClaridenDeploymentTest(unittest.TestCase):
         for expected in (
             "#SBATCH --export=ALL",
             "#SBATCH --error=",
-            'EVAL_ROOT="$DEPLOY_IOPS/x-wam-eval/atomic18/$EVAL_ID"',
+            '#SBATCH --time=06:00:00',
+            'EVAL_ROOT="$DEPLOY_IOPS/x-wam-eval/$EVAL_NAMESPACE/$EVAL_ID"',
             'ROBOCASA_ROOT="$DEPLOY_STORE/src/robocasa"',
             'ROBOSUITE_ROOT="$DEPLOY_STORE/src/robosuite"',
             "fixtures/sinks/Sink025/model.xml",
@@ -260,7 +262,9 @@ class ClaridenDeploymentTest(unittest.TestCase):
             "evaluation_contract.txt",
             'LOG_ROOT="$EVAL_ROOT/logs"',
             'RESULT_ROOT="$EVAL_ROOT/results"',
-            'SUMMARY_CSV="$EVAL_ROOT/summary_atomic18.csv"',
+            'SUMMARY_CSV="$EVAL_ROOT/summary_${SUMMARY_STEM}.csv"',
+            'REQUIRE_POINTMAP="${XWAM_EVAL_REQUIRE_POINTMAP:-false}"',
+            '"training_use_pointmap": true',
             '"$LOG_ROOT/server_launcher.log"',
             '--log-root "$LOG_ROOT"',
             'EVAL_ID="$EVAL_ID"',
@@ -270,6 +274,21 @@ class ClaridenDeploymentTest(unittest.TestCase):
         ):
             self.assertIn(expected, eval_script)
         self.assertNotIn('EVAL_ROOT="$DEPLOY_STORE/evaluations/xwam', eval_script)
+
+        pointmap_eval = (
+            DEPLOY_ROOT / "eval_atomic9_pointmap_step8500_xwam.sbatch"
+        ).read_text(encoding="utf-8")
+        for expected in (
+            "#SBATCH --time=06:00:00",
+            "CHECKPOINT_STEP=8500",
+            "robocasa365_atomic9_fastwam_overlap_ratio00_pointmap_seed42_8gpu",
+            "robocasa365_atomic9_pointmap_step8500_6server_9client.json",
+            "XWAM_EVAL_REQUIRE_DEPTH=false",
+            "XWAM_EVAL_REQUIRE_POINTMAP=true",
+            "XWAM_EVAL_NAMESPACE=atomic9-pointmap",
+            "seed 42～91",
+        ):
+            self.assertIn(expected, pointmap_eval)
 
         close_fridge_eval = (
             DEPLOY_ROOT / "eval_close_fridge_ab_xwam.sbatch"

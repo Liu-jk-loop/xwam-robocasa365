@@ -6,7 +6,7 @@
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=64
 #SBATCH --mem=450G
-#SBATCH --time=12:00:00
+#SBATCH --time=06:00:00
 #SBATCH --job-name=xwam_m6_eval
 #SBATCH --output=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/m6-eval-%j.log
 #SBATCH --error=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys/logs/xwam/m6-eval-%j.err
@@ -16,33 +16,57 @@ set -Eeuo pipefail
 
 DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
 DEPLOY_IOPS=/iopsstor/scratch/cscs/zjingchen/terry_nys
-REPO="$DEPLOY_STORE/src/xwam-robocasa365"
+REPO="${XWAM_EVAL_REPO:-$DEPLOY_STORE/src/xwam-robocasa365}"
 ROBOCASA_ROOT="$DEPLOY_STORE/src/robocasa"
 ROBOSUITE_ROOT="$DEPLOY_STORE/src/robosuite"
 XWAM_EDF="$DEPLOY_STORE/containers/edf/xwam.toml"
 ROBOCASA_EDF="$DEPLOY_STORE/containers/edf/robocasa365.toml"
 RUNTIME_OVERLAY="$DEPLOY_IOPS/python/xwam-nvtx-0.2.15"
 WAN_DIR="$DEPLOY_STORE/checkpoints/xwam/wan22_5b"
-MANIFEST="$DEPLOY_STORE/manifests/xwam/m6/robocasa365_m6_atomic_seen18_manifest.json"
-STATS="$DEPLOY_STORE/manifests/xwam/m6/robocasa365_m6_atomic_seen18_global_stats.json"
+MANIFEST="${XWAM_EVAL_MANIFEST:-$DEPLOY_STORE/manifests/xwam/m6/robocasa365_m6_atomic_seen18_manifest.json}"
+STATS="${XWAM_EVAL_STATS:-$DEPLOY_STORE/manifests/xwam/m6/robocasa365_m6_atomic_seen18_global_stats.json}"
 TOPOLOGY="${XWAM_EVAL_TOPOLOGY:-$REPO/configs/evaluation/robocasa365_m6_atomic18_8server_16client.json}"
 EVAL_ID="${XWAM_EVAL_ID:-}"
 EXPERIMENT_DIR="${XWAM_EVAL_EXPERIMENT_DIR:-}"
 CHECKPOINT="${XWAM_EVAL_CHECKPOINT:-}"
 EPISODES_PER_TASK="${XWAM_EVAL_EPISODES:-50}"
+EVAL_NAMESPACE="${XWAM_EVAL_NAMESPACE:-atomic18}"
+SUMMARY_STEM="${XWAM_EVAL_SUMMARY_STEM:-atomic18}"
+REQUIRE_DEPTH="${XWAM_EVAL_REQUIRE_DEPTH:-false}"
+REQUIRE_POINTMAP="${XWAM_EVAL_REQUIRE_POINTMAP:-false}"
 
 if [[ -z "$EVAL_ID" || ! "$EVAL_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "[FAIL] XWAM_EVAL_ID must be nonempty and contain only A-Za-z0-9._-" >&2
   exit 2
 fi
-EVAL_ROOT="$DEPLOY_IOPS/x-wam-eval/atomic18/$EVAL_ID"
+if [[ -z "$EVAL_NAMESPACE" || ! "$EVAL_NAMESPACE" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "[FAIL] XWAM_EVAL_NAMESPACE must contain only A-Za-z0-9._-" >&2
+  exit 2
+fi
+if [[ -z "$SUMMARY_STEM" || ! "$SUMMARY_STEM" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "[FAIL] XWAM_EVAL_SUMMARY_STEM must contain only A-Za-z0-9._-" >&2
+  exit 2
+fi
+if [[ "$REQUIRE_DEPTH" != true && "$REQUIRE_DEPTH" != false ]]; then
+  echo "[FAIL] XWAM_EVAL_REQUIRE_DEPTH must be true or false" >&2
+  exit 2
+fi
+if [[ "$REQUIRE_POINTMAP" != true && "$REQUIRE_POINTMAP" != false ]]; then
+  echo "[FAIL] XWAM_EVAL_REQUIRE_POINTMAP must be true or false" >&2
+  exit 2
+fi
+if [[ "$REQUIRE_DEPTH" == true && "$REQUIRE_POINTMAP" == true ]]; then
+  echo "[FAIL] depth and PointMap auxiliary modes are mutually exclusive" >&2
+  exit 2
+fi
+EVAL_ROOT="$DEPLOY_IOPS/x-wam-eval/$EVAL_NAMESPACE/$EVAL_ID"
 RESULT_ROOT="$EVAL_ROOT/results"
 LOG_ROOT="$EVAL_ROOT/logs"
 CONTROL_ROOT="$EVAL_ROOT/.runtime/$SLURM_JOB_ID"
 READY_FILE="$CONTROL_ROOT/policy-ready.json"
 STOP_FILE="$CONTROL_ROOT/stop-policy"
 SUMMARY_JSON="$EVAL_ROOT/aggregate.json"
-SUMMARY_CSV="$EVAL_ROOT/summary_atomic18.csv"
+SUMMARY_CSV="$EVAL_ROOT/summary_${SUMMARY_STEM}.csv"
 mkdir -p "$RESULT_ROOT" "$LOG_ROOT/clients" "$LOG_ROOT/servers"
 exec > >(tee -a "$LOG_ROOT/job.log") 2> >(tee -a "$LOG_ROOT/job.err" >&2)
 
@@ -68,19 +92,35 @@ test -s "$ROBOCASA_ROOT/robocasa/models/assets/fixtures/sinks/Sink025/model.xml"
 test -d "$RUNTIME_OVERLAY"
 test -d "$EXPERIMENT_DIR"
 test -s "$EXPERIMENT_DIR/config.yaml"
+if [[ "$REQUIRE_DEPTH" == true ]]; then
+  grep -Eq '^[[:space:]]*use_depth:[[:space:]]*true[[:space:]]*$' "$EXPERIMENT_DIR/config.yaml" || {
+    xwam_fail "RGB-D evaluation requires use_depth=true in experiment config"
+  }
+elif [[ "$REQUIRE_POINTMAP" == true ]]; then
+  grep -Eq '^[[:space:]]*use_depth:[[:space:]]*false[[:space:]]*$' "$EXPERIMENT_DIR/config.yaml" || {
+    xwam_fail "PointMap evaluation requires use_depth=false in experiment config"
+  }
+  grep -Eq '^[[:space:]]*use_pointmap:[[:space:]]*true[[:space:]]*$' "$EXPERIMENT_DIR/config.yaml" || {
+    xwam_fail "PointMap evaluation requires use_pointmap=true in experiment config"
+  }
+else
+  grep -Eq '^[[:space:]]*use_depth:[[:space:]]*false[[:space:]]*$' "$EXPERIMENT_DIR/config.yaml" || {
+    xwam_fail "RGB-only evaluation requires use_depth=false in experiment config"
+  }
+fi
 test -d "$CHECKPOINT"
 test -s "$CHECKPOINT/checkpoint/mp_rank_00_model_states.pt"
 test -s "$WAN_DIR/config.json"
 test -s "$MANIFEST"
 test -s "$STATS"
 test -s "$TOPOLOGY"
-test -z "$(git status --porcelain)" || {
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "[WARN] Evaluation Git worktree is dirty; status and diff digests are recorded in the immutable contract" >&2
   git status --short >&2
-  xwam_fail "Git worktree must be clean before M6 evaluation"
-}
+fi
 
 mkdir -p "$CONTROL_ROOT" "$DEPLOY_IOPS/x-wam-eval/.locks"
-exec 9>"$DEPLOY_IOPS/x-wam-eval/.locks/atomic18-$EVAL_ID.lock"
+exec 9>"$DEPLOY_IOPS/x-wam-eval/.locks/$EVAL_NAMESPACE-$EVAL_ID.lock"
 flock -n 9 || xwam_fail "Another evaluation job is already writing $EVAL_ROOT"
 
 # 同一 eval ID 可以续跑，但不能混入另一 checkpoint/topology/commit 的 episode。
@@ -91,7 +131,11 @@ EXPECTED_CONTRACT="$CONTROL_ROOT/evaluation_contract.expected.txt"
   printf 'experiment_dir=%s\n' "$(realpath "$EXPERIMENT_DIR")"
   printf 'checkpoint=%s\n' "$(realpath "$CHECKPOINT")"
   printf 'episodes_per_task=%s\n' "$EPISODES_PER_TASK"
+  printf 'require_depth=%s\n' "$REQUIRE_DEPTH"
+  printf 'require_pointmap=%s\n' "$REQUIRE_POINTMAP"
   printf 'repo_commit=%s\n' "$(git rev-parse HEAD)"
+  printf 'repo_status_sha256=%s\n' "$(git status --porcelain | sha256sum | awk '{print $1}')"
+  printf 'repo_tracked_diff_sha256=%s\n' "$(git diff --binary HEAD | sha256sum | awk '{print $1}')"
   printf 'robocasa_commit=%s\n' "$(git -C "$ROBOCASA_ROOT" rev-parse HEAD)"
   printf 'robocasa_tracked_diff_sha256=%s\n' "$(git -C "$ROBOCASA_ROOT" diff --binary HEAD | sha256sum | awk '{print $1}')"
   printf 'robosuite_commit=%s\n' "$(git -C "$ROBOSUITE_ROOT" rev-parse HEAD)"
@@ -115,7 +159,8 @@ echo "eval_id=$EVAL_ID"
 echo "experiment_dir=$EXPERIMENT_DIR"
 echo "checkpoint=$CHECKPOINT"
 echo "episodes_per_task=$EPISODES_PER_TASK"
-echo "topology=8 servers / 16 clients / 4 GPUs"
+echo "topology=$(basename "$TOPOLOGY")"
+echo "training_auxiliary_mode=depth:$REQUIRE_DEPTH pointmap:$REQUIRE_POINTMAP"
 echo "model_seed=42 task_seed_start=42 replan=20 action_denoise_steps=10"
 echo "result_root=$RESULT_ROOT"
 echo "failure_report=$FAILURE_REPORT"
@@ -192,12 +237,27 @@ for _ in $(seq 1 5400); do
   fi
   if ! kill -0 "$POLICY_STEP_PID" 2>/dev/null; then
     wait "$POLICY_STEP_PID"
-    xwam_fail "Policy pool exited before all eight servers became ready"
+    xwam_fail "Policy pool exited before all configured servers became ready"
   fi
   sleep 2
 done
 test -s "$READY_FILE"
 grep -q '"ok": true' "$READY_FILE"
+if [[ "$REQUIRE_POINTMAP" == true ]]; then
+  while read -r server_id; do
+    status_file="$LOG_ROOT/servers/server_${server_id}_status.json"
+    test -s "$status_file"
+    grep -q '"training_use_depth": false' "$status_file"
+    grep -q '"training_use_pointmap": true' "$status_file"
+    grep -q '"training_auxiliary_geometry": "pointmap"' "$status_file"
+    grep -q '"inference_run_depth": false' "$status_file"
+    grep -q '"online_depth_required": false' "$status_file"
+  done < <(
+    grep -o '"server_id"[[:space:]]*:[[:space:]]*[0-9]\+' "$TOPOLOGY" \
+      | awk -F: '{gsub(/[[:space:]]/, "", $2); print $2}' \
+      | sort -n -u
+  )
+fi
 
 XWAM_PHASE=eval_client_pool_srun
 set +e
@@ -268,4 +328,4 @@ grep -q '"result": "pass"' "$SUMMARY_JSON"
 rm -f "$STOP_FILE" "$READY_FILE" "$EXPECTED_CONTRACT"
 rmdir "$CONTROL_ROOT" "$EVAL_ROOT/.runtime" 2>/dev/null || true
 trap - EXIT INT TERM
-echo "[PASS] X-WAM M6 Atomic-Seen 18 evaluation completed: $SUMMARY_JSON"
+echo "[PASS] X-WAM evaluation completed: $SUMMARY_JSON"

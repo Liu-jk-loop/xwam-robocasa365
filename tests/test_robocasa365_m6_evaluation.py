@@ -34,6 +34,10 @@ TOPOLOGY = (
     REPO_ROOT
     / "configs/evaluation/robocasa365_m6_atomic18_8server_16client.json"
 )
+POINTMAP_ATOMIC9_TOPOLOGY = (
+    REPO_ROOT
+    / "configs/evaluation/robocasa365_atomic9_pointmap_step8500_6server_9client.json"
+)
 
 
 class RoboCasa365M6EvaluationTest(unittest.TestCase):
@@ -182,6 +186,83 @@ class RoboCasa365M6EvaluationTest(unittest.TestCase):
             [topology["servers"][index]["gpu"] for index in range(8)],
             [0, 1, 2, 3, 0, 1, 2, 3],
         )
+
+    def test_atomic9_pointmap_topology_uses_six_servers_and_matched_seeds(self) -> None:
+        topology = load_m6_evaluation_topology(
+            POINTMAP_ATOMIC9_TOPOLOGY,
+            REPO_ROOT,
+        )
+        self.assertEqual(topology["model_seed"], 42)
+        self.assertEqual(topology["seed_start"], 42)
+        self.assertEqual(topology["episodes_per_task"], 50)
+        self.assertEqual(topology["replan_steps"], 20)
+        self.assertEqual(topology["action_denoise_steps"], 10)
+        self.assertEqual(len(topology["servers"]), 6)
+        self.assertEqual(len(topology["clients"]), 9)
+        self.assertEqual(
+            [topology["servers"][index]["gpu"] for index in range(6)],
+            [0, 0, 1, 1, 2, 3],
+        )
+        self.assertEqual(
+            [task["name"] for client in topology["clients"].values() for task in client["tasks"]],
+            [
+                "OpenStandMixerHead",
+                "PickPlaceSinkToCounter",
+                "TurnOnElectricKettle",
+                "CloseFridge",
+                "TurnOnMicrowave",
+                "OpenDrawer",
+                "CoffeeSetupMug",
+                "PickPlaceDrawerToCounter",
+                "CloseBlenderLid",
+            ],
+        )
+
+    def test_atomic9_pointmap_aggregate_accepts_exactly_nine_tasks(self) -> None:
+        topology = load_m6_evaluation_topology(
+            POINTMAP_ATOMIC9_TOPOLOGY,
+            REPO_ROOT,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for client_id, client in topology["clients"].items():
+                task = client["tasks"][0]["name"]
+                path = root / task / "result.json"
+                path.parent.mkdir(parents=True)
+                path.write_text(
+                    json.dumps(
+                        {
+                            "result": "pass",
+                            "task": task,
+                            "client_id": client_id,
+                            "server_id": client["server_id"],
+                            "split": "target",
+                            "model_seed": 42,
+                            "seed_start": 42,
+                            "episodes_expected": 1,
+                            "episodes_completed": 1,
+                            "n_success": 1,
+                            "success_rate": 1.0,
+                            "mean_inference_time_s": 1.0,
+                            "max_steps": 1000,
+                            "replan_steps": 20,
+                            "action_denoise_steps": 10,
+                            "video_fps": 20,
+                            "episodes": [{"seed": 42, "success": True}],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            report = aggregate(
+                topology_path=POINTMAP_ATOMIC9_TOPOLOGY,
+                output_root=root,
+                episodes_per_task=1,
+                eval_id="pointmap-step8500-unit",
+                checkpoint="/tmp/epoch=6-step=8500.ckpt",
+            )
+            self.assertTrue(report["ok"], report["errors"])
+            self.assertEqual(report["overall"]["tasks"], 9)
+            self.assertEqual(report["overall"]["episodes"], 9)
 
     def test_multitask_server_rejects_task_outside_assigned_subset(self) -> None:
         allowed = ["OpenCabinet", "NavigateKitchen"]

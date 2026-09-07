@@ -1863,3 +1863,43 @@ sbatch deployment/clariden/train_atomic9_ratio00_pointmap_xwam_8gpu.sbatch
 ```
 
 作业会先审计PointMap全局manifest/audit、CloseFridge恢复门禁和两节点变量传递，再加载模型。滚动checkpoint每500步保存、最多5个；Store每3000步保存；第5 epoch的step6855另存milestone；step14000保存final。12小时中断后重提同一训练脚本，planner只会选择model state与rank0～7 optimizer shards完整的最新checkpoint。
+
+## PointMap P6：Atomic9 step8500正式评测
+
+评测使用独立分支，不切换或修改正在训练的checkout。step8500是IOPS滚动保存点，最多只保留后续5档checkpoint；应在step11000写入前启动评测或先把完整step8500目录复制到独立位置。
+
+```bash
+DEPLOY_STORE=/capstor/store/cscs/swissai/aa004/users/zjingchen/terry_nys
+EVAL_REPO="$DEPLOY_STORE/src/xwam-robocasa365-eval"
+
+cd "$EVAL_REPO"
+git fetch origin eval/atomic9-pointmap-8500
+git switch --force-create eval/atomic9-pointmap-8500 FETCH_HEAD
+
+sbatch deployment/clariden/eval_atomic9_pointmap_step8500_xwam.sbatch
+```
+
+默认从下列目录精确寻找完整step8500：
+
+```text
+/iopsstor/scratch/cscs/zjingchen/terry_nys/xwam_run/robocasa365_atomic9_fastwam_overlap_ratio00_pointmap_seed42_8gpu/checkpoints
+```
+
+如果checkpoint已经复制到其他路径，可以直接指定完整目录：
+
+```bash
+export XWAM_POINTMAP_STEP8500_CHECKPOINT=/absolute/path/epoch=N-step=8500.ckpt
+sbatch deployment/clariden/eval_atomic9_pointmap_step8500_xwam.sbatch
+```
+
+作业固定单节点4×GH200、6个server和9个client，GPU映射为`0,0,1,1,2,3`。每个Atomic9任务运行seed42～91的50 episodes；PointMap仅为训练辅助监督，在线client仍只发送RGB和proprio。Slurm最长时限为6小时，结果写入：
+
+```text
+/iopsstor/scratch/cscs/zjingchen/terry_nys/x-wam-eval/atomic9-pointmap/atomic9_pointmap_step8500_seed42_target_50ep/
+```
+
+完成标志为：
+
+```text
+[PASS] X-WAM evaluation completed: .../aggregate.json
+```

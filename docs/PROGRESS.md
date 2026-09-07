@@ -1,13 +1,13 @@
 # 项目进度
 
-更新时间：2026-09-03
+更新时间：2026-09-07
 
 ## 当前状态
 
-- 当前分支：`dev/atomic-robocasa365`
-- 当前阶段：Atomic9 PointMap-Aux全量缓存与14k正式训练
+- 当前分支：`eval/atomic9-pointmap-8500`
+- 当前阶段：Atomic9 PointMap-Aux训练中，准备step8500闭环评测
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：P0、P0.1、P1、P2/P3门禁、CloseFridge 1500步训练及三checkpoint评测均已完成；Atomic9缓存与8卡14k训练待Clariden验证。
+- 超算运行状态：P0、P0.1、P1、P2/P3门禁、CloseFridge训练/评测和Atomic9缓存均已完成；Atomic9 8卡14k训练进行中，step8500评测代码待Clariden运行。
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,7 +20,7 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | P1～P4已完成；进入Atomic9扩展 | CloseFridge loader/depth loss/resume PASS；step1000两组48%，step1500为88%/84% | 生成并审计Atomic9全量depth cache |
-| M5-PM PointMap几何流 | 单任务链路已关闭；进入Atomic9 | CloseFridge训练/评测已完成；Atomic9代码就绪 | 生成并审计Atomic9全量PointMap缓存 |
+| M5-PM PointMap几何流 | Atomic9正式训练与评测 | Atomic9缓存完成、8卡训练进行中 | 完成step8500的9任务闭环评测 |
 | M6 Atomic 正式训练与评测 | Atomic9 RGB/RGB-D训练量诊断 | RGB-D 8.5k/12k为49.6%/56.9%；RGB现有轨迹停在7.5k | 通过续训preflight，从精确7.5k八分片恢复到12k并同合同评测 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
 
@@ -70,6 +70,7 @@
 - 单任务评测的阶段性结论是：step1000略高于同步RGB-D，step1500相对step1000只小幅增长，没有重现RGB-D step1500的88%跃升。由于旧RGB-D单任务实验的scheduler horizon为3000步、PointMap为1500步，该对比不是严格的模态因果对照。
 - 用户决定不再补单任务训练，直接训练Atomic9 PointMap-Aux。配置与Atomic9 RGB-D对齐：同9任务/自然采样/全局统计、seed42、ratio0、LR `1e-5`、warmup200、公开X-WAM pretrained、2节点8卡、GBS128、BF16+ZeRO-1+FP32 optimizer state和固定14,000步。
 - Atomic9 PointMap缓存使用4卡分片可恢复生成，以训练manifest的精确日期路径为准，最后发布9任务manifest/audit索引。训练保存逻辑与RGB-D相同：滚动每500步最多5个、Store每3000步、真实第5 epoch step6855里程碑和最终checkpoint。真实缓存、preflight、8卡训练与恢复均为`cluster-pending`。
+- Atomic9 PointMap训练已由用户确认进行到中段；不改变当前Flex-Pi裁剪合同，先保留该实验作为完整基线。新增独立评测分支和step8500入口：单节点4卡运行6个policy server与9个client，每任务固定seed42～91、50 episodes，最长6小时。PointMap仍只作为训练期辅助监督，闭环不读取PointMap缓存；真实评测为`cluster-pending`。
 
 ## Clariden 部署状态
 

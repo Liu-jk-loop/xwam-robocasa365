@@ -102,7 +102,7 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         action="append",
         dest="server_ids",
-        help="只启动指定server；可重复。默认启动0..7。",
+        help="只启动指定server；可重复。默认启动topology中的全部server。",
     )
     args = parser.parse_args()
     if args.startup_timeout_seconds <= 0:
@@ -132,7 +132,7 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     topology = load_m6_evaluation_topology(args.topology, REPO_ROOT)
-    server_ids = sorted(args.server_ids or range(8))
+    server_ids = sorted(args.server_ids or topology["servers"])
     log_root = Path(args.log_root).expanduser().resolve()
     server_root = log_root / "servers"
     server_root.mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,14 @@
 # 变更记录
 
+## 2026-09-07 — Atomic9 PointMap step8500正式评测
+
+- 从已推送的PointMap训练版本建立独立`eval/atomic9-pointmap-8500`分支，不混入本地进行中的DA3改动，也不改变正在运行的训练配置和checkpoint。
+- 新增Atomic9 PointMap step8500精确checkpoint入口：默认从IOPS滚动目录查找，只接受model state和rank0～7八份optimizer shard完整且步数严格为8500的唯一目录；也支持显式checkpoint覆盖。
+- 评测固定单节点4×GH200、6个policy server和9个client；GPU分配为`0,0,1,1,2,3`，九个Atomic任务各由一个client执行seed42～91的50 episodes，保持target split、replan20、action denoise10与既有RGB-D评测一致。
+- 通用评测入口增加PointMap模态门禁：训练config必须为`use_pointmap=true/use_depth=false`，全部server READY后还会核对PointMap训练身份及`inference_run_depth=false/online_depth_required=false`。在线闭环仍只使用RGB和proprio。
+- Slurm时限固定为6小时；dirty Git只记录commit/status/diff摘要并警告，不再阻塞评测。结果写入独立`atomic9-pointmap`命名空间，避免与RGB、RGB-D及单任务结果混合。
+- 本地验收覆盖sbatch语法、Atomic9拓扑、PointMap模态合同和相关回归测试；真实4卡模型加载及450 episodes为`cluster-pending`。
+
 ## 2026-09-03 — Atomic9 PointMap-Aux全量缓存与14k正式训练入口
 
 - 根据单任务PointMap评测的阶段性结果，不再追加CloseFridge单任务训练，直接进入Atomic9 PointMap-Aux实验。任务集、自然比例采样、16D/12D全局统计、seed42、LR `1e-5`、warmup 200、ratio0和初始权重均与Atomic9 RGB-D一致。
