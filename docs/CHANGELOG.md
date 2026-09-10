@@ -1,5 +1,44 @@
 # 变更记录
 
+## 2026-09-10 — 星光Atomic9 RGB-D双Conda推理入口
+
+### 问题
+
+Clariden训练得到的Atomic9 ratio0 RGB-D step 12000权重已迁移到星光，但原评测入口绑定
+EDF/Enroot、`/capstor`、`/iopsstor`和完整8-rank DeepSpeed checkpoint。星光仅需推理，且
+policy与RoboCasa分别位于`xwam-robocasa365`和`robocasa`两个Conda环境。
+
+### 新增和修改逻辑
+
+- 新增星光直接运行入口，使用`conda run`分别启动policy pool与simulator client pool，复用
+  已验证的4 GPU、6 server、9 client Atomic9 topology及seed 42～91合同。
+- 推理门禁只要求`mp_rank_00_model_states.pt`，并固定核对本次迁移文件的精确字节数；不再
+  错误要求推理不会读取的8份ZeRO optimizer shard。
+- 在加载6份模型前增加双环境预检：policy侧检查Torch CUDA、4卡、BF16和关键依赖；
+  simulator侧真实创建并reset一次`CloseFridge(target, seed=42)`，检查EGL、已知assets、
+  16D state和三路256×256 RGB。
+- 保留中断续跑、逐任务结果、视频、最终JSON/CSV聚合和不可变评测合同；Git dirty状态只记录
+  和进入合同，不作为退出条件。
+
+### 涉及文件
+
+- 星光入口：`deployment/starlight/eval_atomic9_rgbd_step12000_xwam.sh`
+- 双环境预检：`scripts/probe_starlight_eval_runtime.py`
+- 静态测试：`tests/test_starlight_evaluation_deployment.py`
+- 架构、进度和运行说明：`docs/ARCHITECTURE.md`、`docs/PROGRESS.md`、
+  `docs/CLUSTER_RUNBOOK.md`
+
+### 验证
+
+- Bash语法、Python编译、双环境/model-only/Atomic9合同单元测试：`local-static/pass`。
+- 星光Torch/CUDA、RoboCasa EGL reset、6份模型加载和9任务闭环：`cluster-pending`。
+
+### 风险与回滚
+
+- 入口要求当前运行环境已经独占或获配4张可见GPU；它本身不向调度器申请资源。
+- 评测配置继续要求`use_depth=true`以匹配训练结构，但在线推理不读取depth缓存。
+- 回退本次提交只删除星光部署入口和预检，不修改权重、数据、Conda环境或已有评测结果。
+
 ## 2026-08-25 — Atomic9 RGB-D step 13000最终补充评测
 
 - 用户指定RGB-D checkpoint为IOPS路径`xwam_run/robocasa365_atomic9_fastwam_overlap_ratio00_rgbd_seed42_8gpu/checkpoints/epoch=9-step=13000.ckpt`；新入口精确绑定该路径，不按目录搜索“最近step”、不回退相邻checkpoint、不优先final权重。

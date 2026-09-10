@@ -1,13 +1,13 @@
 # 项目进度
 
-更新时间：2026-08-25
+更新时间：2026-09-10
 
 ## 当前状态
 
 - 当前分支：`eval/atomic9-checkpoint-ab`（独立评测工作区；训练分支仍为`dev/atomic-robocasa365`）
-- 当前阶段：Atomic9 ratio0 RGB-D step 13000最终补充闭环评测准备
+- 当前阶段：Clariden Atomic9 RGB-D step 12000权重迁移至星光，准备双Conda环境闭环复现
 - 本地运行能力：没有可用 Torch，只执行静态验证
-- 超算运行状态：RGB-D 8.5k/12k已完成；用户已提供精确IOPS `epoch=9-step=13000.ckpt`路径。新入口已准备精确绑定13k，真实完整性检查、加载与闭环结果为`cluster-pending`。
+- 超算运行状态：Clariden RGB-D 8.5k/12k/13k评测已完成；step 12000 model state与配套config/manifest/stats已上传星光。星光4卡、6 server、9 client真实运行仍为`cluster-pending`。
 - 任务范围：只包含 atomic，排除 composite
 
 ## 阶段状态
@@ -20,8 +20,16 @@
 | M3 RGB-only 训练烟测 | 已完成 | commit `5420c89` 训练、commit `50b11a4` audit：16 项全真，result `pass/global_step=12` | 已关闭 |
 | M4 闭环评测器 | 已完成 | commit `f9e1b6b`：故意中断/确定性恢复后完成 CloseFridge 900步，机器审计 `pass` | 已关闭 |
 | M5 离线深度试点 | 已完成 | RGB-D replay、cache、loader、batch、短训练与resume门禁均由用户反馈通过 | 已关闭 |
-| M6 Atomic 正式训练与评测 | Atomic9 RGB/RGB-D后期checkpoint闭环比较 | RGB-D 8.5k/12k已完成；RGB 12k待聚合；RGB-D 13k精确路径已给定 | 完成RGB-D 13k的9任务、seed42～91、50 episodes/task评测并统一比较 |
+| M6 Atomic 正式训练与评测 | 已有Atomic9 RGB-D checkpoint迁移复现 | Clariden评测已完成；星光model-only权重及元数据已上传，双Conda入口本地静态通过 | 星光先通过policy/simulator预检，再完成step 12000的9任务、seed42～91、50 episodes/task评测 |
 | M7 复现与维护 | 未开始 | 待验证 | clean clone 完整复现 |
+
+## 星光迁移状态
+
+- 迁移对象为Atomic9 ratio0 RGB-D step 12000，仅用于推理；模型状态文件固定为`26121537691` bytes，不要求同步8份optimizer shard。
+- 新增`deployment/starlight/eval_atomic9_rgbd_step12000_xwam.sh`，直接在已分配4张GPU的星光节点或容器内运行，不依赖Clariden EDF、Enroot、`/capstor`或`/iopsstor`。
+- policy server固定使用Conda环境`xwam-robocasa365`，RoboCasa simulator client固定使用`robocasa`；二者继续通过本机ZeroMQ broker隔离依赖。
+- 启动顺序固定为：静态路径与权重检查 → policy环境4卡/BF16检查 → simulator环境`CloseFridge` EGL reset → 6个policy server逐一READY → 9个client并发评测 → JSON/CSV聚合。
+- 当前本地已通过Bash语法、Python编译和dependency-light测试；Torch/CUDA、双环境、模型加载及50 episodes/task闭环均为`cluster-pending`。
 
 ## Clariden 部署状态
 

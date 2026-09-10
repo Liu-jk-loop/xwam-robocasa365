@@ -1618,6 +1618,86 @@ grep -E '"(ok|result|seed_start|micro_success_rate|macro_success_rate)"' \
 若仅为迁移该同一权重，可通过`XWAM_RGBD_STEP13000_CHECKPOINT`覆盖精确路径；文件名仍必须
 与step13000一致。更换checkpoint身份时必须同时使用新的`XWAM_RGBD_STEP13000_EVAL_ID`。
 
+## 星光：Atomic9 RGB-D step 12000 双Conda环境评测
+
+本入口在已经分配到4张GPU的星光节点或容器中直接运行。模型服务使用
+`xwam-robocasa365`，RoboCasa仿真使用`robocasa`；不要提前激活或合并两个环境，
+脚本通过`conda run`分别启动。在线policy输入仍为三路RGB和16D state，不读取离线depth缓存。
+
+默认文件结构：
+
+```text
+/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/
+├── xwam-robocasa365-eval/
+├── models/
+│   ├── Wan-AI/Wan2.2-TI2V-5B/
+│   └── x-wam/finetuned/robocasa365_atomic9_ratio00_rgbd_seed42/
+│       ├── config.yaml
+│       └── checkpoints/epoch=8-step=12000.ckpt/
+│           ├── latest
+│           └── checkpoint/mp_rank_00_model_states.pt
+└── manifests/xwam/atomic9_ratio00/
+    ├── robocasa365_atomic9_fastwam_overlap_manifest.json
+    └── robocasa365_atomic9_fastwam_overlap_global_stats.json
+```
+
+先确认评测分支与模型文件完整：
+
+```bash
+BASE=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang
+REPO="$BASE/xwam-robocasa365-eval"
+
+cd "$REPO"
+git rev-parse HEAD
+git status --short --branch
+
+MODEL_STATE="$BASE/models/x-wam/finetuned/robocasa365_atomic9_ratio00_rgbd_seed42/checkpoints/epoch=8-step=12000.ckpt/checkpoint/mp_rank_00_model_states.pt"
+test "$(stat -c '%s' "$MODEL_STATE")" -eq 26121537691
+```
+
+正式启动：
+
+```bash
+cd "$REPO"
+bash deployment/starlight/eval_atomic9_rgbd_step12000_xwam.sh
+```
+
+脚本会先写出以下预检证据，全部`ok=true/result=pass`后才加载6份模型：
+
+```text
+.../logs/policy_environment.json
+.../logs/simulator_environment.json
+```
+
+默认评测合同为4 GPU、6 policy server、9 simulator client、Atomic9、seed 42～91、
+50 episodes/task、replan 20、action denoise 10。推理只检查并读取model state，不要求训练resume
+使用的8份ZeRO optimizer shard。同一`EVAL_ID`中断后可原命令续跑；已完成episode会跳过。
+
+默认输出与验收：
+
+```bash
+EVAL_ROOT="$BASE/experiments/xwam-eval/atomic9-rgbd/atomic9_rgbd_step12000_seed42_target_50ep"
+
+test -s "$EVAL_ROOT/aggregate.json"
+test -s "$EVAL_ROOT/summary_atomic9.csv"
+grep -E '"(ok|result|seed_start|micro_success_rate|macro_success_rate)"' \
+  "$EVAL_ROOT/aggregate.json"
+```
+
+如实际目录不同，通过环境变量覆盖，不要修改脚本：
+
+```bash
+XWAM_STL_EXPERIMENT_DIR=/absolute/model-root \
+XWAM_STL_CHECKPOINT=/absolute/epoch=8-step=12000.ckpt \
+XWAM_STL_MANIFEST=/absolute/manifest.json \
+XWAM_STL_STATS=/absolute/global_stats.json \
+XWAM_STL_OUTPUT_BASE=/absolute/eval-output \
+  bash deployment/starlight/eval_atomic9_rgbd_step12000_xwam.sh
+```
+
+若当前节点的`conda`不在`PATH`，设置`XWAM_STL_CONDA_BIN=/absolute/path/to/conda`。
+改变checkpoint、配置、统计、代码状态或episode数时必须使用新的`XWAM_STL_EVAL_ID`，避免与已有结果混合。
+
 ## 外部模型路径
 
 复用已有完整 Wan2.2 模型：
