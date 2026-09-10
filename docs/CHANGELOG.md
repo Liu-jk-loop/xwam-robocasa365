@@ -12,6 +12,8 @@ policy与RoboCasa分别位于`xwam-robocasa365`和`robocasa`两个Conda环境。
 
 - 新增星光直接运行入口，使用`conda run`分别启动policy pool与simulator client pool，复用
   已验证的4 GPU、6 server、9 client Atomic9 topology及seed 42～91合同。
+- 仓库路径默认由入口脚本自身位置解析，兼容星光实际的`liuwenshuo/xwam-robocasa365-eval`
+  目录，不要求仓库位于固定的`$BASE/xwam-robocasa365-eval`。
 - 推理门禁只要求`mp_rank_00_model_states.pt`，并固定核对本次迁移文件的精确字节数；不再
   错误要求推理不会读取的8份ZeRO optimizer shard。
 - 在加载6份模型前增加双环境预检：policy侧检查Torch CUDA、4卡、BF16和关键依赖；

@@ -5,8 +5,10 @@
 
 set -Eeuo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_REPO="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 BASE="${XWAM_STL_BASE:-/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang}"
-REPO="${XWAM_STL_REPO:-$BASE/xwam-robocasa365-eval}"
+REPO="${XWAM_STL_REPO:-$DEFAULT_REPO}"
 POLICY_ENV="${XWAM_STL_POLICY_ENV:-xwam-robocasa365}"
 SIMULATOR_ENV="${XWAM_STL_SIMULATOR_ENV:-robocasa}"
 MODEL_ROOT="${XWAM_STL_MODEL_ROOT:-$BASE/models/x-wam/finetuned/robocasa365_atomic9_ratio00_rgbd_seed42}"

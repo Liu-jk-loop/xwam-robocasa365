@@ -26,6 +26,8 @@ class StarlightEvaluationDeploymentTest(unittest.TestCase):
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("xwam-robocasa365", source)
         self.assertIn('SIMULATOR_ENV="${XWAM_STL_SIMULATOR_ENV:-robocasa}"', source)
+        self.assertIn('REPO="${XWAM_STL_REPO:-$DEFAULT_REPO}"', source)
+        self.assertIn('SCRIPT_DIR="$(cd --', source)
         self.assertIn("conda", source.lower())
         self.assertIn("mp_rank_00_model_states.pt", source)
         self.assertIn("26121537691", source)

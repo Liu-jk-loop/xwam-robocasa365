@@ -1628,7 +1628,7 @@ grep -E '"(ok|result|seed_start|micro_success_rate|macro_success_rate)"' \
 
 ```text
 /HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang/
-├── xwam-robocasa365-eval/
+├── liuwenshuo/xwam-robocasa365-eval/
 ├── models/
 │   ├── Wan-AI/Wan2.2-TI2V-5B/
 │   └── x-wam/finetuned/robocasa365_atomic9_ratio00_rgbd_seed42/
@@ -1645,7 +1645,7 @@ grep -E '"(ok|result|seed_start|micro_success_rate|macro_success_rate)"' \
 
 ```bash
 BASE=/HOME/sysu_xdliang/sysu_xdliang_5/HDD_POOL/nieyunshuang
-REPO="$BASE/xwam-robocasa365-eval"
+REPO="$BASE/liuwenshuo/xwam-robocasa365-eval"
 
 cd "$REPO"
 git rev-parse HEAD
@@ -1696,6 +1696,8 @@ XWAM_STL_OUTPUT_BASE=/absolute/eval-output \
 ```
 
 若当前节点的`conda`不在`PATH`，设置`XWAM_STL_CONDA_BIN=/absolute/path/to/conda`。
+入口默认从自身位置解析仓库根，因此仓库放在`liuwenshuo/`等任意子目录都不需要设置
+`XWAM_STL_REPO`。
 改变checkpoint、配置、统计、代码状态或episode数时必须使用新的`XWAM_STL_EVAL_ID`，避免与已有结果混合。
 
 ## 外部模型路径

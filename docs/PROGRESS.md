@@ -27,6 +27,7 @@
 
 - 迁移对象为Atomic9 ratio0 RGB-D step 12000，仅用于推理；模型状态文件固定为`26121537691` bytes，不要求同步8份optimizer shard。
 - 新增`deployment/starlight/eval_atomic9_rgbd_step12000_xwam.sh`，直接在已分配4张GPU的星光节点或容器内运行，不依赖Clariden EDF、Enroot、`/capstor`或`/iopsstor`。
+- 入口从脚本自身解析仓库根，已覆盖实际部署目录`liuwenshuo/xwam-robocasa365-eval`，无需修改源码或额外覆盖仓库路径。
 - policy server固定使用Conda环境`xwam-robocasa365`，RoboCasa simulator client固定使用`robocasa`；二者继续通过本机ZeroMQ broker隔离依赖。
 - 启动顺序固定为：静态路径与权重检查 → policy环境4卡/BF16检查 → simulator环境`CloseFridge` EGL reset → 6个policy server逐一READY → 9个client并发评测 → JSON/CSV聚合。
 - 当前本地已通过Bash语法、Python编译和dependency-light测试；Torch/CUDA、双环境、模型加载及50 episodes/task闭环均为`cluster-pending`。
