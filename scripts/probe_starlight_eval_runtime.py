@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.metadata
 import json
 import os
@@ -48,6 +49,18 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _manifest_digest(payload: dict[str, Any]) -> str:
+    canonical = dict(payload)
+    canonical.pop("manifest_digest", None)
+    encoded = json.dumps(
+        canonical,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _probe_policy(
     expected_gpus: int,
     manifest_path: Path,
@@ -72,6 +85,8 @@ def _probe_policy(
         if isinstance(task, dict)
     ]
     missing_dataset_paths = [str(path) for path in dataset_paths if not path.is_dir()]
+    declared_manifest_digest = str(manifest.get("manifest_digest", ""))
+    actual_manifest_digest = _manifest_digest(manifest)
     checks = {
         "torch_cuda_available": bool(torch.cuda.is_available()),
         "expected_gpu_count": gpu_count == expected_gpus,
@@ -83,12 +98,14 @@ def _probe_policy(
         "omegaconf_import": hasattr(omegaconf, "OmegaConf"),
         "manifest_pass": manifest.get("ok") is True
         and manifest.get("result") == "pass",
+        "manifest_content_digest": bool(declared_manifest_digest)
+        and declared_manifest_digest == actual_manifest_digest,
         "atomic9_task_count": len(tasks) == 9 and len(dataset_paths) == 9,
         "dataset_paths_exist": not missing_dataset_paths,
         "statistics_pass": statistics.get("ok") is True
         and statistics.get("result") == "pass",
-        "statistics_manifest_digest": bool(manifest.get("manifest_digest"))
-        and statistics.get("manifest_digest") == manifest.get("manifest_digest"),
+        "statistics_manifest_digest": bool(declared_manifest_digest)
+        and statistics.get("manifest_digest") == declared_manifest_digest,
         "statistics_dimensions": len(
             statistics.get("observation.state", {}).get("q01", [])
         )
@@ -109,7 +126,8 @@ def _probe_policy(
         "pyzmq": _package_version("pyzmq"),
         "manifest": str(manifest_path),
         "statistics": str(statistics_path),
-        "manifest_digest": manifest.get("manifest_digest"),
+        "declared_manifest_digest": declared_manifest_digest,
+        "actual_manifest_digest": actual_manifest_digest,
         "task_count": len(tasks),
         "missing_dataset_paths": missing_dataset_paths,
     }

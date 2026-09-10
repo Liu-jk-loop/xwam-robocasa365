@@ -31,6 +31,7 @@
 - policy server固定使用Conda环境`xwam-robocasa365`，RoboCasa simulator client固定使用`robocasa`；二者继续通过本机ZeroMQ broker隔离依赖。
 - 启动顺序固定为：静态路径与权重检查 → policy环境4卡/BF16检查 → simulator环境`CloseFridge` EGL reset → 6个policy server逐一READY → 9个client并发评测 → JSON/CSV聚合。
 - 当前本地已通过Bash语法、Python编译和dependency-light测试；Torch/CUDA、双环境、模型加载及50 episodes/task闭环均为`cluster-pending`。
+- 首次星光policy预检已确认4×H100、Torch 2.9.0+cu128、FlashAttention 2.8.3及双精度合同正常；失败项仅为实际读取的模型`metadata/` manifest仍引用Clariden `/capstor`数据路径。下一步在星光数据根重新生成绑定的新manifest/global stats后复测。
 
 ## Clariden 部署状态
 

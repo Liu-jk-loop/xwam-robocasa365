@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import subprocess
+import json
 import unittest
 from pathlib import Path
+
+from scripts.probe_starlight_eval_runtime import _manifest_digest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -11,6 +14,16 @@ PROBE = REPO_ROOT / "scripts/probe_starlight_eval_runtime.py"
 
 
 class StarlightEvaluationDeploymentTest(unittest.TestCase):
+    def test_manifest_digest_detects_manual_path_rewrite(self) -> None:
+        manifest = {
+            "schema_version": 1,
+            "tasks": [{"task_name": "CloseFridge", "dataset_path": "/old"}],
+        }
+        manifest["manifest_digest"] = _manifest_digest(manifest)
+        encoded = json.loads(json.dumps(manifest))
+        encoded["tasks"][0]["dataset_path"] = "/new"
+        self.assertNotEqual(encoded["manifest_digest"], _manifest_digest(encoded))
+
     def test_shell_entrypoint_is_syntactically_valid(self) -> None:
         result = subprocess.run(
             ["bash", "-n", str(SCRIPT)],

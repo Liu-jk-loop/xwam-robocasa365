@@ -19,6 +19,8 @@ policy与RoboCasa分别位于`xwam-robocasa365`和`robocasa`两个Conda环境。
 - 在加载6份模型前增加双环境预检：policy侧检查Torch CUDA、4卡、BF16和关键依赖；
   simulator侧真实创建并reset一次`CloseFridge(target, seed=42)`，检查EGL、已知assets、
   16D state和三路256×256 RGB。
+- policy预检同时重算manifest内容摘要并与global stats绑定摘要比较；手工替换`dataset_path`
+  但未重新生成摘要/统计时会在模型加载前明确失败。
 - 保留中断续跑、逐任务结果、视频、最终JSON/CSV聚合和不可变评测合同；Git dirty状态只记录
   和进入合同，不作为退出条件。
 
