@@ -21,6 +21,8 @@ policy与RoboCasa分别位于`xwam-robocasa365`和`robocasa`两个Conda环境。
   16D state和三路256×256 RGB。
 - policy预检同时重算manifest内容摘要并与global stats绑定摘要比较；手工替换`dataset_path`
   但未重新生成摘要/统计时会在模型加载前明确失败。
+- Simulator默认环境从其他项目占用的`robocasa`切换到隔离的`robocasa_rldx`；依赖预检
+  改为逐项收集关键import错误，一轮报告全部缺包，不再停在第一个`ModuleNotFoundError`。
 - 保留中断续跑、逐任务结果、视频、最终JSON/CSV聚合和不可变评测合同；Git dirty状态只记录
   和进入合同，不作为退出条件。
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import importlib.metadata
 import json
 import os
@@ -135,13 +136,48 @@ def _probe_policy(
 
 
 def _probe_simulator() -> tuple[dict[str, bool], dict[str, Any]]:
-    import gymnasium as gym
-    import imageio
-    import imageio_ffmpeg
-    import numpy as np
-    import robocasa
-    import robosuite
-    import zmq
+    imports = {
+        "gymnasium": "gymnasium",
+        "imageio": "imageio",
+        "imageio_ffmpeg": "imageio_ffmpeg",
+        "numpy": "numpy",
+        "pyzmq": "zmq",
+        "robosuite": "robosuite",
+        "robocasa": "robocasa",
+    }
+    modules: dict[str, Any] = {}
+    import_errors: dict[str, str] = {}
+    for label, module_name in imports.items():
+        try:
+            modules[label] = importlib.import_module(module_name)
+        except Exception as exc:
+            import_errors[label] = f"{type(exc).__name__}: {exc}"
+
+    checks = {f"{label}_import": label in modules for label in imports}
+    details: dict[str, Any] = {
+        "package_versions": {
+            "gymnasium": _package_version("gymnasium"),
+            "imageio": _package_version("imageio"),
+            "imageio-ffmpeg": _package_version("imageio-ffmpeg"),
+            "numpy": _package_version("numpy"),
+            "pyzmq": _package_version("pyzmq"),
+            "robosuite": _package_version("robosuite"),
+            "robocasa": _package_version("robocasa"),
+        },
+        "import_errors": import_errors,
+        "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
+        "mujoco_egl_device_id": os.environ.get("MUJOCO_EGL_DEVICE_ID"),
+    }
+    if import_errors:
+        return checks, details
+
+    gym = modules["gymnasium"]
+    imageio = modules["imageio"]
+    imageio_ffmpeg = modules["imageio_ffmpeg"]
+    np = modules["numpy"]
+    robocasa = modules["robocasa"]
+    robosuite = modules["robosuite"]
+    zmq = modules["pyzmq"]
 
     from data.robocasa365_schema import load_panda_omron_schema
     from evaluation.robocasa365_benchmark import pack_online_cameras, pack_online_state
@@ -170,37 +206,41 @@ def _probe_simulator() -> tuple[dict[str, bool], dict[str, Any]]:
     state = pack_online_state(observation, schema)
     cameras = pack_online_cameras(observation, list(camera_keys), [256, 256, 3])
     ffmpeg_executable = Path(imageio_ffmpeg.get_ffmpeg_exe()).resolve()
-    checks = {
-        "robocasa_assets": assets_root.is_dir(),
-        "sink025_model": sink_model.is_file() and sink_model.stat().st_size > 0,
-        "close_fridge_registered": "robocasa/CloseFridge" in gym.envs.registry,
-        "close_fridge_reset": isinstance(observation, dict),
-        "state_16d": state.shape == (16,),
-        "three_rgb_cameras": cameras.shape == (3, 256, 256, 3)
-        and cameras.dtype == np.uint8,
-        "task_description": bool(
-            str(observation.get("annotation.human.task_description", "")).strip()
-        ),
-        "pyzmq_import": hasattr(zmq, "Context"),
-        "ffmpeg_available": ffmpeg_executable.is_file(),
-    }
-    details = {
-        "robocasa": _package_version("robocasa"),
-        "robosuite": _package_version("robosuite"),
-        "gymnasium": _package_version("gymnasium"),
-        "imageio": imageio.__version__,
-        "pyzmq": _package_version("pyzmq"),
-        "robocasa_module": _module_path(robocasa),
-        "robosuite_module": _module_path(robosuite),
-        "assets_root": str(assets_root),
-        "sink025_model": str(sink_model),
-        "state_shape": list(state.shape),
-        "camera_shape": list(cameras.shape),
-        "camera_dtype": str(cameras.dtype),
-        "ffmpeg_executable": str(ffmpeg_executable),
-        "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
-        "mujoco_egl_device_id": os.environ.get("MUJOCO_EGL_DEVICE_ID"),
-    }
+    checks.update(
+        {
+            "robocasa_assets": assets_root.is_dir(),
+            "sink025_model": sink_model.is_file() and sink_model.stat().st_size > 0,
+            "close_fridge_registered": "robocasa/CloseFridge" in gym.envs.registry,
+            "close_fridge_reset": isinstance(observation, dict),
+            "state_16d": state.shape == (16,),
+            "three_rgb_cameras": cameras.shape == (3, 256, 256, 3)
+            and cameras.dtype == np.uint8,
+            "task_description": bool(
+                str(observation.get("annotation.human.task_description", "")).strip()
+            ),
+            "pyzmq_import": hasattr(zmq, "Context"),
+            "ffmpeg_available": ffmpeg_executable.is_file(),
+        }
+    )
+    details.update(
+        {
+            "robocasa": _package_version("robocasa"),
+            "robosuite": _package_version("robosuite"),
+            "gymnasium": _package_version("gymnasium"),
+            "imageio": imageio.__version__,
+            "pyzmq": _package_version("pyzmq"),
+            "robocasa_module": _module_path(robocasa),
+            "robosuite_module": _module_path(robosuite),
+            "assets_root": str(assets_root),
+            "sink025_model": str(sink_model),
+            "state_shape": list(state.shape),
+            "camera_shape": list(cameras.shape),
+            "camera_dtype": str(cameras.dtype),
+            "ffmpeg_executable": str(ffmpeg_executable),
+            "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
+            "mujoco_egl_device_id": os.environ.get("MUJOCO_EGL_DEVICE_ID"),
+        }
+    )
     return checks, details
 
 

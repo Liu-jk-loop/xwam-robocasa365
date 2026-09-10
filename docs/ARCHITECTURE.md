@@ -92,7 +92,7 @@ The X-WAM backbone should consume validated tensors and remain free of dataset-p
 - M6正式client不再嵌套M4.3 runner或逐episode Git门禁。每完成一个episode便原子更新该任务`result.json`；同一Git commit/checkpoint/eval ID重提时跳过连续完成seed，中断episode从头重跑。最终聚合必须收齐18个task result和配置声明的全部episode，缺失记录不能被当作0%成功率静默吞掉。
 - 每个环境step把三路原始RGB拼成一帧并直接流式编码20 FPS MP4，跑满1000步的失败episode约50秒；不持久化PNG帧。正式评测目录固定为IOPS的`x-wam-eval/atomic18/<eval ID>`，仅组织为`logs/`、`results/<Task>/videos`、task result及根目录JSON/CSV汇总；policy server正式模式不写逐request journal，也不把全部成功request嵌入状态JSON。Capstor/Store不承载推理结果。
 - 在加载八份policy模型前，独立simulator probe必须确认RoboCasa/robosuite实际import路径位于上述Store根目录，并检查已知正式场景资产`Sink025/model.xml`非空；两份源码commit与asset hash进入eval不可变合同。当前RoboCasa EDF经FastWAM验证只枚举单一EGL设备，因此16个simulator client均固定EGL device 0；这不改变policy server的0/1/2/3 GPU映射。
-- 星光迁移继续复用相同的ZeroMQ、topology、动作和聚合实现，只替换外层部署：policy pool通过`xwam-robocasa365` Conda环境启动，simulator client pool通过`robocasa`环境启动。运行前先分别完成4卡BF16依赖门禁和一次`CloseFridge(target, seed=42)` EGL reset，再加载6份Atomic9模型。推理只读取`mp_rank_00_model_states.pt`，不会因未迁移训练用ZeRO optimizer shard而阻塞；模型文件固定字节数、resolved config、manifest、global stats、topology和代码状态仍进入不可变评测合同。
+- 星光迁移继续复用相同的ZeroMQ、topology、动作和聚合实现，只替换外层部署：policy pool通过`xwam-robocasa365` Conda环境启动，simulator client pool通过隔离的`robocasa_rldx`环境启动，不修改其他项目使用的`robocasa`环境。运行前先分别完成4卡BF16依赖门禁和一次`CloseFridge(target, seed=42)` EGL reset，再加载6份Atomic9模型。推理只读取`mp_rank_00_model_states.pt`，不会因未迁移训练用ZeRO optimizer shard而阻塞；模型文件固定字节数、resolved config、manifest、global stats、topology和代码状态仍进入不可变评测合同。
 
 #### Atomic9 checkpoint同合同对比
 

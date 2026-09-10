@@ -38,7 +38,9 @@ class StarlightEvaluationDeploymentTest(unittest.TestCase):
     def test_entrypoint_uses_two_conda_environments_and_model_only_gate(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("xwam-robocasa365", source)
-        self.assertIn('SIMULATOR_ENV="${XWAM_STL_SIMULATOR_ENV:-robocasa}"', source)
+        self.assertIn(
+            'SIMULATOR_ENV="${XWAM_STL_SIMULATOR_ENV:-robocasa_rldx}"', source
+        )
         self.assertIn('REPO="${XWAM_STL_REPO:-$DEFAULT_REPO}"', source)
         self.assertIn('SCRIPT_DIR="$(cd --', source)
         self.assertIn("conda", source.lower())
@@ -72,6 +74,18 @@ class StarlightEvaluationDeploymentTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--role", result.stdout)
+
+    def test_simulator_probe_collects_dependency_errors(self) -> None:
+        source = PROBE.read_text(encoding="utf-8")
+        for expected in (
+            '"gymnasium": "gymnasium"',
+            '"imageio_ffmpeg": "imageio_ffmpeg"',
+            '"pyzmq": "zmq"',
+            '"robosuite": "robosuite"',
+            '"robocasa": "robocasa"',
+            '"import_errors": import_errors',
+        ):
+            self.assertIn(expected, source)
 
 
 if __name__ == "__main__":

@@ -1621,7 +1621,7 @@ grep -E '"(ok|result|seed_start|micro_success_rate|macro_success_rate)"' \
 ## 星光：Atomic9 RGB-D step 12000 双Conda环境评测
 
 本入口在已经分配到4张GPU的星光节点或容器中直接运行。模型服务使用
-`xwam-robocasa365`，RoboCasa仿真使用`robocasa`；不要提前激活或合并两个环境，
+`xwam-robocasa365`，RoboCasa仿真使用隔离的`robocasa_rldx`；不要提前激活或合并两个环境，
 脚本通过`conda run`分别启动。在线policy输入仍为三路RGB和16D state，不读取离线depth缓存。
 
 默认文件结构：
@@ -1698,6 +1698,9 @@ XWAM_STL_OUTPUT_BASE=/absolute/eval-output \
 若当前节点的`conda`不在`PATH`，设置`XWAM_STL_CONDA_BIN=/absolute/path/to/conda`。
 入口默认从自身位置解析仓库根，因此仓库放在`liuwenshuo/`等任意子目录都不需要设置
 `XWAM_STL_REPO`。
+`robocasa`环境属于其他项目，不在本流程内安装或升级包；星光评测缺失依赖只补到
+`robocasa_rldx`。Simulator预检会一次列出`gymnasium`、`numpy`、`imageio`、
+`imageio-ffmpeg`、`pyzmq`、`robosuite`和`robocasa`的全部import失败项。
 改变checkpoint、配置、统计、代码状态或episode数时必须使用新的`XWAM_STL_EVAL_ID`，避免与已有结果混合。
 
 ## 外部模型路径
